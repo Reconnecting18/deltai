@@ -1,0 +1,36 @@
+# Python
+project/venv/
+project/__pycache__/
+project/*.pyc
+project/.env
+**/__pycache__/
+*.pyc
+*.pyo
+fix.py
+
+# Node / Electron
+app/node_modules/
+app/.cache/
+
+# Ollama models — too large, stored at C:\Users\ethan\.ollama\
+# Do NOT commit model weights
+
+# Data / memory stores
+data/chromadb/
+data/sqlite/
+
+# Knowledge base files (PDFs, docs) — add manually if desired
+# data/knowledge/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temp
+*.tmp
+*.bak
