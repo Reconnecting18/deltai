@@ -143,13 +143,19 @@ def stats():
 
 
 MODELFILE_PATH = r"C:\e3n\modelfiles\E3N.modelfile"
+MODULES_DIR = os.path.join(_HERE, '..', 'modelfiles')
+MODULE_FILES = {
+    "modelfile": MODELFILE_PATH,
+    "protocols": os.path.join(MODULES_DIR, "protocols.md"),
+    "personality": os.path.join(MODULES_DIR, "personality.md"),
+    "pilot": os.path.join(MODULES_DIR, "pilot.md"),
+}
 
 @app.get("/modelfile")
 def get_modelfile():
     try:
         with open(MODELFILE_PATH, "r", encoding="utf-8") as f:
-            content = f.read()
-        return PlainTextResponse(content)
+            return PlainTextResponse(f.read())
     except Exception as e:
         return PlainTextResponse(f"# Error reading modelfile: {e}")
 
@@ -160,6 +166,29 @@ class ModelfileUpdate(BaseModel):
 def save_modelfile(update: ModelfileUpdate):
     try:
         with open(MODELFILE_PATH, "w", encoding="utf-8") as f:
+            f.write(update.content)
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.get("/module/{name}")
+def get_module(name: str):
+    path = MODULE_FILES.get(name)
+    if not path:
+        return PlainTextResponse(f"# Unknown module: {name}", status_code=404)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return PlainTextResponse(f.read())
+    except Exception as e:
+        return PlainTextResponse(f"# Error reading {name}: {e}")
+
+@app.post("/module/{name}")
+def save_module(name: str, update: ModelfileUpdate):
+    path = MODULE_FILES.get(name)
+    if not path:
+        return {"ok": False, "error": f"Unknown module: {name}"}
+    try:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(update.content)
         return {"ok": True}
     except Exception as e:

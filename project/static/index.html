@@ -125,13 +125,19 @@ canvas.spark{width:100%;height:28px;display:block}
 #t-run:disabled{opacity:0.2;cursor:not-allowed}
 
 /* MEMORY */
+.mem-tabs{display:flex;gap:0;border-bottom:1px solid var(--bdr);flex-shrink:0;padding:0 8px;background:rgba(0,0,0,0.2)}
+.mem-tab{background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text2);font-family:var(--mono);font-size:9px;letter-spacing:0.1em;padding:8px 12px;cursor:pointer;transition:all 0.12s;text-transform:uppercase;font-weight:600}
+.mem-tab:hover{color:var(--teal2)}
+.mem-tab.active{color:var(--teal);border-bottom-color:var(--teal)}
+.mem-panel{display:none}
+.mem-panel.active{display:block}
 #m-content{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;scrollbar-width:thin;scrollbar-color:var(--bdr) transparent}
 .mlabel{font-family:var(--mono);font-size:9px;letter-spacing:0.2em;color:var(--teal2);text-transform:uppercase;margin-bottom:4px;font-weight:600}
 .mfbox{background:var(--bg2);border:1px solid var(--bdr);padding:12px;position:relative}
 .mfbox::before,.mfbox::after{content:'';position:absolute;width:6px;height:6px;border-color:var(--teal2);border-style:solid;opacity:0.5}
 .mfbox::before{top:-1px;left:-1px;border-width:1.5px 0 0 1.5px}
 .mfbox::after{bottom:-1px;right:-1px;border-width:0 1.5px 1.5px 0}
-.mfta{width:100%;background:transparent;border:none;color:var(--text);font-family:var(--mono);font-size:11px;line-height:1.75;resize:vertical;outline:none;min-height:140px;user-select:text;-webkit-user-select:text}
+.mfta{width:100%;background:transparent;border:none;color:var(--text);font-family:var(--mono);font-size:11px;line-height:1.75;resize:vertical;outline:none;min-height:200px;user-select:text;-webkit-user-select:text}
 .macts{display:flex;gap:8px;align-items:center}
 .mok{font-family:var(--mono);font-size:9px;color:var(--teal);height:14px}
 </style>
@@ -263,24 +269,56 @@ canvas.spark{width:100%;height:28px;display:block}
 </div>
 
 <!-- FLOATING MEMORY WINDOW -->
-<div class="fwin" id="fwin-memory" style="width:520px;height:480px;top:80px;left:50%;transform:translateX(-50%)">
+<div class="fwin" id="fwin-memory" style="width:580px;height:520px;top:80px;left:50%;transform:translateX(-50%)">
   <div class="fwin-header" id="fwin-memory-header">
     <span class="fwin-title">E3N - MEMORY</span>
     <button class="fwin-close" onclick="toggleWin('memory')">&#x2715;</button>
   </div>
+  <div class="mem-tabs">
+    <button class="mem-tab active" data-mod="protocols">Protocols</button>
+    <button class="mem-tab" data-mod="personality">Personality</button>
+    <button class="mem-tab" data-mod="pilot">Pilot (PIM)</button>
+    <button class="mem-tab" data-mod="modelfile">Modelfile</button>
+    <button class="mem-tab" data-mod="status">Status</button>
+  </div>
   <div id="m-content">
-    <div>
-      <div class="mlabel">E3N Modelfile — Personality &amp; Operator Profile</div>
-      <div class="mfbox">
-        <textarea class="mfta" id="mf-ed" spellcheck="false">Loading...</textarea>
+    <div class="mem-panel active" data-panel="protocols">
+      <div class="mlabel">Protocols — Rulesets E3N must follow</div>
+      <div class="mfbox"><textarea class="mfta" id="mod-protocols" spellcheck="false">Loading...</textarea></div>
+      <div class="macts" style="margin-top:8px">
+        <button class="tb-btn" onclick="saveModule('protocols')">Save</button>
+        <button class="tb-btn" style="border-color:var(--bdr);color:var(--text2)" onclick="loadModule('protocols')">Reload</button>
+        <div class="mok" id="mod-protocols-ok"></div>
       </div>
+    </div>
+    <div class="mem-panel" data-panel="personality">
+      <div class="mlabel">Personality Module — Character &amp; Voice</div>
+      <div class="mfbox"><textarea class="mfta" id="mod-personality" spellcheck="false">Loading...</textarea></div>
+      <div class="macts" style="margin-top:8px">
+        <button class="tb-btn" onclick="saveModule('personality')">Save</button>
+        <button class="tb-btn" style="border-color:var(--bdr);color:var(--text2)" onclick="loadModule('personality')">Reload</button>
+        <div class="mok" id="mod-personality-ok"></div>
+      </div>
+    </div>
+    <div class="mem-panel" data-panel="pilot">
+      <div class="mlabel">Pilot Information Module (PIM) — Pilot Memory</div>
+      <div class="mfbox"><textarea class="mfta" id="mod-pilot" spellcheck="false">Loading...</textarea></div>
+      <div class="macts" style="margin-top:8px">
+        <button class="tb-btn" onclick="saveModule('pilot')">Save</button>
+        <button class="tb-btn" style="border-color:var(--bdr);color:var(--text2)" onclick="loadModule('pilot')">Reload</button>
+        <div class="mok" id="mod-pilot-ok"></div>
+      </div>
+    </div>
+    <div class="mem-panel" data-panel="modelfile">
+      <div class="mlabel">E3N Modelfile — Ollama Build Config</div>
+      <div class="mfbox"><textarea class="mfta" id="mf-ed" spellcheck="false">Loading...</textarea></div>
       <div class="macts" style="margin-top:8px">
         <button class="tb-btn" onclick="saveModelfile()">Save &amp; Rebuild</button>
         <button class="tb-btn" style="border-color:var(--bdr);color:var(--text2)" onclick="loadModelfile()">Reload</button>
         <div class="mok" id="mf-ok"></div>
       </div>
     </div>
-    <div>
+    <div class="mem-panel" data-panel="status">
       <div class="mlabel" style="margin-top:4px">Memory Status</div>
       <div class="block"><div class="c-tr"></div><div class="c-bl"></div>
         <div class="stbl">
@@ -288,6 +326,15 @@ canvas.spark{width:100%;height:28px;display:block}
           <div class="srow"><span class="sk">Size</span><span class="sv" id="m-mem-sz">--</span></div>
           <div class="srow"><span class="sk">Status</span><span class="sv"><span class="chip chip-warn">Phase 2 inactive</span></span></div>
           <div class="srow"><span class="sk">Knowledge</span><span class="sv">C:\e3n\data\knowledge</span></div>
+        </div>
+      </div>
+      <div class="mlabel" style="margin-top:12px">Module Directories</div>
+      <div class="block"><div class="c-tr"></div><div class="c-bl"></div>
+        <div class="stbl">
+          <div class="srow"><span class="sk">Protocols</span><span class="sv">C:\e3n\modelfiles\protocols.md</span></div>
+          <div class="srow"><span class="sk">Personality</span><span class="sv">C:\e3n\modelfiles\personality.md</span></div>
+          <div class="srow"><span class="sk">Pilot (PIM)</span><span class="sv">C:\e3n\modelfiles\pilot.md</span></div>
+          <div class="srow"><span class="sk">Modelfile</span><span class="sv">C:\e3n\modelfiles\E3N.modelfile</span></div>
         </div>
       </div>
     </div>
@@ -367,7 +414,7 @@ function toggleWin(name){
   const isVisible=win.classList.contains('visible')
   win.classList.toggle('visible',!isVisible)
   btn.classList.toggle('active',!isVisible)
-  if(!isVisible&&name==='memory')loadModelfile()
+  if(!isVisible&&name==='memory'){const at=document.querySelector('.mem-tab.active');if(at){const m=at.dataset.mod;if(m==='modelfile')loadModelfile();else if(['protocols','personality','pilot'].indexOf(m)>=0)loadModule(m)}}
   if(!isVisible&&name==='terminal')document.getElementById('t-in').focus()
 }
 
@@ -659,6 +706,7 @@ async function runCmd(){
   var glowCanvas=null, glowCtx=null, glowRAF=null
   var origParent=null, origNextSibling=null
   var swappedWith=null // track which block we've live-swapped with
+  var swapRect=null // bounding rect of target BEFORE swap (sticky zone)
   var dragParent=null, dragNext=null // dragging block's current DOM position (updates on swap)
 
   var s=document.createElement('style')
@@ -755,6 +803,9 @@ async function runCmd(){
     if(swappedWith===targetBlock)return // already swapped with this one
     // If we previously swapped with a different block, revert first
     if(swappedWith){revertSwap()}
+    // Save target's rect BEFORE moving it (used as sticky zone)
+    var tr=targetBlock.getBoundingClientRect()
+    swapRect={left:tr.left,right:tr.right,top:tr.top,bottom:tr.bottom}
     var tParent=targetBlock.parentNode
     var tNext=nextBlockSibling(targetBlock)
     // Move target to where dragging currently sits
@@ -787,7 +838,12 @@ async function runCmd(){
     dragParent=tParent
     dragNext=tNext
     swappedWith=null
+    swapRect=null
     buildSlots(dragging.offsetHeight)
+  }
+
+  function ghostInRect(r){
+    return r&&ghostCX>=r.left&&ghostCX<=r.right&&ghostCY>=r.top&&ghostCY<=r.bottom
   }
 
   function drawGlows(){
@@ -843,9 +899,13 @@ async function runCmd(){
     // Live swap on hover over a block
     if(newHovered&&newHovered.classList&&newHovered.classList.contains('block')){
       liveSwap(newHovered)
-    } else if(!newHovered&&swappedWith){
-      // Ghost moved away from all blocks — revert
-      revertSwap()
+    } else if(swappedWith){
+      // Ghost still in the swap target's original rect? Keep the swap (sticky zone)
+      if(ghostInRect(swapRect)){
+        newHovered=swappedWith // maintain hover state
+      } else {
+        revertSwap()
+      }
     }
 
     hovered=newHovered
@@ -938,7 +998,7 @@ async function runCmd(){
 
     origParent=null; origNextSibling=null
     dragParent=null; dragNext=null
-    swappedWith=null
+    swappedWith=null; swapRect=null
   }
 
   setTimeout(init,600)
@@ -946,15 +1006,49 @@ async function runCmd(){
 })()
 
 
+// MEMORY TABS
+document.querySelectorAll('.mem-tab').forEach(tab=>{
+  tab.addEventListener('click',function(){
+    document.querySelectorAll('.mem-tab').forEach(t=>t.classList.remove('active'))
+    document.querySelectorAll('.mem-panel').forEach(p=>p.classList.remove('active'))
+    this.classList.add('active')
+    const panel=document.querySelector('.mem-panel[data-panel="'+this.dataset.mod+'"]')
+    if(panel)panel.classList.add('active')
+    // Auto-load module content on tab switch
+    const mod=this.dataset.mod
+    if(mod==='modelfile')loadModelfile()
+    else if(['protocols','personality','pilot'].indexOf(mod)>=0)loadModule(mod)
+  })
+})
+
+// MODULE LOAD/SAVE
+const API=location.origin
+async function loadModule(name){
+  try{
+    const r=await fetch(API+'/module/'+name)
+    if(r.ok)document.getElementById('mod-'+name).value=await r.text()
+  }catch{document.getElementById('mod-'+name).value='# Could not load '+name}
+}
+async function saveModule(name){
+  const content=document.getElementById('mod-'+name).value
+  try{
+    const r=await fetch(API+'/module/'+name,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content})})
+    const d=await r.json()
+    const ok=document.getElementById('mod-'+name+'-ok')
+    ok.textContent=d.ok?'SAVED':'SAVE FAILED'
+    setTimeout(()=>ok.textContent='',4000)
+  }catch{document.getElementById('mod-'+name+'-ok').textContent='ERROR'}
+}
+
 // MODELFILE
 async function loadModelfile(){
-  try{const r=await fetch('http://localhost:8000/modelfile');if(r.ok)document.getElementById('mf-ed').value=await r.text()}
+  try{const r=await fetch(API+'/modelfile');if(r.ok)document.getElementById('mf-ed').value=await r.text()}
   catch{document.getElementById('mf-ed').value='# Could not load modelfile'}
 }
 async function saveModelfile(){
   const content=document.getElementById('mf-ed').value
   try{
-    const r=await fetch('http://localhost:8000/modelfile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content})})
+    const r=await fetch(API+'/modelfile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content})})
     const d=await r.json()
     const ok=document.getElementById('mf-ok')
     ok.textContent=d.ok?'SAVED - run ollama create e3n to apply':'SAVE FAILED'
