@@ -651,13 +651,15 @@ async function runCmd(){
 
 
 
-// BLOCK DRAG — cascading displacement, empty slot glow, no mid-drag shifting
+// BLOCK DRAG — live iPhone-style swap on hover
 ;(function(){
   var dragging=null, ghost=null, hovered=null, slots=[]
   var ox=0, oy=0, altDown=false
   var ghostCX=0, ghostCY=0
   var glowCanvas=null, glowCtx=null, glowRAF=null
   var origParent=null, origNextSibling=null
+  var swappedWith=null // track which block we've live-swapped with
+  var dragParent=null, dragNext=null // dragging block's current DOM position (updates on swap)
 
   var s=document.createElement('style')
   s.textContent=[
@@ -668,6 +670,7 @@ async function runCmd(){
     '.block-drag-target{outline:1px solid rgba(0,212,184,0.7)!important;background:rgba(0,212,184,0.04)!important}',
     '#glow-canvas{position:fixed;inset:0;pointer-events:none;z-index:840}',
     '.panel{position:relative}',
+    '.block.swap-transit{transition:transform 0.18s ease}',
   ].join('')
   document.head.appendChild(s)
 
@@ -740,6 +743,53 @@ async function runCmd(){
     slots=[]
   }
 
+  // Get next sibling that isn't a slot placeholder
+  function nextBlockSibling(node){
+    var s=node?node.nextSibling:null
+    while(s&&s.classList&&s.classList.contains('slot-placeholder'))s=s.nextSibling
+    return s
+  }
+
+  // Live-swap dragging block's DOM position with target block
+  function liveSwap(targetBlock){
+    if(swappedWith===targetBlock)return // already swapped with this one
+    // If we previously swapped with a different block, revert first
+    if(swappedWith){revertSwap()}
+    var tParent=targetBlock.parentNode
+    var tNext=nextBlockSibling(targetBlock)
+    // Move target to where dragging currently sits
+    if(dragNext&&dragNext.parentNode===dragParent){
+      dragParent.insertBefore(targetBlock, dragNext)
+    } else {
+      dragParent.appendChild(targetBlock)
+    }
+    // Update dragging's tracked position to where target was
+    dragParent=tParent
+    dragNext=tNext
+    swappedWith=targetBlock
+    // Rebuild empty-slot placeholders since layout changed
+    buildSlots(dragging.offsetHeight)
+  }
+
+  // Revert the live swap (dragging goes back, swapped block goes back)
+  function revertSwap(){
+    if(!swappedWith)return
+    var target=swappedWith
+    var tParent=target.parentNode
+    var tNext=nextBlockSibling(target)
+    // Move target back to where dragging currently is (which is target's original spot)
+    if(dragNext&&dragNext.parentNode===dragParent){
+      dragParent.insertBefore(target, dragNext)
+    } else {
+      dragParent.appendChild(target)
+    }
+    // Dragging's tracked position reverts to where target was sitting
+    dragParent=tParent
+    dragNext=tNext
+    swappedWith=null
+    buildSlots(dragging.offsetHeight)
+  }
+
   function drawGlows(){
     if(!glowCtx)return
     glowCanvas.width=window.innerWidth
@@ -789,6 +839,15 @@ async function runCmd(){
       closestBlock.classList.add('block-drag-target')
       newHovered=closestBlock
     }
+
+    // Live swap on hover over a block
+    if(newHovered&&newHovered.classList&&newHovered.classList.contains('block')){
+      liveSwap(newHovered)
+    } else if(!newHovered&&swappedWith){
+      // Ghost moved away from all blocks — revert
+      revertSwap()
+    }
+
     hovered=newHovered
     glowRAF=requestAnimationFrame(drawGlows)
   }
@@ -803,6 +862,10 @@ async function runCmd(){
     while(origNextSibling&&origNextSibling.classList&&origNextSibling.classList.contains('slot-placeholder')){
       origNextSibling=origNextSibling.nextSibling
     }
+    // Track dragging block's current DOM position (changes during live swaps)
+    dragParent=origParent
+    dragNext=origNextSibling
+    swappedWith=null
     var r=dragging.getBoundingClientRect()
     ox=e.clientX-r.left; oy=e.clientY-r.top
     ghostCX=r.left+r.width/2; ghostCY=r.top+r.height/2
@@ -835,57 +898,47 @@ async function runCmd(){
     document.removeEventListener('mouseup',onUp)
   }
 
-  function cascadePlace(widget, targetBlock, depth){
-    if(depth>8)return
-    var targetParent=targetBlock.parentNode
-    var targetNext=targetBlock.nextSibling
-    while(targetNext&&targetNext.classList&&targetNext.classList.contains('slot-placeholder')){
-      targetNext=targetNext.nextSibling
-    }
-    // Place widget where target was
-    if(targetNext)targetParent.insertBefore(widget,targetNext)
-    else targetParent.appendChild(widget)
-
-    // Displace target: try other panel first if it has space
-    var leftPanel=document.getElementById('panel-left')
-    var rightPanel=document.getElementById('panel-right')
-    var otherPanel=targetParent===leftPanel?rightPanel:leftPanel
-    var otherCount=getPanelBlocks(otherPanel).length
-    var thisCount=getPanelBlocks(targetParent).filter(function(b){return b!==targetBlock}).length
-
-    if(otherCount<thisCount){
-      otherPanel.appendChild(targetBlock)
-    } else {
-      // Append to same panel bottom
-      targetParent.appendChild(targetBlock)
-    }
-  }
-
   function onUp(e){
     var dropped=dragging
     var target=hovered
-    var savedParent=origParent, savedNext=origNextSibling
     cleanup()
     dragging=null
-    origParent=null; origNextSibling=null
     if(!dropped){return}
     dropped.style.opacity='1'
 
     if(!target){
-      // No valid target — restore to exact original position cleanly
-      if(savedNext&&savedNext.parentNode===savedParent){
-        savedParent.insertBefore(dropped,savedNext)
-      } else {
-        savedParent.appendChild(dropped)
+      // No valid target — revert any live swap and restore original position
+      if(swappedWith){
+        // Revert: move swappedWith back to dragParent/dragNext, dragging back to orig
+        var sw=swappedWith
+        if(dragNext&&dragNext.parentNode===dragParent){
+          dragParent.insertBefore(sw,dragNext)
+        } else {
+          dragParent.appendChild(sw)
+        }
       }
-      return
-    }
-
-    if(target.classList&&target.classList.contains('slot-placeholder')){
+      if(origNextSibling&&origNextSibling.parentNode===origParent){
+        origParent.insertBefore(dropped,origNextSibling)
+      } else {
+        origParent.appendChild(dropped)
+      }
+    } else if(target.classList&&target.classList.contains('slot-placeholder')){
+      // Revert any live swap, then place in empty slot
+      if(swappedWith){
+        var sw=swappedWith
+        if(dragNext&&dragNext.parentNode===dragParent){
+          dragParent.insertBefore(sw,dragNext)
+        } else {
+          dragParent.appendChild(sw)
+        }
+      }
       target._panel.appendChild(dropped)
-    } else if(target.classList&&target.classList.contains('block')){
-      cascadePlace(dropped,target,0)
     }
+    // If dropped on a block, the live swap already placed everything correctly — just finalize
+
+    origParent=null; origNextSibling=null
+    dragParent=null; dragNext=null
+    swappedWith=null
   }
 
   setTimeout(init,600)
