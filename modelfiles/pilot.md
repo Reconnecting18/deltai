@@ -1,5 +1,5 @@
 # PILOT INFORMATION MODULE (PIM)
-# Memory of the Pilot — who they are, what they care about.
+*Memory of the Pilot — who they are, what they care about.*
 
 ## IDENTITY
 - Name: Ethan

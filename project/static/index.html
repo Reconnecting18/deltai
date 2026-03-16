@@ -138,6 +138,16 @@ canvas.spark{width:100%;height:28px;display:block}
 .mfbox::before{top:-1px;left:-1px;border-width:1.5px 0 0 1.5px}
 .mfbox::after{bottom:-1px;right:-1px;border-width:0 1.5px 1.5px 0}
 .mfta{width:100%;background:transparent;border:none;color:var(--text);font-family:var(--mono);font-size:11px;line-height:1.75;resize:vertical;outline:none;min-height:200px;user-select:text;-webkit-user-select:text}
+.mod-view{color:var(--text);font-family:var(--mono);font-size:11px;line-height:1.75;min-height:200px;user-select:text;-webkit-user-select:text}
+.mod-view h1{font-size:14px;color:var(--teal);font-weight:700;margin:0 0 6px 0;border-bottom:1px solid var(--bdr);padding-bottom:4px}
+.mod-view h2{font-size:12px;color:var(--teal2);font-weight:600;margin:12px 0 4px 0}
+.mod-view h3{font-size:11px;color:var(--text);font-weight:600;margin:10px 0 4px 0}
+.mod-view ul{margin:2px 0 6px 0;padding-left:18px}
+.mod-view li{margin:1px 0;color:var(--text2)}
+.mod-view p{margin:4px 0;color:var(--text2)}
+.mod-view strong{color:var(--text);font-weight:600}
+.mod-view em{color:var(--teal2);font-style:italic}
+.mod-view hr{border:none;border-top:1px solid var(--bdr);margin:8px 0}
 .macts{display:flex;gap:8px;align-items:center}
 .mok{font-family:var(--mono);font-size:9px;color:var(--teal);height:14px}
 </style>
@@ -278,44 +288,46 @@ canvas.spark{width:100%;height:28px;display:block}
     <button class="mem-tab active" data-mod="protocols">Protocols</button>
     <button class="mem-tab" data-mod="personality">Personality</button>
     <button class="mem-tab" data-mod="pilot">Pilot (PIM)</button>
-    <button class="mem-tab" data-mod="modelfile">Modelfile</button>
     <button class="mem-tab" data-mod="status">Status</button>
   </div>
   <div id="m-content">
     <div class="mem-panel active" data-panel="protocols">
       <div class="mlabel">Protocols — Rulesets E3N must follow</div>
-      <div class="mfbox"><textarea class="mfta" id="mod-protocols" spellcheck="false">Loading...</textarea></div>
+      <div class="mfbox">
+        <div class="mod-view" id="mod-protocols-view"></div>
+        <textarea class="mfta" id="mod-protocols" spellcheck="false" style="display:none">Loading...</textarea>
+      </div>
       <div class="macts" style="margin-top:8px">
-        <button class="tb-btn" onclick="saveModule('protocols')">Save</button>
-        <button class="tb-btn" style="border-color:var(--bdr);color:var(--text2)" onclick="loadModule('protocols')">Reload</button>
+        <button class="tb-btn" id="mod-protocols-edit-btn" onclick="toggleModEdit('protocols')">Edit</button>
+        <button class="tb-btn" onclick="saveModule('protocols')" style="display:none" id="mod-protocols-save-btn">Save</button>
+        <button class="tb-btn" style="border-color:var(--bdr);color:var(--text2);display:none" onclick="loadModule('protocols')" id="mod-protocols-reload-btn">Reload</button>
         <div class="mok" id="mod-protocols-ok"></div>
       </div>
     </div>
     <div class="mem-panel" data-panel="personality">
       <div class="mlabel">Personality Module — Character &amp; Voice</div>
-      <div class="mfbox"><textarea class="mfta" id="mod-personality" spellcheck="false">Loading...</textarea></div>
+      <div class="mfbox">
+        <div class="mod-view" id="mod-personality-view"></div>
+        <textarea class="mfta" id="mod-personality" spellcheck="false" style="display:none">Loading...</textarea>
+      </div>
       <div class="macts" style="margin-top:8px">
-        <button class="tb-btn" onclick="saveModule('personality')">Save</button>
-        <button class="tb-btn" style="border-color:var(--bdr);color:var(--text2)" onclick="loadModule('personality')">Reload</button>
+        <button class="tb-btn" id="mod-personality-edit-btn" onclick="toggleModEdit('personality')">Edit</button>
+        <button class="tb-btn" onclick="saveModule('personality')" style="display:none" id="mod-personality-save-btn">Save</button>
+        <button class="tb-btn" style="border-color:var(--bdr);color:var(--text2);display:none" onclick="loadModule('personality')" id="mod-personality-reload-btn">Reload</button>
         <div class="mok" id="mod-personality-ok"></div>
       </div>
     </div>
     <div class="mem-panel" data-panel="pilot">
       <div class="mlabel">Pilot Information Module (PIM) — Pilot Memory</div>
-      <div class="mfbox"><textarea class="mfta" id="mod-pilot" spellcheck="false">Loading...</textarea></div>
-      <div class="macts" style="margin-top:8px">
-        <button class="tb-btn" onclick="saveModule('pilot')">Save</button>
-        <button class="tb-btn" style="border-color:var(--bdr);color:var(--text2)" onclick="loadModule('pilot')">Reload</button>
-        <div class="mok" id="mod-pilot-ok"></div>
+      <div class="mfbox">
+        <div class="mod-view" id="mod-pilot-view"></div>
+        <textarea class="mfta" id="mod-pilot" spellcheck="false" style="display:none">Loading...</textarea>
       </div>
-    </div>
-    <div class="mem-panel" data-panel="modelfile">
-      <div class="mlabel">E3N Modelfile — Ollama Build Config</div>
-      <div class="mfbox"><textarea class="mfta" id="mf-ed" spellcheck="false">Loading...</textarea></div>
       <div class="macts" style="margin-top:8px">
-        <button class="tb-btn" onclick="saveModelfile()">Save &amp; Rebuild</button>
-        <button class="tb-btn" style="border-color:var(--bdr);color:var(--text2)" onclick="loadModelfile()">Reload</button>
-        <div class="mok" id="mf-ok"></div>
+        <button class="tb-btn" id="mod-pilot-edit-btn" onclick="toggleModEdit('pilot')">Edit</button>
+        <button class="tb-btn" onclick="saveModule('pilot')" style="display:none" id="mod-pilot-save-btn">Save</button>
+        <button class="tb-btn" style="border-color:var(--bdr);color:var(--text2);display:none" onclick="loadModule('pilot')" id="mod-pilot-reload-btn">Reload</button>
+        <div class="mok" id="mod-pilot-ok"></div>
       </div>
     </div>
     <div class="mem-panel" data-panel="status">
@@ -414,7 +426,7 @@ function toggleWin(name){
   const isVisible=win.classList.contains('visible')
   win.classList.toggle('visible',!isVisible)
   btn.classList.toggle('active',!isVisible)
-  if(!isVisible&&name==='memory'){const at=document.querySelector('.mem-tab.active');if(at){const m=at.dataset.mod;if(m==='modelfile')loadModelfile();else if(['protocols','personality','pilot'].indexOf(m)>=0)loadModule(m)}}
+  if(!isVisible&&name==='memory'){const at=document.querySelector('.mem-tab.active');if(at){const m=at.dataset.mod;if(['protocols','personality','pilot'].indexOf(m)>=0)loadModule(m)}}
   if(!isVisible&&name==='terminal')document.getElementById('t-in').focus()
 }
 
@@ -1016,18 +1028,74 @@ document.querySelectorAll('.mem-tab').forEach(tab=>{
     if(panel)panel.classList.add('active')
     // Auto-load module content on tab switch
     const mod=this.dataset.mod
-    if(mod==='modelfile')loadModelfile()
-    else if(['protocols','personality','pilot'].indexOf(mod)>=0)loadModule(mod)
+    if(['protocols','personality','pilot'].indexOf(mod)>=0)loadModule(mod)
   })
 })
 
+// MARKDOWN RENDERER
+function renderMd(src){
+  var lines=src.split('\n'),html=[],inList=false
+  for(var i=0;i<lines.length;i++){
+    var l=lines[i]
+    // headers
+    if(l.match(/^### /)){if(inList){html.push('</ul>');inList=false}html.push('<h3>'+mdInline(l.slice(4))+'</h3>');continue}
+    if(l.match(/^## /)){if(inList){html.push('</ul>');inList=false}html.push('<h2>'+mdInline(l.slice(3))+'</h2>');continue}
+    if(l.match(/^# /)){if(inList){html.push('</ul>');inList=false}html.push('<h1>'+mdInline(l.slice(2))+'</h1>');continue}
+    // hr
+    if(l.match(/^---+\s*$/)){if(inList){html.push('</ul>');inList=false}html.push('<hr>');continue}
+    // list item
+    if(l.match(/^- /)){if(!inList){html.push('<ul>');inList=true}html.push('<li>'+mdInline(l.slice(2))+'</li>');continue}
+    // blank line
+    if(l.trim()===''){if(inList){html.push('</ul>');inList=false}continue}
+    // paragraph
+    if(inList){html.push('</ul>');inList=false}
+    html.push('<p>'+mdInline(l)+'</p>')
+  }
+  if(inList)html.push('</ul>')
+  return html.join('\n')
+}
+function mdInline(s){
+  s=s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+  s=s.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+  s=s.replace(/\*(.+?)\*/g,'<em>$1</em>')
+  s=s.replace(/`(.+?)`/g,'<code style="background:rgba(0,255,200,0.08);padding:1px 4px">$1</code>')
+  return s
+}
+
 // MODULE LOAD/SAVE
 const API=location.origin
+var modEditState={}
 async function loadModule(name){
   try{
     const r=await fetch(API+'/module/'+name)
-    if(r.ok)document.getElementById('mod-'+name).value=await r.text()
-  }catch{document.getElementById('mod-'+name).value='# Could not load '+name}
+    const t=await r.text()
+    var raw=r.ok?t:'# Error loading '+name
+    document.getElementById('mod-'+name).value=raw
+    document.getElementById('mod-'+name+'-view').innerHTML=renderMd(raw)
+    // exit edit mode on reload
+    if(modEditState[name]){toggleModEdit(name)}
+  }catch(e){
+    document.getElementById('mod-'+name).value='# Could not load '+name
+    document.getElementById('mod-'+name+'-view').innerHTML='<p>Could not load '+name+'</p>'
+  }
+}
+function toggleModEdit(name){
+  var editing=modEditState[name]
+  var ta=document.getElementById('mod-'+name)
+  var view=document.getElementById('mod-'+name+'-view')
+  var editBtn=document.getElementById('mod-'+name+'-edit-btn')
+  var saveBtn=document.getElementById('mod-'+name+'-save-btn')
+  var reloadBtn=document.getElementById('mod-'+name+'-reload-btn')
+  if(!editing){
+    view.style.display='none';ta.style.display='block'
+    editBtn.textContent='View';saveBtn.style.display='';reloadBtn.style.display=''
+    modEditState[name]=true
+  }else{
+    view.innerHTML=renderMd(ta.value)
+    ta.style.display='none';view.style.display='block'
+    editBtn.textContent='Edit';saveBtn.style.display='none';reloadBtn.style.display='none'
+    modEditState[name]=false
+  }
 }
 async function saveModule(name){
   const content=document.getElementById('mod-'+name).value
@@ -1037,6 +1105,8 @@ async function saveModule(name){
     const ok=document.getElementById('mod-'+name+'-ok')
     ok.textContent=d.ok?'SAVED':'SAVE FAILED'
     setTimeout(()=>ok.textContent='',4000)
+    // update rendered view
+    if(d.ok)document.getElementById('mod-'+name+'-view').innerHTML=renderMd(content)
   }catch{document.getElementById('mod-'+name+'-ok').textContent='ERROR'}
 }
 
