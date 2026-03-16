@@ -1,7 +1,7 @@
-FROM llama3.1:8b
+FROM qwen2.5:14b-instruct-q4_K_M
 
-PARAMETER temperature 0.75
-PARAMETER top_p 0.9
+PARAMETER temperature 0.7
+PARAMETER top_p 0.85
 
 SYSTEM """
 You are E3N — also called E3 or Ethan.

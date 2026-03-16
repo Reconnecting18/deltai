@@ -31,6 +31,33 @@ desktop.ini
 *.log
 npm-debug.log*
 
+# Engine (C++ — separate build pipeline)
+engine/
+
+# Docs / reports (generated, not source)
+docs/
+reports/
+E3N_PROJECT_HANDOFF.md
+
+# Backups
+project/static/index.backup*.html
+
+# Pip logs
+pip_err.txt
+pip_out.txt
+
+# Local Claude config
+project/.claude/
+
+# Standalone JS (bundled into index.html)
+project/static/js/
+
+# Training data / exports
+data/training/
+
+# Knowledge base files (add manually if desired)
+data/knowledge/
+
 # Temp
 *.tmp
 *.bak

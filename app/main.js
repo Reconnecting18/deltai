@@ -48,12 +48,14 @@ function createWindow() {
     frame: false,
     hasShadow: true,
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
     },
     show: false,
   })
 
+  mainWindow.webContents.session.clearCache()
   mainWindow.loadURL(URL)
   mainWindow.once('ready-to-show', () => mainWindow.show())
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {

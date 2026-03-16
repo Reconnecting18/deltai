@@ -10,10 +10,9 @@
     },
     {
       "name": "E3N FastAPI Backend",
-      "runtimeExecutable": "C:\\Python314\\python.exe",
-      "runtimeArgs": ["project/serve.py"],
-      "port": 8080,
-      "autoPort": true
+      "runtimeExecutable": "C:\\e3n\\project\\venv\\Scripts\\python.exe",
+      "runtimeArgs": ["-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8111", "--app-dir", "C:\\e3n\\project"],
+      "port": 8111
     },
     {
       "name": "E3N Uvicorn Direct",
