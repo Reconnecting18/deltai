@@ -53,6 +53,15 @@ html,body{width:100%;height:100%;background:var(--bg);color:var(--text);font-fam
 .sys-alert--error{border:1px solid rgba(196,74,58,0.2);background:rgba(196,74,58,0.05);color:rgba(196,74,58,0.5)}
 .sys-alert--error .sys-alert-dot{width:4px;height:4px;border-radius:50%;background:#c44a3a}
 /* sys-divider visibility handled by JS renderHealth() */
+/* TOAST NOTIFICATIONS */
+#toast-container{position:fixed;bottom:20px;right:20px;z-index:9999;display:flex;flex-direction:column-reverse;gap:8px;max-width:380px}
+.toast{display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:4px;font-family:var(--mono);font-size:11px;letter-spacing:0.5px;animation:toastIn 0.3s ease;backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.08)}
+.toast--normal{background:rgba(90,138,122,0.15);border-color:rgba(90,138,122,0.3);color:rgba(90,138,122,0.9)}
+.toast--high{background:rgba(196,154,58,0.15);border-color:rgba(196,154,58,0.3);color:rgba(196,154,58,0.9)}
+.toast--critical{background:rgba(160,48,48,0.2);border-color:rgba(160,48,48,0.4);color:rgba(200,80,80,0.95)}
+.toast-icon{font-size:12px}.toast-text{flex:1}.toast-src{font-size:9px;opacity:0.5}
+.toast--fade{opacity:0;transform:translateX(20px);transition:all 0.4s ease}
+@keyframes toastIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
 
 /* MAIN */
 #main{flex:1;display:grid;grid-template-columns:260px 1fr 260px;grid-template-rows:1fr;overflow:hidden;min-height:0;position:relative}
@@ -701,14 +710,16 @@ poll();setInterval(poll,2000)
 
 // ── SUBSYSTEM HEALTH POLLING ──
 let sysHealth={ollama:'online',fastapi:'online',chromadb:'online',router:'local',watcher:'active',tools:'online',anthropic:'standby'}
-const NOMINAL={ollama:['online'],fastapi:['online'],chromadb:['online'],router:['local','online'],watcher:['active'],tools:['online'],anthropic:['ready']}
+const NOMINAL={ollama:['online'],fastapi:['online'],chromadb:['online'],router:['local','online'],watcher:['active'],tools:['online'],anthropic:['ready'],voice:['online'],telemetry:['online']}
 const BADGE_CONFIG={
   ollama:{down:{cls:'error',text:'OLLAMA — DOWN'}},
   chromadb:{degraded:{cls:'warn',text:'RAG — DEGRADED'},down:{cls:'error',text:'RAG — DOWN'}},
   router:{cloud:{cls:'warn',text:'ROUTER — CLOUD MODE'},down:{cls:'error',text:'ROUTER — DOWN'}},
   watcher:{stopped:{cls:'warn',text:'WATCHER — STOPPED'},error:{cls:'error',text:'WATCHER — ERROR'}},
   tools:{partial:{cls:'warn',text:'TOOLS — PARTIAL'},down:{cls:'error',text:'TOOLS — DOWN'}},
-  anthropic:{standby:{cls:'warn',text:'CLOUD — STANDBY'},unavail:{cls:'error',text:'CLOUD — UNAVAILABLE'}}
+  anthropic:{standby:{cls:'warn',text:'CLOUD — STANDBY'},unavail:{cls:'error',text:'CLOUD — UNAVAILABLE'}},
+  voice:{disabled:{cls:'warn',text:'VOICE — DISABLED'},unavailable:{cls:'warn',text:'VOICE — OFF'},degraded:{cls:'error',text:'VOICE — ERROR'}},
+  telemetry:{down:{cls:'error',text:'TELEMETRY — DOWN'}}
 }
 async function pollHealth(){
   try{
@@ -750,6 +761,34 @@ function renderHealth(){
   if(divider)divider.style.display=container.children.length?'':'none'
 }
 pollHealth();setInterval(pollHealth,10000)
+
+// ── WEBSOCKET ALERTS ──
+let _alertWs=null
+function connectAlertWs(){
+  try{
+    _alertWs=new WebSocket('ws://localhost:8000/ws/alerts')
+    _alertWs.onmessage=function(ev){
+      try{
+        const alert=JSON.parse(ev.data)
+        showToast(alert)
+      }catch(e){}
+    }
+    _alertWs.onclose=function(){setTimeout(connectAlertWs,5000)}
+    _alertWs.onerror=function(){_alertWs.close()}
+  }catch(e){setTimeout(connectAlertWs,5000)}
+}
+function showToast(alert){
+  const container=document.getElementById('toast-container')
+  if(!container)return
+  const toast=document.createElement('div')
+  const prio=alert.priority||'normal'
+  toast.className=`toast toast--${prio}`
+  const icon=prio==='critical'?'⚠':'●'
+  toast.innerHTML=`<span class="toast-icon">${icon}</span><span class="toast-text">${alert.context||''}</span><span class="toast-src">${alert.source||''}</span>`
+  container.appendChild(toast)
+  setTimeout(()=>{toast.classList.add('toast--fade');setTimeout(()=>toast.remove(),500)},10000)
+}
+connectAlertWs()
 
 // TERMINAL
 const tIn=document.getElementById('t-in'),tLog=document.getElementById('t-log')
@@ -1191,5 +1230,6 @@ async function trExport(){
 }
 
 </script>
+<div id="toast-container"></div>
 </body>
 </html>

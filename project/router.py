@@ -169,6 +169,71 @@ def is_sim_running() -> bool:
     return False
 
 
+# ── SESSION MODE (GPU protection for active racing) ────────────────────
+_session_active = False
+_session_started_at = 0.0
+_session_last_ingest = 0.0
+_SESSION_TIMEOUT = _env_int("SESSION_TIMEOUT_SEC", 60)
+_SESSION_SOURCE_PATTERN = os.getenv("SESSION_SOURCE_PATTERN", "lmu").lower()
+_SESSION_GPU_PROTECT = _env_bool("SESSION_GPU_PROTECT", True)
+_SESSION_FORCE_CLOUD = _env_bool("SESSION_FORCE_CLOUD", True)
+
+
+def is_session_active() -> bool:
+    """Check if a racing session is active (manual or auto-detected via ingest)."""
+    global _session_active
+    if not _session_active:
+        return False
+    # Auto-deactivate after timeout without ingest
+    if _session_last_ingest > 0 and (time.time() - _session_last_ingest) > _SESSION_TIMEOUT:
+        _session_active = False
+        logger.info("Session auto-deactivated (ingest timeout)")
+        return False
+    return True
+
+
+def activate_session(manual: bool = False):
+    """Manually activate session mode."""
+    global _session_active, _session_started_at
+    _session_active = True
+    _session_started_at = time.time()
+    logger.info(f"Session activated (manual={manual})")
+
+
+def deactivate_session():
+    """Manually deactivate session mode."""
+    global _session_active
+    _session_active = False
+    logger.info("Session deactivated")
+
+
+def activate_session_from_ingest(source: str):
+    """Auto-activate session when ingest source matches pattern."""
+    global _session_active, _session_started_at, _session_last_ingest
+    if not _SESSION_GPU_PROTECT:
+        return
+    if _SESSION_SOURCE_PATTERN and _SESSION_SOURCE_PATTERN in source.lower():
+        now = time.time()
+        _session_last_ingest = now
+        if not _session_active:
+            _session_active = True
+            _session_started_at = now
+            logger.info(f"Session auto-activated from ingest source: {source}")
+
+
+def get_session_status() -> dict:
+    """Return session state for the /session/status endpoint."""
+    return {
+        "active": is_session_active(),
+        "started_at": _session_started_at if _session_active else None,
+        "last_ingest": _session_last_ingest if _session_last_ingest > 0 else None,
+        "timeout_sec": _SESSION_TIMEOUT,
+        "gpu_protect": _SESSION_GPU_PROTECT,
+        "force_cloud": _SESSION_FORCE_CLOUD,
+        "source_pattern": _SESSION_SOURCE_PATTERN,
+    }
+
+
 # ── TASK COMPLEXITY CLASSIFICATION ──────────────────────────────────────
 
 # Tier 3 — needs Opus: deep reasoning, engineering, real-time strategy
@@ -259,6 +324,64 @@ def is_split_workload(message: str) -> bool:
         if re.search(pattern, text, re.IGNORECASE):
             return True
     return False
+
+
+# ── TELEMETRY QUERY CLASSIFICATION ─────────────────────────────────────
+
+TELEMETRY_PATTERNS = {
+    "telemetry_lookup": [
+        r"\b(fuel remaining|fuel left|how much fuel)\b",
+        r"\b(tire temps?|tyre temps?|tire temperature|tyre temperature)\b",
+        r"\b(tire pressure|tyre pressure|tire wear|tyre wear)\b",
+        r"\b(current lap|last lap|best lap|lap time)\b",
+        r"\b(position|standings|gap to|gap ahead|gap behind)\b",
+        r"\b(sector time|sector \d|s1|s2|s3)\b",
+        r"\b(speed trap|top speed|vmax)\b",
+        r"\b(brake temp|brake bias|brake balance)\b",
+        r"\b(water temp|oil temp|engine temp)\b",
+        r"\b(drs|ers|battery|energy)\b",
+    ],
+    "telemetry_coaching": [
+        r"\b(why am i slow|where am i losing|losing time)\b",
+        r"\b(improve|faster|quicker|better)\b.{0,20}\b(lap|sector|corner|time)\b",
+        r"\b(braking point|turn.in|apex|exit speed|racing line)\b",
+        r"\b(oversteer|understeer|snap|loose|tight)\b",
+        r"\b(compare.*lap|delta|diff.*best)\b",
+        r"\b(coach|coaching|driving tip|technique)\b",
+    ],
+    "telemetry_strategy": [
+        r"\b(pit now|should i pit|pit window|pit stop)\b",
+        r"\b(tire strategy|tyre strategy|compound|stint)\b",
+        r"\b(fuel strategy|fuel save|fuel target|lift.and.coast)\b",
+        r"\b(undercut|overcut|gap for pit)\b",
+        r"\b(weather change|rain|dry|inters|wets)\b",
+        r"\b(safety car|vsc|yellow flag)\b",
+    ],
+    "telemetry_debrief": [
+        r"\b(race analysis|race review|race debrief|post.?race)\b",
+        r"\b(session analysis|session review|session summary)\b",
+        r"\b(full analysis|complete review|detailed breakdown)\b",
+        r"\b(stint comparison|stint analysis|race pace)\b",
+    ],
+}
+
+
+def classify_telemetry_category(message: str) -> str | None:
+    """
+    Classify if a message is telemetry-related and what category.
+    Returns category string or None for non-telemetry queries.
+    Only meaningful when session is active or recent telemetry data exists.
+
+    Check order: debrief → strategy → coaching → lookup (most specific first).
+    """
+    text = message.lower().strip()
+    # Check in priority order: more specific categories first
+    for category in ("telemetry_debrief", "telemetry_strategy", "telemetry_coaching", "telemetry_lookup"):
+        patterns = TELEMETRY_PATTERNS.get(category, [])
+        for pattern in patterns:
+            if re.search(pattern, text, re.IGNORECASE):
+                return category
+    return None
 
 
 # ── CONNECTIVITY CHECK ──────────────────────────────────────────────────
@@ -470,7 +593,8 @@ class RouteDecision:
     def __init__(self, backend: str, model: str, tier: int, reason: str,
                  split: bool = False, gpu_loaded: bool = False,
                  sim_running: bool = False, cpu_only: bool = False,
-                 backup_model: str | None = None):
+                 backup_model: str | None = None,
+                 query_category: str = "general"):
         self.backend = backend      # "ollama" or "anthropic"
         self.model = model          # model name/id
         self.tier = tier            # 1, 2, or 3
@@ -480,6 +604,7 @@ class RouteDecision:
         self.sim_running = sim_running
         self.cpu_only = cpu_only
         self.backup_model = backup_model  # emergency fallback (None = no backup)
+        self.query_category = query_category
 
     def to_dict(self) -> dict:
         """Serialize for frontend. backup_model excluded — invisible infrastructure."""
@@ -492,6 +617,7 @@ class RouteDecision:
             "gpu_loaded": self.gpu_loaded,
             "sim_running": self.sim_running,
             "cpu_only": self.cpu_only,
+            "query_category": self.query_category,
         }
 
     def __repr__(self):
@@ -502,6 +628,8 @@ class RouteDecision:
             tag += ", SIM"
         if self.cpu_only:
             tag += ", CPU"
+        if self.query_category != "general":
+            tag += f", cat={self.query_category}"
         return tag + f", reason={self.reason})"
 
 
@@ -564,10 +692,36 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
     sim_active = is_sim_running()
     gpu_loaded = is_gpu_loaded()
     split = is_split_workload(message)
+
+    # Classify telemetry category when session active or sim running
+    query_cat = "general"
+    if is_session_active() or sim_active:
+        cat = classify_telemetry_category(message)
+        if cat:
+            query_cat = cat
+
     cloud_ready = (cloud_enabled and has_api_key()
                    and await is_cloud_available() and _check_budget())
 
     vram_free = get_vram_free_mb()
+
+    # ── Session active — GPU protection ──
+    if is_session_active() and _SESSION_GPU_PROTECT:
+        if cloud_ready and _SESSION_FORCE_CLOUD:
+            model = opus_model if tier == 3 else sonnet_model
+            return RouteDecision("anthropic", model, tier,
+                                 "session active — GPU protected, cloud routing",
+                                 split=False, sim_running=sim_active,
+                                 gpu_loaded=gpu_loaded, backup_model=backup,
+                                 query_category=query_cat)
+        else:
+            # No cloud — CPU-only local as safe fallback
+            default_model = os.getenv("E3N_MODEL", "e3n-qwen3b").strip()
+            return RouteDecision("ollama", default_model, tier,
+                                 "session active — GPU protected, CPU-only fallback",
+                                 sim_running=sim_active, gpu_loaded=gpu_loaded,
+                                 cpu_only=True, backup_model=get_backup_model(default_model),
+                                 query_category=query_cat)
 
     # ── Force cloud ──
     if force_cloud:
@@ -575,11 +729,13 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
             model = opus_model if tier == 3 else sonnet_model
             return RouteDecision("anthropic", model, tier,
                                  "user requested cloud", split=split,
-                                 sim_running=sim_active, backup_model=backup)
+                                 sim_running=sim_active, backup_model=backup,
+                                 query_category=query_cat)
         return RouteDecision("ollama", local_model, tier,
                              "cloud requested but unavailable — local fallback",
                              gpu_loaded=gpu_loaded, sim_running=sim_active,
-                             cpu_only=cpu_only, backup_model=backup)
+                             cpu_only=cpu_only, backup_model=backup,
+                             query_category=query_cat)
 
     # ── Force local ──
     if force_local:
@@ -588,7 +744,8 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
                              f"{' (CPU)' if cpu_only else ''}"
                              f"{' (sim active)' if sim_active else ''}",
                              gpu_loaded=gpu_loaded, sim_running=sim_active,
-                             cpu_only=cpu_only, backup_model=backup)
+                             cpu_only=cpu_only, backup_model=backup,
+                             query_category=query_cat)
 
     # ── Sim running — VRAM is precious ──
     if sim_active:
@@ -598,13 +755,15 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
                                  f"sim running, VRAM {vram_free}MB free — "
                                  f"complex task routed to cloud",
                                  split=split, sim_running=True,
-                                 gpu_loaded=gpu_loaded, backup_model=backup)
+                                 gpu_loaded=gpu_loaded, backup_model=backup,
+                                 query_category=query_cat)
         # Tier 1 or no cloud — use small local model
         return RouteDecision("ollama", local_model, tier,
                              f"sim running, VRAM {vram_free}MB free — "
                              f"{local_model}{' (CPU)' if cpu_only else ''}",
                              sim_running=True, gpu_loaded=gpu_loaded,
-                             cpu_only=cpu_only, backup_model=backup)
+                             cpu_only=cpu_only, backup_model=backup,
+                             query_category=query_cat)
 
     # ── GPU loaded (no sim, but something else using GPU) ──
     if gpu_loaded:
@@ -612,36 +771,44 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
             model = opus_model if tier == 3 else sonnet_model
             return RouteDecision("anthropic", model, tier,
                                  f"GPU loaded ({get_gpu_utilization()}%) — routing to cloud",
-                                 split=split, gpu_loaded=True, backup_model=backup)
+                                 split=split, gpu_loaded=True, backup_model=backup,
+                                 query_category=query_cat)
         return RouteDecision("ollama", local_model, tier,
                              f"GPU loaded ({get_gpu_utilization()}%) — "
                              f"using {local_model}{' (CPU)' if cpu_only else ''}",
-                             gpu_loaded=True, cpu_only=cpu_only, backup_model=backup)
+                             gpu_loaded=True, cpu_only=cpu_only, backup_model=backup,
+                             query_category=query_cat)
 
     # ── Normal routing by tier ──
     if tier == 1:
         return RouteDecision("ollama", local_model, 1,
                              f"simple task — {local_model}",
-                             backup_model=backup)
+                             backup_model=backup,
+                             query_category=query_cat)
 
     if tier == 2:
         if cloud_ready:
             return RouteDecision("anthropic", sonnet_model, 2,
                                  "moderate complexity — Sonnet",
-                                 split=split, backup_model=backup)
+                                 split=split, backup_model=backup,
+                                 query_category=query_cat)
         return RouteDecision("ollama", local_model, 2,
                              f"moderate complexity — no cloud, using {local_model}",
-                             backup_model=backup)
+                             backup_model=backup,
+                             query_category=query_cat)
 
     if tier == 3:
         if cloud_ready:
             return RouteDecision("anthropic", opus_model, 3,
                                  "heavy reasoning — Opus",
-                                 split=split, backup_model=backup)
+                                 split=split, backup_model=backup,
+                                 query_category=query_cat)
         return RouteDecision("ollama", local_model, 3,
                              f"heavy reasoning — no cloud, using {local_model} (best effort)",
-                             backup_model=backup)
+                             backup_model=backup,
+                             query_category=query_cat)
 
     return RouteDecision("ollama", local_model, 1,
                          f"default — {local_model}",
-                         backup_model=backup)
+                         backup_model=backup,
+                         query_category=query_cat)

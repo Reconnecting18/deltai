@@ -146,3 +146,78 @@ TOOLS = [
 
 # Quick lookup by name
 TOOL_MAP = {t["function"]["name"]: t for t in TOOLS}
+
+# ── CONDITIONAL TELEMETRY TOOLS ───────────────────────────────────────
+# Only available when TELEMETRY_API_URL is configured
+
+import os as _os
+
+_TELEMETRY_API_URL = _os.getenv("TELEMETRY_API_URL", "").strip()
+
+TELEMETRY_TOOLS = []
+if _TELEMETRY_API_URL:
+    TELEMETRY_TOOLS = [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_session_status",
+                "description": "Get the current racing session status from the telemetry API: session type, elapsed time, flag status, weather, track conditions.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_lap_summary",
+                "description": "Get lap time summary from telemetry: last lap, best lap, sector times, delta to best, position. Optionally specify a lap number.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "lap_number": {
+                            "type": "integer",
+                            "description": "Specific lap number to query. Default: latest lap."
+                        }
+                    },
+                    "required": []
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_tire_status",
+                "description": "Get current tire status: temperatures (inner/middle/outer), pressures, wear percentage, compound for all four tires.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_strategy_recommendation",
+                "description": "Get pit strategy recommendation from telemetry data: optimal pit window, tire compound suggestion, fuel target, estimated time loss.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "remaining_laps": {
+                            "type": "integer",
+                            "description": "Estimated remaining laps. If not provided, calculated from fuel and pace."
+                        }
+                    },
+                    "required": []
+                }
+            }
+        },
+    ]
+    # Add telemetry tools to main TOOLS list
+    TOOLS.extend(TELEMETRY_TOOLS)
+    # Update TOOL_MAP
+    for t in TELEMETRY_TOOLS:
+        TOOL_MAP[t["function"]["name"]] = t

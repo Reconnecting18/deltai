@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from collections import deque
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, FileResponse, PlainTextResponse, Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -8,7 +9,9 @@ import httpx
 import json
 import re
 import os
+import time as _time
 import asyncio
+import base64
 import psutil
 import platform
 import logging
@@ -20,10 +23,14 @@ from router import (route, is_cloud_available, is_cloud_available_sync,
                     get_gpu_utilization, get_vram_free_mb, classify_complexity,
                     is_sim_running, get_budget_status, record_cloud_usage,
                     _pick_local_model, get_backup_model, check_model_health,
-                    check_model_exists, init_budget_from_db)
+                    check_model_exists, init_budget_from_db,
+                    is_session_active, activate_session, deactivate_session,
+                    activate_session_from_ingest, get_session_status,
+                    classify_telemetry_category)
 from anthropic_client import stream_chat as anthropic_stream
 from persistence import (init_db, load_history, save_history_pair,
-                         clear_history as db_clear_history, trim_history)
+                         clear_history as db_clear_history, trim_history,
+                         export_session_history)
 
 load_dotenv()
 psutil.cpu_percent(interval=0.1)
@@ -41,7 +48,8 @@ except Exception:
 RAG_AVAILABLE = False
 try:
     from memory import (query_knowledge, ingest_all, get_memory_stats, get_file_details,
-                        remove_file, ingest_context, cleanup_expired, KNOWLEDGE_PATH)
+                        remove_file, ingest_context, cleanup_expired, ingest_context_batch,
+                        KNOWLEDGE_PATH)
     from watcher import start_watcher, stop_watcher, watcher_running
     RAG_AVAILABLE = True
 except ImportError as e:
@@ -73,6 +81,7 @@ except ImportError as e:
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 E3N_MODEL  = os.getenv("E3N_MODEL", "e3n")
 BACKUP_MAX_RETRIES = int(os.getenv("BACKUP_MAX_RETRIES", "2"))
+TELEMETRY_API_URL = os.getenv("TELEMETRY_API_URL", "").strip()
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -81,12 +90,61 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _backup_health_status: dict = {}   # {model: {"healthy": bool, "last_check": float}}
 _backup_last_activated: float = 0  # timestamp of last emergency activation
 
+# ── WEBSOCKET ALERT SYSTEM ──────────────────────────────────────────
+_alert_clients: list[WebSocket] = []
+_recent_alerts: deque = deque(maxlen=20)
+
+
+async def _broadcast_alert(alert: dict):
+    """Send an alert to all connected WebSocket clients."""
+    dead = []
+    msg = json.dumps(alert)
+    for ws in _alert_clients:
+        try:
+            await ws.send_text(msg)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        try:
+            _alert_clients.remove(ws)
+        except ValueError:
+            pass
+
+
+# ── TELEMETRY PROMPT TEMPLATES ───────────────────────────────────────
+
+_COACH_TEMPLATE = """You are in COACHING MODE. The operator is asking about driving performance.
+Structure your response as:
+1. OBSERVATION — what the data shows (specific numbers)
+2. IMPACT — how it affects lap time (quantify in tenths/hundredths)
+3. ACTION — one concrete change to try next lap
+Compare to the driver's own best, not theoretical limits. Be surgical — data over feelings."""
+
+_ENGINEER_TEMPLATE = """You are in RACE ENGINEER MODE. The operator needs a strategic decision.
+Structure your response as:
+1. RECOMMENDATION — lead with the call (pit/stay/save fuel/etc.)
+2. NUMBERS — lap to pit, compound choice, fuel target, time delta
+3. RISK — what could go wrong, and the fallback plan
+Never hedge a pit call. Give a clear recommendation with confidence. Include specific numbers."""
+
+
+def build_telemetry_prompt(query_category: str) -> str | None:
+    """Return the coaching or engineering prompt template for telemetry queries."""
+    if query_category == "telemetry_coaching":
+        return _COACH_TEMPLATE
+    elif query_category in ("telemetry_strategy", "telemetry_debrief"):
+        return _ENGINEER_TEMPLATE
+    return None
+
+
 # ── CONVERSATION HISTORY ─────────────────────────────────────────────
 HISTORY_MAX_TURNS = int(os.getenv("CONVERSATION_HISTORY_MAX", "10"))
 _conversation_history: list[dict] = []
+_current_session_id: str | None = None  # tracks active session for history tagging
 
 
-def _append_to_history(user_message: str, assistant_response: str):
+def _append_to_history(user_message: str, assistant_response: str,
+                       query_category: str = "general", rag_context: str = ""):
     """Store a clean user-assistant exchange. Skip if either is empty."""
     if not user_message.strip() or not assistant_response.strip():
         return
@@ -95,16 +153,21 @@ def _append_to_history(user_message: str, assistant_response: str):
     max_msgs = HISTORY_MAX_TURNS * 2
     if len(_conversation_history) > max_msgs:
         del _conversation_history[:-max_msgs]
-    # Persist to SQLite
+    # Persist to SQLite (with session tagging)
     try:
-        save_history_pair(user_message, assistant_response)
+        save_history_pair(user_message, assistant_response, session_id=_current_session_id)
         trim_history(HISTORY_MAX_TURNS)
     except Exception as e:
         logger.warning(f"Failed to persist history: {e}")
     # Auto-capture good exchanges for training data
     if TRAINING_AVAILABLE:
         try:
-            auto_capture("e3n-auto", user_message, assistant_response)
+            # Route racing exchanges to dedicated dataset
+            if query_category.startswith("telemetry_"):
+                auto_capture("e3n-racing", user_message, assistant_response,
+                             category=query_category, rag_context=rag_context)
+            else:
+                auto_capture("e3n-auto", user_message, assistant_response)
         except Exception:
             pass  # never break chat for training
 
@@ -164,7 +227,7 @@ async def _inference_with_emergency_fallback(
         data, err = await _try_ollama_inference(client, backup_model, messages, tools)
         if data is not None:
             global _backup_last_activated
-            _backup_last_activated = __import__("time").time()
+            _backup_last_activated = _time.time()
             return data, None, backup_model, True
         # Backup also failed — try one more in the chain
         second_backup = get_backup_model(backup_model)
@@ -172,7 +235,7 @@ async def _inference_with_emergency_fallback(
             logger.error(f"Backup {backup_model} also failed. Last resort: {second_backup}")
             data, err2 = await _try_ollama_inference(client, second_backup, messages, tools)
             if data is not None:
-                _backup_last_activated = __import__("time").time()
+                _backup_last_activated = _time.time()
                 return data, None, second_backup, True
         return None, f"All models failed. Primary: {last_error}", model, False
 
@@ -198,7 +261,7 @@ async def _backup_health_loop():
             healthy = await check_model_health(model)
             _backup_health_status[model] = {
                 "healthy": healthy,
-                "last_check": __import__("time").time(),
+                "last_check": _time.time(),
             }
             if healthy:
                 logger.info(f"Backup health OK: {model}")
@@ -533,11 +596,19 @@ def _check_greeting(message: str) -> str | None:
 
 # ── RAG CONTEXT BUILDER ────────────────────────────────────────────────
 
-def build_rag_context(user_message: str) -> str:
+def build_rag_context(user_message: str, source_filter: str = None,
+                      max_age_sec: float = None) -> str:
     if not RAG_AVAILABLE:
         return ""
+    # Cleanup expired entries during active sessions
+    if is_session_active():
+        try:
+            cleanup_expired()
+        except Exception:
+            pass
     try:
-        matches = query_knowledge(user_message, n_results=3, threshold=0.75)
+        matches = query_knowledge(user_message, n_results=3, threshold=0.75,
+                                  source_filter=source_filter, max_age_sec=max_age_sec)
         if not matches:
             return ""
         context_parts = ["[KNOWLEDGE CONTEXT — from your ingested documents]"]
@@ -599,8 +670,36 @@ async def chat(req: ChatRequest):
         logger.info(f"Greeting short-circuit: '{req.message}' → '{greeting_response}'")
         return StreamingResponse(stream_greeting(), media_type="application/x-ndjson")
 
+    # ── SESSION EVENT ──────────────────────────────────────────
+    query_cat = decision.query_category
+
+    # ── TELEMETRY LOOKUP SHORT-CIRCUIT ─────────────────────────
+    # Simple data queries during active session — answer from RAG, no model needed
+    if query_cat == "telemetry_lookup" and RAG_AVAILABLE:
+        lookup_context = build_rag_context(req.message, source_filter=None, max_age_sec=120)
+        if lookup_context:
+            async def stream_lookup():
+                yield json.dumps({"t": "route", **decision.to_dict()}) + "\n"
+                chunk_count = lookup_context.count("[Source:")
+                yield json.dumps({"t": "rag", "n": chunk_count}) + "\n"
+                # Extract clean data from RAG context (strip metadata headers)
+                clean = lookup_context.replace("[KNOWLEDGE CONTEXT — from your ingested documents]", "").replace("[END CONTEXT]", "")
+                clean = re.sub(r'\[Source:.*?\|.*?\]\n?', '', clean).strip()
+                yield json.dumps({"t": "text", "c": clean}) + "\n"
+                _append_to_history(req.message, clean, query_category=query_cat, rag_context=lookup_context)
+                yield json.dumps({"t": "done", "turns": len(_conversation_history) // 2}) + "\n"
+            logger.info(f"Telemetry lookup short-circuit: '{req.message}'")
+            return StreamingResponse(stream_lookup(), media_type="application/x-ndjson")
+
     # ── RAG CONTEXT ─────────────────────────────────────────
-    rag_context = build_rag_context(req.message)
+    # During active sessions, prefer recent telemetry data
+    if is_session_active() and query_cat.startswith("telemetry_"):
+        rag_context = build_rag_context(req.message, max_age_sec=300)
+    else:
+        rag_context = build_rag_context(req.message)
+
+    # ── TELEMETRY PROMPT INJECTION ──────────────────────────
+    telemetry_prompt = build_telemetry_prompt(query_cat)
 
     # ── SPLIT WORKLOAD PATH ─────────────────────────────────
     # Phase 1: Local 3B model gathers data via tools (free, fast)
@@ -627,7 +726,7 @@ async def chat(req: ChatRequest):
                 async for line in anthropic_stream(
                     message=req.message, model=decision.model,
                     rag_context=rag_context, tools=TOOLS, execute_tool_fn=execute_tool,
-                    history=_get_history(),
+                    history=_get_history(), telemetry_mode=telemetry_prompt,
                 ):
                     if line.strip().startswith('{"t":"_usage"'):
                         try:
@@ -641,7 +740,7 @@ async def chat(req: ChatRequest):
                         if ev.get("t") == "text":
                             full_response += ev.get("c", "")
                         elif ev.get("t") == "done":
-                            _append_to_history(req.message, full_response)
+                            _append_to_history(req.message, full_response, query_category=query_cat, rag_context=rag_context)
                             yield json.dumps({"t": "done", "turns": len(_conversation_history) // 2}) + "\n"
                             continue
                     except (json.JSONDecodeError, ValueError):
@@ -715,7 +814,7 @@ async def chat(req: ChatRequest):
                 async for line in anthropic_stream(
                     message=req.message, model=decision.model,
                     rag_context=rag_context, tools=TOOLS, execute_tool_fn=execute_tool,
-                    history=_get_history(),
+                    history=_get_history(), telemetry_mode=telemetry_prompt,
                 ):
                     if line.strip().startswith('{"t":"_usage"'):
                         try:
@@ -729,7 +828,7 @@ async def chat(req: ChatRequest):
                         if ev.get("t") == "text":
                             full_response += ev.get("c", "")
                         elif ev.get("t") == "done":
-                            _append_to_history(req.message, full_response)
+                            _append_to_history(req.message, full_response, query_category=query_cat, rag_context=rag_context)
                             yield json.dumps({"t": "done", "turns": len(_conversation_history) // 2}) + "\n"
                             continue
                     except (json.JSONDecodeError, ValueError):
@@ -756,7 +855,7 @@ async def chat(req: ChatRequest):
             async for line in anthropic_stream(
                 message=req.message, model=decision.model,
                 rag_context=combined_context, tools=None,
-                split_mode=True,
+                split_mode=True, telemetry_mode=telemetry_prompt,
                 history=_get_history(),
             ):
                 if line.strip().startswith('{"t":"_usage"'):
@@ -771,7 +870,7 @@ async def chat(req: ChatRequest):
                     if ev.get("t") == "text":
                         full_response += ev.get("c", "")
                     elif ev.get("t") == "done":
-                        _append_to_history(req.message, full_response)
+                        _append_to_history(req.message, full_response, query_category=query_cat, rag_context=rag_context)
                         yield json.dumps({"t": "done", "turns": len(_conversation_history) // 2}) + "\n"
                         continue
                 except (json.JSONDecodeError, ValueError):
@@ -798,6 +897,7 @@ async def chat(req: ChatRequest):
                 tools=TOOLS,
                 execute_tool_fn=execute_tool,
                 history=_get_history(),
+                telemetry_mode=telemetry_prompt,
             ):
                 # Intercept _usage events for cost tracking
                 if line.strip().startswith('{"t":"_usage"'):
@@ -817,7 +917,7 @@ async def chat(req: ChatRequest):
                     if ev.get("t") == "text":
                         full_response += ev.get("c", "")
                     elif ev.get("t") == "done":
-                        _append_to_history(req.message, full_response)
+                        _append_to_history(req.message, full_response, query_category=query_cat, rag_context=rag_context)
                         yield json.dumps({"t": "done", "turns": len(_conversation_history) // 2}) + "\n"
                         continue
                 except (json.JSONDecodeError, ValueError):
@@ -827,10 +927,15 @@ async def chat(req: ChatRequest):
         return StreamingResponse(stream_cloud(), media_type="application/x-ndjson")
 
     # ── OLLAMA PATH (with tool calling) ─────────────────────
+    # Inject telemetry prompt as system message for local models
+    telemetry_prefix = ""
+    if telemetry_prompt:
+        telemetry_prefix = f"[SYSTEM NOTE]\n{telemetry_prompt}\n[END NOTE]\n\n"
+
     if rag_context:
-        user_content = f"{rag_context}\n{req.message}"
+        user_content = f"{telemetry_prefix}{rag_context}\n{req.message}"
     else:
-        user_content = req.message
+        user_content = f"{telemetry_prefix}{req.message}" if telemetry_prefix else req.message
 
     messages = _get_history() + [{"role": "user", "content": user_content}]
 
@@ -898,7 +1003,7 @@ async def chat(req: ChatRequest):
                         chunk_size = 4
                         for i in range(0, len(content), chunk_size):
                             yield json.dumps({"t": "text", "c": content[i:i+chunk_size]}) + "\n"
-                    _append_to_history(req.message, content)
+                    _append_to_history(req.message, content, query_category=query_cat, rag_context=rag_context)
                     yield json.dumps({"t": "done", "turns": len(_conversation_history) // 2}) + "\n"
                     return
 
@@ -946,7 +1051,7 @@ async def chat(req: ChatRequest):
                 content = data.get("message", {}).get("content", "Max tool rounds reached.")
                 for i in range(0, len(content), 4):
                     yield json.dumps({"t": "text", "c": content[i:i+4]}) + "\n"
-                _append_to_history(req.message, content)
+                _append_to_history(req.message, content, query_category=query_cat, rag_context=rag_context)
             else:
                 yield json.dumps({"t": "error", "c": str(err)}) + "\n"
             yield json.dumps({"t": "done", "turns": len(_conversation_history) // 2}) + "\n"
@@ -1073,7 +1178,7 @@ class IngestRequest(BaseModel):
 
 
 @app.post("/ingest")
-def ingest_endpoint(req: IngestRequest):
+async def ingest_endpoint(req: IngestRequest):
     """
     Ingest structured context from an external service into ChromaDB.
     This is E3N's connector — any service can push context here.
@@ -1085,12 +1190,64 @@ def ingest_endpoint(req: IngestRequest):
     if not req.context or not req.context.strip():
         return {"status": "error", "reason": "context is required"}
     try:
+        # Auto-activate session from telemetry source
+        global _current_session_id
+        was_active = is_session_active()
+        activate_session_from_ingest(req.source.strip())
+        # Auto-set session_id when ingest triggers session activation
+        if not was_active and is_session_active() and not _current_session_id:
+            _current_session_id = f"auto_{int(_time.time())}"
         result = ingest_context(
             source=req.source.strip(),
             context=req.context.strip(),
             ttl=req.ttl,
             tags=req.tags,
         )
+        # Forward alerts to WebSocket clients
+        if "alert" in req.tags:
+            alert = {
+                "source": req.source,
+                "context": req.context,
+                "tags": req.tags,
+                "ts": _time.time(),
+                "priority": "critical" if "critical" in req.tags else "high" if "high" in req.tags else "normal",
+            }
+            _recent_alerts.append(alert)
+            await _broadcast_alert(alert)
+        return result
+    except Exception as e:
+        return {"status": "error", "reason": str(e)}
+
+
+class IngestBatchRequest(BaseModel):
+    items: list[dict]  # each: {"source": str, "context": str, "ttl": int, "tags": list[str]}
+
+
+@app.post("/ingest/batch")
+async def ingest_batch_endpoint(req: IngestBatchRequest):
+    """Batch ingest multiple context items. Max 100 per batch."""
+    if not RAG_AVAILABLE:
+        return {"error": "RAG not available"}
+    try:
+        # Auto-activate session from any telemetry sources in batch
+        for item in req.items[:5]:  # check first 5 for pattern
+            src = item.get("source", "")
+            if src:
+                activate_session_from_ingest(src)
+        result = ingest_context_batch(req.items)
+        # Forward any alerts
+        for item in req.items:
+            tags = item.get("tags", [])
+            if "alert" in tags:
+                alert = {
+                    "source": item.get("source", ""),
+                    "context": item.get("context", ""),
+                    "tags": tags,
+                    "ts": _time.time(),
+                    "priority": "critical" if "critical" in tags else "high" if "high" in tags else "normal",
+                }
+                _recent_alerts.append(alert)
+                await _broadcast_alert(alert)
         return result
     except Exception as e:
         return {"status": "error", "reason": str(e)}
@@ -1105,6 +1262,70 @@ def ingest_cleanup():
         return cleanup_expired()
     except Exception as e:
         return {"status": "error", "reason": str(e)}
+
+
+# ── SESSION ENDPOINTS ────────────────────────────────────────────────
+
+@app.post("/session/start")
+def session_start():
+    """Manually activate racing session mode (GPU protection)."""
+    global _current_session_id
+    _current_session_id = f"session_{int(_time.time())}"
+    activate_session(manual=True)
+    return {"ok": True, "session_id": _current_session_id, **get_session_status()}
+
+
+@app.post("/session/end")
+def session_end():
+    """Deactivate racing session mode and export session history."""
+    global _current_session_id
+    result = {"ok": True}
+    # Export session history for training
+    if _current_session_id:
+        try:
+            export_path = os.path.join(r"C:\e3n\data\training\sessions", f"{_current_session_id}.jsonl")
+            os.makedirs(os.path.dirname(export_path), exist_ok=True)
+            export_result = export_session_history(_current_session_id, export_path)
+            result["export"] = export_result
+        except Exception as e:
+            result["export_error"] = str(e)
+    _current_session_id = None
+    deactivate_session()
+    result.update(get_session_status())
+    return result
+
+
+@app.get("/session/status")
+def session_status():
+    """Get current session state."""
+    status = get_session_status()
+    status["session_id"] = _current_session_id
+    return status
+
+
+# ── WEBSOCKET ALERTS ─────────────────────────────────────────────────
+
+@app.websocket("/ws/alerts")
+async def websocket_alerts(websocket: WebSocket):
+    """WebSocket endpoint for proactive racing alerts."""
+    await websocket.accept()
+    _alert_clients.append(websocket)
+    try:
+        while True:
+            await websocket.receive_text()  # keep alive
+    except WebSocketDisconnect:
+        pass
+    finally:
+        try:
+            _alert_clients.remove(websocket)
+        except ValueError:
+            pass
+
+
+@app.get("/alerts/recent")
+def recent_alerts():
+    """Get the last 20 alerts."""
+    return {"alerts": list(_recent_alerts)}
 
 
 # ── SUBSYSTEM HEALTH ──────────────────────────────────────────────────
@@ -1167,6 +1388,15 @@ async def system_health():
     else:
         results["voice"] = "unavailable"
 
+    # Telemetry API (conditional — only when configured)
+    if TELEMETRY_API_URL:
+        try:
+            async with httpx.AsyncClient(timeout=3) as client:
+                r = await client.get(f"{TELEMETRY_API_URL}/health")
+                results["telemetry"] = "online" if r.status_code == 200 else "down"
+        except Exception:
+            results["telemetry"] = "down"
+
     return results
 
 
@@ -1175,7 +1405,6 @@ async def system_health():
 @app.get("/backup/status")
 def backup_status():
     """Emergency backup system status."""
-    import time as _time
     backup_enabled = os.getenv("BACKUP_ENABLED", "true").lower() in ("true", "1", "yes")
     strong = os.getenv("E3N_STRONG_MODEL", "e3n-qwen14b")
     default = os.getenv("E3N_MODEL", "e3n-qwen3b")
@@ -1375,7 +1604,6 @@ async def voice_chat(request: Request):
     tts_result = await synthesize_speech(response_text)
     audio_b64 = None
     if "audio" in tts_result:
-        import base64
         audio_b64 = base64.b64encode(tts_result["audio"]).decode("ascii")
 
     return {

@@ -96,6 +96,7 @@ async def stream_chat(
     tools: list = None,
     execute_tool_fn=None,
     split_mode: bool = False,
+    telemetry_mode: str = None,
     history: list = None,
 ):
     """
@@ -144,6 +145,9 @@ async def stream_chat(
                 "results are in the context below. Focus on analysis and reasoning. "
                 "Do not suggest running commands or gathering data — it has been done."
             )
+
+        if telemetry_mode:
+            system_prompt += f"\n\n{telemetry_mode}"
 
         payload = {
             "model": model,

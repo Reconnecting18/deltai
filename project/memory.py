@@ -399,7 +399,8 @@ def _rerank_results(matches: list[dict], boost_recent: bool = True) -> list[dict
 # ── QUERY ───────────────────────────────────────────────────────────────
 
 def query_knowledge(query: str, n_results: int = 5, threshold: float = 0.75,
-                    boost_recent: bool = True) -> list[dict]:
+                    boost_recent: bool = True, source_filter: str = None,
+                    max_age_sec: float = None) -> list[dict]:
     """
     Search the knowledge base for relevant chunks using multi-query expansion,
     source-grouped reranking, and optional recency bias.
@@ -407,6 +408,8 @@ def query_knowledge(query: str, n_results: int = 5, threshold: float = 0.75,
     Returns list of {"text", "source", "distance", "chunk_index"}.
     threshold: max cosine distance (lower = more relevant). 0.75 for nomic-embed-text.
     boost_recent: if True, recently ingested context gets a slight relevance boost.
+    source_filter: if provided, only return results from this source.
+    max_age_sec: if provided, filter out results older than this many seconds (based on ingested_at).
     """
     collection = get_collection()
 
@@ -422,17 +425,26 @@ def query_knowledge(query: str, n_results: int = 5, threshold: float = 0.75,
     except Exception:
         return []
 
+    # Build optional where clause for source filtering
+    where_clause = None
+    if source_filter:
+        where_clause = {"source": source_filter}
+
     # Run each variant and collect results, deduplicating by chunk ID
     seen_ids = set()
     all_matches = []
     fetch_n = min(n_results * 2, collection.count())  # fetch extra for dedup headroom
 
     for emb in query_embeddings:
-        results = collection.query(
-            query_embeddings=[emb],
-            n_results=fetch_n,
-            include=["documents", "distances", "metadatas"],
-        )
+        query_kwargs = {
+            "query_embeddings": [emb],
+            "n_results": fetch_n,
+            "include": ["documents", "distances", "metadatas"],
+        }
+        if where_clause is not None:
+            query_kwargs["where"] = where_clause
+
+        results = collection.query(**query_kwargs)
 
         for i in range(len(results["ids"][0])):
             chunk_id = results["ids"][0][i]
@@ -445,6 +457,13 @@ def query_knowledge(query: str, n_results: int = 5, threshold: float = 0.75,
                 continue
 
             meta = results["metadatas"][0][i]
+
+            # Age filtering: skip entries older than max_age_sec
+            if max_age_sec is not None:
+                ingested_at = meta.get("ingested_at", 0)
+                if ingested_at > 0 and (_time.time() - ingested_at) > max_age_sec:
+                    continue  # Skip old entries
+
             all_matches.append({
                 "text": results["documents"][0][i],
                 "source": meta.get("source", "?"),
@@ -585,6 +604,76 @@ def ingest_context(source: str, context: str, ttl: int = 0,
 
     return {"status": "ok", "chunks": len(chunks), "source": source,
             "expires_at": expires_at if expires_at > 0 else None}
+
+
+def ingest_context_batch(items: list[dict]) -> dict:
+    """
+    Batch ingest multiple context items in a single embedding + ChromaDB call.
+    Each item: {"source": str, "context": str, "ttl": int, "tags": list[str]}
+    Max 100 items per batch.
+
+    Returns {"status": "ok", "ingested": N, "chunks": N}
+    """
+    if not items:
+        return {"status": "error", "reason": "empty batch"}
+    if len(items) > 100:
+        return {"status": "error", "reason": f"batch too large ({len(items)} > 100 max)"}
+
+    collection = get_collection()
+    now = _time.time()
+
+    all_texts = []
+    all_ids = []
+    all_metadatas = []
+    items_processed = 0
+
+    for item_idx, item in enumerate(items):
+        source = item.get("source", "").strip()
+        context = item.get("context", "").strip()
+        ttl = item.get("ttl", 0)
+        tags = item.get("tags", [])
+
+        if not source or not context:
+            continue
+        items_processed += 1
+
+        chunks = chunk_text(context, source)
+        expires_at = now + ttl if ttl > 0 else 0
+        ts_str = str(int(now * 1000)) + f"_{item_idx}"
+
+        for c in chunks:
+            all_texts.append(c["text"])
+            all_ids.append(f"ingest::{source}::{ts_str}::chunk_{c['chunk_index']}")
+            all_metadatas.append({
+                "source": f"ingest:{source}",
+                "chunk_index": c["chunk_index"],
+                "total_chunks": c["total_chunks"],
+                "ingested_at": now,
+                "expires_at": expires_at,
+                "tags": json.dumps(tags),
+                "char_count": len(c["text"]),
+            })
+
+    if not all_texts:
+        return {"status": "error", "reason": "no valid items in batch"}
+
+    try:
+        embeddings = get_embeddings(all_texts)
+    except Exception as e:
+        return {"status": "error", "reason": f"embedding failed: {e}"}
+
+    collection.add(
+        ids=all_ids,
+        documents=all_texts,
+        embeddings=embeddings,
+        metadatas=all_metadatas,
+    )
+
+    return {
+        "status": "ok",
+        "ingested": items_processed,
+        "chunks": len(all_texts),
+    }
 
 
 def cleanup_expired() -> dict:

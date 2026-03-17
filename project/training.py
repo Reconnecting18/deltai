@@ -467,6 +467,8 @@ def auto_capture(
     user_msg: str,
     assistant_msg: str,
     min_quality_len: int = 50,
+    category: str = None,
+    rag_context: str = None,
 ) -> dict:
     """
     Automatically capture good conversation exchanges for training data.
@@ -503,8 +505,16 @@ def auto_capture(
     if not os.path.exists(ds_path):
         create_dataset(dataset_name)
 
+    # Determine capture category
+    capture_category = category or "auto-captured"
+
+    # For racing exchanges, include RAG context in input
+    capture_input = user_msg
+    if rag_context and category and category.startswith("telemetry_"):
+        capture_input = f"[Context]\n{rag_context}\n\n[Query]\n{user_msg}"
+
     # Passed all filters — add to dataset
-    result = add_example(dataset_name, user_msg, assistant_msg, category="auto-captured")
+    result = add_example(dataset_name, capture_input, assistant_msg, category=capture_category)
     if result.get("status") == "ok":
         return {"captured": True, "dataset": dataset_name}
     else:

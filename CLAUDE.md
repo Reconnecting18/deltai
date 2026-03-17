@@ -18,10 +18,10 @@ E3N is ONLY the AI intelligence layer — reasoning, memory, tool execution, and
 - **RAG:** ChromaDB at `C:\e3n\data\chromadb`, nomic-embed-text, 0.75 cosine threshold, multi-query expansion + reranking
 - **Knowledge:** Drop files in `C:\e3n\data\knowledge\` — watchdog auto-ingests
 - **Ingest connector:** `POST /ingest` — external services push structured context into ChromaDB with source tags and TTL
-- **Router:** `C:\e3n\project\router.py` — VRAM-aware GPU detection, sim process detection, tier classification, model cascade, emergency backup chain, cloud budget enforcement, split workload detection
-- **Tools:** 7 tools in `C:\e3n\project\tools\` (read_file, write_file, list_directory, run_powershell, get_system_info, search_knowledge, memory_stats)
-- **Anthropic client:** `C:\e3n\project\anthropic_client.py` — cloud inference with tool use, split workload mode, conversation history support (dormant — no API key set)
-- **Conversation history:** In-memory rolling 10-turn window + SQLite persistence across all chat paths
+- **Router:** `C:\e3n\project\router.py` — VRAM-aware GPU detection, sim process detection, tier classification, model cascade, emergency backup chain, cloud budget enforcement, split workload detection, session mode, telemetry query classification
+- **Tools:** 7 core tools + 4 conditional telemetry tools in `C:\e3n\project\tools\` (core: read_file, write_file, list_directory, run_powershell, get_system_info, search_knowledge, memory_stats; telemetry: get_session_status, get_lap_summary, get_tire_status, get_strategy_recommendation — only loaded when TELEMETRY_API_URL is set)
+- **Anthropic client:** `C:\e3n\project\anthropic_client.py` — cloud inference with tool use, split workload mode, telemetry mode prompt injection, conversation history support (dormant — no API key set)
+- **Conversation history:** In-memory rolling 10-turn window + SQLite persistence across all chat paths, session-aware tagging
 - **Split workload:** Local 3B gathers data via tools → cloud reasons over enriched context
 - **Cloud cost budget:** Daily spend tracking ($5 default), router gates cloud when exhausted, persisted to SQLite
 - **Voice module:** `C:\e3n\project\voice.py` — STT (faster-whisper) + TTS (edge-tts / Windows SAPI fallback), integrated endpoints
@@ -50,27 +50,31 @@ E3N does NOT directly process telemetry, UDP packets, or game data. Instead:
 - General-purpose tool system
 - Smart routing with tier classification
 - Split workload (local tools + cloud reasoning)
-- Conversation history + persistence
+- Conversation history + persistence (session-aware)
 - Cloud cost budget enforcement
-- Training pipeline for fine-tuning
+- Training pipeline for fine-tuning (+ racing auto-capture)
 - Emergency backup system
 - Voice module (STT/TTS)
+- Session mode + GPU protection for active racing
+- Telemetry query classification and prompt injection
+- WebSocket alerts for proactive racing notifications
+- Batch ingest for high-frequency data sources
 
 ## Key Files
 | File | Purpose |
 |------|---------|
-| `project/main.py` | FastAPI app — chat (3 paths: local, cloud, split), conversation history, stats, health, budget, memory, ingest, backup, training, voice endpoints |
-| `project/router.py` | Smart routing: VRAM detection, sim detection, tier classification, split workload detection, cloud budget enforcement + persistence, emergency backup chain |
-| `project/memory.py` | ChromaDB RAG: chunking, embedding, multi-query expansion, source-grouped reranking, recency bias, ingest with TTL |
+| `project/main.py` | FastAPI app — chat (3 paths: local, cloud, split), conversation history, stats, health, budget, memory, ingest, batch ingest, session mode, WebSocket alerts, backup, training, voice endpoints |
+| `project/router.py` | Smart routing: VRAM detection, sim detection, tier classification, split workload detection, cloud budget enforcement + persistence, emergency backup chain, session mode (GPU protection), telemetry query classification |
+| `project/memory.py` | ChromaDB RAG: chunking, embedding, multi-query expansion, source-grouped reranking, recency bias, ingest with TTL, batch ingest, source/age filtering |
 | `project/watcher.py` | Watchdog file watcher for knowledge dir |
-| `project/anthropic_client.py` | Anthropic API streaming with tool use, split_mode, conversation history support (dormant — no API key) |
-| `project/persistence.py` | SQLite backing store for conversation history and cloud budget (WAL mode, short-lived connections) |
-| `project/training.py` | Training pipeline: dataset CRUD, export (alpaca/sharegpt/chatml), few-shot model creation via Ollama, auto-capture of good exchanges |
+| `project/anthropic_client.py` | Anthropic API streaming with tool use, split_mode, telemetry_mode prompt injection, conversation history support (dormant — no API key) |
+| `project/persistence.py` | SQLite backing store for conversation history (session-aware), cloud budget, session history export (WAL mode, short-lived connections) |
+| `project/training.py` | Training pipeline: dataset CRUD, export (alpaca/sharegpt/chatml), few-shot model creation via Ollama, auto-capture with racing category support |
 | `project/voice.py` | Voice module: STT (faster-whisper, VRAM-aware device selection), TTS (edge-tts + Windows SAPI fallback), audio cleanup |
-| `project/tools/executor.py` | Tool execution with type coercion, safety checks, tool retry on error |
-| `project/tools/definitions.py` | 7 tool JSON schemas |
-| `project/static/index.html` | Full dashboard UI (single file) — header health monitor, budget display, terminal with history CLR |
-| `project/.env` | Config (models, VRAM thresholds, backup, budget, history, paths, cloud settings, voice) |
+| `project/tools/executor.py` | Tool execution with type coercion, safety checks, tool retry on error, conditional telemetry tool implementations |
+| `project/tools/definitions.py` | 7 core + 4 conditional telemetry tool JSON schemas |
+| `project/static/index.html` | Full dashboard UI (single file) — header health monitor, budget display, terminal with history CLR, WebSocket alert toasts |
+| `project/.env` | Config (models, VRAM thresholds, backup, budget, history, paths, cloud settings, voice, session mode, telemetry) |
 | `app/main.js` | Electron main process |
 
 ## How to Start
@@ -87,7 +91,8 @@ npm start
 
 ## Stream Protocol (frontend ↔ backend)
 JSON lines from `/chat`:
-- `{"t":"route","backend":"...","model":"...","tier":N,"reason":"...","split":bool}` — routing decision (split flag when split workload active)
+- `{"t":"route","backend":"...","model":"...","tier":N,"reason":"...","split":bool,"query_category":"..."}` — routing decision (includes split flag, query category)
+- `{"t":"session","active":bool,"session_id":"..."}` — session state change
 - `{"t":"rag","n":N}` — RAG context chunks found
 - `{"t":"split_phase","phase":N,"c":"..."}` — split workload phase (1=gathering, 2=reasoning, 0=fallback)
 - `{"t":"tool","n":"tool_name","a":{args}}` — tool call
@@ -148,6 +153,7 @@ In-memory rolling window of recent exchanges so the model can reference prior co
 - **Injected into all 3 chat paths:** Ollama (prepended to messages array), Anthropic (prepended via `history` param), split workload (both phases)
 - **What's stored:** Clean user text + final assistant response text only
 - **What's NOT stored:** Greetings (canned), tool calls, RAG context, errors
+- **Session-aware:** When a racing session is active, history pairs are tagged with `session_id`. On session end, tagged turns are exported to `C:\e3n\data\training\sessions\{session_id}.jsonl` for post-race review.
 - **Endpoints:** `DELETE /chat/history` (clear), `GET /chat/history` (turns + max_turns metadata)
 - **Frontend:** CLR button in terminal header, turn counter `[NT]` (e.g., `[3T]` = 3 turns)
 - **Persistent:** Backed by SQLite (`persistence.py`) — survives server restarts. In-memory remains primary; DB is the backing store.
@@ -164,7 +170,9 @@ Multi-query retrieval with reranking for better knowledge base results.
 - **Multi-query search:** All variants searched in parallel, results deduplicated by chunk ID
 - **Source grouping:** Documents with multiple matching chunks get a relevance boost (diminishing returns)
 - **Recency bias:** Recently ingested context (within 5 minutes via /ingest) gets a slight boost — useful for live data
-- **Backward compatible:** `query_knowledge()` API unchanged, optional `boost_recent` parameter added
+- **Source filtering:** `source_filter` parameter restricts results to a specific source (e.g., `ingest:lmu-telemetry`)
+- **Age filtering:** `max_age_sec` parameter filters out results older than N seconds (based on `ingested_at` metadata) — useful for live session queries
+- **Backward compatible:** `query_knowledge()` API unchanged, optional parameters added
 
 ## Split Workload
 Two-phase inference: local model gathers data (free), cloud model reasons over it (premium quality). Best of both worlds.
@@ -210,13 +218,80 @@ TTS_VOICE=en-US-GuyNeural
 TTS_RATE=+0%
 ```
 
+## Session Mode (GPU Protection)
+Active racing session detection and GPU protection for frame rate preservation.
+
+- **Auto-detection:** When `/ingest` receives data from a source matching `SESSION_SOURCE_PATTERN` (default: `lmu`), session mode auto-activates
+- **Manual control:** `POST /session/start` and `POST /session/end` endpoints
+- **GPU protection:** When session active + GPU protect enabled, ALL inference routes away from GPU:
+  - Cloud available → route to Anthropic (Sonnet/Opus based on complexity)
+  - No cloud → route to CPU-only local (e3n-qwen3b on CPU)
+- **Auto-timeout:** Session deactivates after `SESSION_TIMEOUT_SEC` (default: 60s) without ingest activity
+- **Session history:** Conversation turns tagged with `session_id`, exported to JSONL on session end
+- **Endpoints:**
+  - `POST /session/start` — manual activation, returns session_id
+  - `POST /session/end` — deactivate, export session history to `C:\e3n\data\training\sessions\`
+  - `GET /session/status` — current state (active, started_at, last_ingest, timeout, etc.)
+
+**Config (.env):**
+```
+SESSION_GPU_PROTECT=true
+SESSION_FORCE_CLOUD=true
+SESSION_DETECT_MODE=ingest
+SESSION_SOURCE_PATTERN=lmu
+SESSION_TIMEOUT_SEC=60
+```
+
+## Telemetry Query Classification
+Regex-based classifier in `router.py` that categorizes telemetry-related queries during active sessions.
+
+- **4 categories** (checked in priority order — most specific first):
+  - `telemetry_debrief` — race/session analysis, post-race review
+  - `telemetry_strategy` — pit calls, tire strategy, fuel management, weather decisions
+  - `telemetry_coaching` — driving improvement, braking points, lines, oversteer/understeer
+  - `telemetry_lookup` — simple data queries (fuel, tire temps, lap times, gaps)
+- **Activates when:** Session is active OR sim is running
+- **Query category** propagated through `RouteDecision.query_category` to all downstream systems
+- **Telemetry lookup short-circuit:** Simple data queries answered directly from RAG without model inference (zero latency)
+- **Racing prompt templates:** Dynamic coach/engineer prompt injection based on category:
+  - Coaching → structured OBSERVATION/IMPACT/ACTION format
+  - Strategy/Debrief → structured RECOMMENDATION/NUMBERS/RISK format
+  - Injected into Ollama (as `[SYSTEM NOTE]` prefix) and Anthropic (via `telemetry_mode` parameter)
+
+## WebSocket Alerts
+Real-time proactive alert system for racing notifications.
+
+- **Endpoint:** `WebSocket /ws/alerts` with auto-reconnect client
+- **Trigger:** `/ingest` with `"alert"` in tags automatically forwards to all connected WebSocket clients
+- **Priority levels:** `normal`, `high` (amber), `critical` (red)
+- **Recent history:** `GET /alerts/recent` returns last 20 alerts (in-memory deque)
+- **Frontend:** Toast notifications slide in from bottom-right, auto-dismiss after 10 seconds
+- **Connection:** Auto-reconnect with 5-second retry on disconnect
+
+## Batch Ingest
+High-throughput ingestion for multiple context items in a single call.
+
+- **Endpoint:** `POST /ingest/batch` with `{"items": [...]}`
+- **Efficiency:** Single `get_embeddings()` call + single `collection.add()` for all chunks
+- **Rate limit:** Max 100 items per batch
+- **Validation:** Items with empty source/context silently skipped, accurate `items_processed` count
+- **Alert forwarding:** Items with `"alert"` in tags still forwarded to WebSocket clients
+
+## Conditional Telemetry Tools
+4 tools that only load when `TELEMETRY_API_URL` env var is set — keeps E3N clean when no telemetry service is running.
+
+- **Tools:** `get_session_status`, `get_lap_summary`, `get_tire_status`, `get_strategy_recommendation`
+- **API calls:** Each tool hits the external Telemetry API via httpx GET requests
+- **Error handling:** Graceful failure with clear error messages when API is unreachable
+- **Dynamic loading:** `TOOLS` list and `EXECUTORS` dict extended at import time only when configured
+
 ## Training Pipeline
 Dataset management and few-shot model creation for fine-tuning E3N's behavior.
 
 - **Dataset CRUD:** Create, list, add examples, remove examples, get all examples
 - **Export formats:** Alpaca, ShareGPT, ChatML — ready for external training tools
 - **Few-shot model creation:** Bakes curated examples into the SYSTEM prompt of a new Ollama model variant via `ollama create`
-- **Auto-capture:** `auto_capture()` automatically saves good conversation exchanges (filters out greetings, errors, short responses) to a training dataset. Called on every non-trivial exchange.
+- **Auto-capture:** `auto_capture()` automatically saves good conversation exchanges (filters out greetings, errors, short responses) to a training dataset. Called on every non-trivial exchange. Racing exchanges (telemetry queries) routed to dedicated `e3n-racing` dataset with RAG context included in training input.
 - **Background execution:** Training runs in a background thread, status trackable via `/training/status`
 - **Endpoints:**
   - `GET /training/datasets` — list datasets
@@ -248,9 +323,10 @@ User-friendly error handling and automatic retry logic.
 ## Header Health Monitor
 Live subsystem health monitor in the dashboard header.
 
-- **Endpoint:** `GET /api/health` checks 8 subsystems: Ollama, FastAPI, ChromaDB/RAG, Router, Watcher, Tools, Anthropic, Voice
-- **Display:** "X/8 ONLINE" with colored dot (green = all nominal, orange/red = degraded)
+- **Endpoint:** `GET /api/health` checks 8-9 subsystems: Ollama, FastAPI, ChromaDB/RAG, Router, Watcher, Tools, Anthropic, Voice, and optionally Telemetry (when `TELEMETRY_API_URL` is configured)
+- **Display:** "X/8 ONLINE" (or "X/9 ONLINE" with telemetry) with colored dot (green = all nominal, orange/red = degraded)
 - **Alert badges:** Non-nominal systems show warning/error badges (e.g., "CLOUD — STANDBY", "WATCHER — STOPPED")
+- **Dynamic count:** Subsystem count adjusts based on whether telemetry is configured
 - **Polled every 10 seconds** via JS `pollHealth()`
 
 ## Greeting Short-Circuit
@@ -265,12 +341,23 @@ POST /ingest
   "ttl": 300,                        // seconds until auto-expiry (0 = permanent)
   "tags": ["race", "tires"]          // optional filtering tags
 }
+
+POST /ingest/batch
+{
+  "items": [
+    {"source": "lmu-telemetry", "context": "...", "ttl": 300, "tags": ["race"]},
+    ...  // max 100 items per batch
+  ]
+}
 ```
 - Chunks and embeds the context into ChromaDB
 - Tagged with source + timestamp
-- TTL-expired entries cleaned up periodically
+- TTL-expired entries cleaned up periodically (and on every /chat request during active sessions)
 - RAG queries pull from all sources (knowledge files + ingested context)
 - Recent ingests get a relevance boost in query results
+- Batch endpoint: single embedding + ChromaDB call for all items (efficient for high-frequency sources)
+- Sources matching `SESSION_SOURCE_PATTERN` auto-activate session mode (GPU protection)
+- Items with `"alert"` in tags forwarded to WebSocket clients as real-time notifications
 
 ## UI Design Direction
 - Militaristic/tactical ops center aesthetic — NOT neon sci-fi
@@ -282,25 +369,35 @@ POST /ingest
 - Terminal: CLR button + turn counter for conversation history
 
 ## Current Status
-- Phase 1-3 complete (dashboard, RAG, tools, router, cloud client, split workload, budget)
+- Phase 1-4 complete (dashboard, RAG, tools, router, cloud client, split workload, budget, voice, training)
+- Phase 5 complete (telemetry prep — all 11 issues implemented, verified 50/50, debugged)
 - Dashboard UI polish: DONE (tactical redesign deployed)
 - Qwen model migration: DONE (14B primary, 3B sim/default)
 - Emergency backup system: DONE (e3n-nemo + e3n as last resort)
-- /ingest connector: DONE (external services push context)
+- /ingest connector: DONE (external services push context, now with batch + alert forwarding)
 - VRAM-aware routing: DONE (Tier A/B/C with sim detection)
 - Greeting short-circuit: DONE (3B over-triggering fix)
-- Header health monitor: DONE (X/8 ONLINE + alert badges, now includes voice)
+- Header health monitor: DONE (8-9 subsystems, dynamic telemetry count)
 - Split workload: DONE (local tools + cloud reasoning, dormant until API key)
-- Conversation history: DONE (10-turn rolling, persistent, all chat paths)
+- Conversation history: DONE (10-turn rolling, persistent, session-aware tagging)
 - Cloud cost budget: DONE (daily tracking, header display, router enforcement, persistent)
 - Cloud tool-use: DONE (anthropic_client.py fully built, dormant until API key)
-- Persistence (SQLite): DONE (history + budget survive restarts)
-- Smarter RAG: DONE (multi-query expansion, source reranking, recency bias)
-- Training pipeline: DONE (dataset CRUD, export, few-shot model creation, auto-capture)
+- Persistence (SQLite): DONE (history + budget + session export survive restarts)
+- Smarter RAG: DONE (multi-query expansion, source reranking, recency bias, source/age filtering)
+- Training pipeline: DONE (dataset CRUD, export, few-shot model creation, auto-capture, racing dataset)
 - Text-as-tool parser: DONE (balanced brace extraction, Windows paths, Python literals, Ollama arrays)
 - Error recovery UX: DONE (tool retry, friendly errors, retry events)
 - Voice module: DONE (STT via faster-whisper, TTS via edge-tts, full voice chat loop)
-- Stress tests: PASSED (75/75 across 9 test groups)
+- Session mode: DONE (GPU protection, auto-detect from ingest, manual start/end, session history export)
+- Telemetry query classification: DONE (4 categories, priority ordering, prompt templates)
+- Racing prompt templates: DONE (coach + engineer modes, injected into both Ollama + Anthropic paths)
+- WebSocket alerts: DONE (real-time toast notifications, auto-reconnect, priority levels)
+- Batch ingest: DONE (single embedding call, max 100 items, alert forwarding)
+- Conditional telemetry tools: DONE (4 tools, loaded only when TELEMETRY_API_URL set)
+- Session-aware history: DONE (tagged turns, JSONL export on session end)
+- Racing auto-capture: DONE (e3n-racing dataset, RAG context in training input)
+- Dynamic health monitor: DONE (conditional 9th telemetry subsystem)
+- Stress tests: PASSED (50/50 telemetry prep + 75/75 Phase 1-4)
 - Future (separate projects): Telemetry API for LMU
 
 ## Build Phases
@@ -310,15 +407,17 @@ POST /ingest
 | 2 | DONE | VRAM-aware routing, Qwen migration, sim detection, /ingest, emergency backup |
 | 3 | DONE | Cloud tool-use, split workload, cost budget, conversation history, header health monitor, SQLite persistence |
 | 4 | DONE | Smarter RAG, training pipeline execution, text-as-tool hardening, error recovery UX, voice module (STT/TTS) |
+| 5 | DONE | Telemetry prep — session mode, GPU protection, query classification, racing prompts, RAG recency tuning, telemetry tools, WebSocket alerts, session-aware history, batch ingest, dynamic health, racing auto-capture |
 | — | SEPARATE PROJECT | Telemetry API (LMU race engineer) — connects to E3N via /ingest |
 
 ## Known Issues
 1. ~~Text-as-tool fallback needed~~ — FIXED: robust parser with balanced brace extraction, Windows path handling, multiple format support
 2. 3B model occasionally fires unnecessary tools for non-greeting messages (greeting short-circuit covers the common cases)
-3. No Anthropic API key — cloud tier fully built but dormant
-4. Ethan has $200/mo Claude Max but NO separate API key
+3. No Anthropic API key — cloud tier fully built but dormant. **IMPORTANT:** Set `ANTHROPIC_API_KEY` in .env before first race session — cloud is the only safe inference path when GPU is protected during racing.
+4. Ethan has $200/mo Claude Max but NO separate API key (obtain from console.anthropic.com)
 5. VRAM tier dynamically shifts between A and B as Ollama loads/unloads models — correct behavior, not a bug
 6. ~~Conversation history is ephemeral~~ — FIXED: now persisted to SQLite
 7. ~~Cloud budget resets on restart~~ — FIXED: now persisted to SQLite
 8. Voice STT loads Whisper model on first use — ~2-5 second cold start on first transcription
 9. Training uses few-shot embedding (not true LoRA fine-tuning) since Ollama doesn't expose training API
+10. Session mode without API key falls back to CPU-only local inference — functional but slow. Cloud is strongly recommended for racing sessions.

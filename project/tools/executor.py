@@ -297,6 +297,52 @@ def memory_stats() -> str:
         return f"ERROR: {e}"
 
 
+# ── TELEMETRY TOOLS (conditional) ─────────────────────────────────────
+
+_TELEMETRY_API_URL = os.getenv("TELEMETRY_API_URL", "").strip()
+
+def _telemetry_get(endpoint: str, params: dict = None) -> str:
+    """Helper: GET from telemetry API with error handling."""
+    if not _TELEMETRY_API_URL:
+        return "ERROR: Telemetry API not configured (TELEMETRY_API_URL not set)"
+    import httpx as _httpx
+    try:
+        with _httpx.Client(timeout=10) as client:
+            resp = client.get(f"{_TELEMETRY_API_URL}{endpoint}", params=params)
+            if resp.status_code != 200:
+                return f"ERROR: Telemetry API returned HTTP {resp.status_code}: {resp.text[:200]}"
+            data = resp.json()
+            return json.dumps(data, indent=2)
+    except Exception as e:
+        return f"ERROR: Cannot reach telemetry API at {_TELEMETRY_API_URL}: {e}"
+
+
+def get_session_status(**kwargs) -> str:
+    """Get current racing session status."""
+    return _telemetry_get("/api/session")
+
+
+def get_lap_summary(lap_number=None, **kwargs) -> str:
+    """Get lap time summary."""
+    params = {}
+    if lap_number is not None:
+        params["lap"] = _coerce_int(lap_number)
+    return _telemetry_get("/api/laps", params=params if params else None)
+
+
+def get_tire_status(**kwargs) -> str:
+    """Get current tire status."""
+    return _telemetry_get("/api/tires")
+
+
+def get_strategy_recommendation(remaining_laps=None, **kwargs) -> str:
+    """Get pit strategy recommendation."""
+    params = {}
+    if remaining_laps is not None:
+        params["remaining_laps"] = _coerce_int(remaining_laps)
+    return _telemetry_get("/api/strategy", params=params if params else None)
+
+
 # ── DISPATCH ────────────────────────────────────────────────────────────
 
 EXECUTORS = {
@@ -308,6 +354,12 @@ EXECUTORS = {
     "search_knowledge": search_knowledge,
     "memory_stats": memory_stats,
 }
+
+if _TELEMETRY_API_URL:
+    EXECUTORS["get_session_status"] = get_session_status
+    EXECUTORS["get_lap_summary"] = get_lap_summary
+    EXECUTORS["get_tire_status"] = get_tire_status
+    EXECUTORS["get_strategy_recommendation"] = get_strategy_recommendation
 
 def execute_tool(name: str, arguments: dict) -> str:
     """Execute a tool by name with given arguments. Returns result string."""
