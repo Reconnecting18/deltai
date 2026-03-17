@@ -25,7 +25,7 @@ E3N is ONLY the AI intelligence layer — reasoning, memory, tool execution, and
 - **Split workload:** Local 3B gathers data via tools → cloud reasons over enriched context
 - **Cloud cost budget:** Daily spend tracking ($5 default), router gates cloud when exhausted, persisted to SQLite
 - **Voice module:** `C:\e3n\project\voice.py` — STT (faster-whisper) + TTS (edge-tts / Windows SAPI fallback), integrated endpoints
-- **Training pipeline:** `C:\e3n\project\training.py` — dataset management, few-shot model creation via Ollama, auto-capture of good exchanges
+- **Training pipeline:** `C:\e3n\project\training.py` — dataset management, QLoRA fine-tuning (Qwen2.5-3B), few-shot fallback, GGUF export + Ollama registration, A/B eval, auto-capture of good exchanges
 - **Venv:** `C:\e3n\project\venv\`
 
 ## Key Architecture Decision: E3N is a Pure AI Brain
@@ -69,13 +69,15 @@ E3N does NOT directly process telemetry, UDP packets, or game data. Instead:
 | `project/watcher.py` | Watchdog file watcher for knowledge dir |
 | `project/anthropic_client.py` | Anthropic API streaming with tool use, split_mode, telemetry_mode prompt injection, conversation history support (dormant — no API key) |
 | `project/persistence.py` | SQLite backing store for conversation history (session-aware), cloud budget, session history export (WAL mode, short-lived connections) |
-| `project/training.py` | Training pipeline: dataset CRUD, export (alpaca/sharegpt/chatml), few-shot model creation via Ollama, auto-capture with racing category support |
+| `project/training.py` | Training pipeline: dataset CRUD, export (alpaca/sharegpt/chatml), QLoRA fine-tuning + GGUF export + Ollama registration, few-shot fallback, A/B eval, auto-capture with racing category support |
 | `project/voice.py` | Voice module: STT (faster-whisper, VRAM-aware device selection), TTS (edge-tts + Windows SAPI fallback), audio cleanup |
 | `project/tools/executor.py` | Tool execution with type coercion, safety checks, tool retry on error, conditional telemetry tool implementations |
 | `project/tools/definitions.py` | 7 core + 4 conditional telemetry tool JSON schemas |
 | `project/static/index.html` | Full dashboard UI (single file) — header health monitor, budget display, terminal with history CLR, WebSocket alert toasts |
 | `project/.env` | Config (models, VRAM thresholds, backup, budget, history, paths, cloud settings, voice, session mode, telemetry) |
+| `project/tests/verify_full.py` | 33-test verification suite — training, safety guards, router stress, persistence, RAG, CUDA, anthropic client |
 | `app/main.js` | Electron main process |
+| `tools/llama.cpp/` | GGUF conversion toolchain — `convert_hf_to_gguf.py` + `build/bin/Release/llama-quantize.exe` |
 
 ## How to Start
 ```powershell
@@ -286,21 +288,46 @@ High-throughput ingestion for multiple context items in a single call.
 - **Dynamic loading:** `TOOLS` list and `EXECUTORS` dict extended at import time only when configured
 
 ## Training Pipeline
-Dataset management and few-shot model creation for fine-tuning E3N's behavior.
+Dataset management, QLoRA fine-tuning, and progressive model improvement.
 
+- **Two training modes:**
+  - `"lora"` — Real QLoRA fine-tuning via transformers/peft/trl on Qwen2.5-3B (~6-7GB VRAM)
+  - `"fewshot"` — Legacy few-shot embedding into system prompt (always available, no deps needed)
+  - `"auto"` (default) — Tries LoRA first, falls back to fewshot if deps missing
+- **LoRA pipeline:** Load 4-bit base → apply LoRA (r=16, alpha=32) → train with SFTTrainer → save adapter → merge on CPU → export GGUF (Q4_K_M) → register in Ollama
+- **Safety guards:** Blocks training during active racing sessions or when sim is running. SafetyCallback aborts mid-training if sim launches. Ollama models unloaded from VRAM before training starts.
+- **GGUF conversion:** Uses llama.cpp `convert_hf_to_gguf.py` + `llama-quantize` for Q4_K_M output
+- **A/B evaluation:** `run_ab_eval()` compares two models on a dataset — measures latency and response quality, saves results to `eval/` directory
 - **Dataset CRUD:** Create, list, add examples, remove examples, get all examples
 - **Export formats:** Alpaca, ShareGPT, ChatML — ready for external training tools
-- **Few-shot model creation:** Bakes curated examples into the SYSTEM prompt of a new Ollama model variant via `ollama create`
-- **Auto-capture:** `auto_capture()` automatically saves good conversation exchanges (filters out greetings, errors, short responses) to a training dataset. Called on every non-trivial exchange. Racing exchanges (telemetry queries) routed to dedicated `e3n-racing` dataset with RAG context included in training input.
-- **Background execution:** Training runs in a background thread, status trackable via `/training/status`
+- **Auto-capture:** `auto_capture()` saves good exchanges (filters greetings, errors, short responses). Racing exchanges → `e3n-racing` dataset with RAG context.
+- **Background execution:** Training runs in a background thread, status trackable via `/training/status` (includes loss, step progress, trainable params)
+- **Progressive loop:** Use E3N → auto-capture → accumulate dataset → trigger LoRA → deploy fine-tuned model → repeat
 - **Endpoints:**
   - `GET /training/datasets` — list datasets
   - `POST /training/datasets` — create dataset
   - `POST /training/datasets/{name}/add` — add example
   - `POST /training/datasets/{name}/export` — export to format
-  - `POST /training/start` — start fine-tuning
+  - `POST /training/start` — start fine-tuning (accepts `mode`: lora/fewshot/auto)
   - `POST /training/stop` — cancel training
-  - `GET /training/status` — progress, status, errors
+  - `GET /training/status` — progress, status, loss, errors
+  - `GET /training/lora/status` — check if LoRA deps are installed
+  - `POST /training/eval/ab` — A/B model comparison
+
+**LoRA config (.env):**
+```
+HF_BASE_MODEL=Qwen/Qwen2.5-3B-Instruct
+LORA_R=16
+LORA_ALPHA=32
+LORA_DROPOUT=0.05
+LORA_EPOCHS=3
+LORA_BATCH_SIZE=2
+LORA_GRAD_ACCUM=4
+LORA_LR=2e-4
+LORA_MAX_SEQ_LEN=1024
+LORA_QUANT_METHOD=Q4_K_M
+LLAMA_CPP_PATH=C:\e3n\tools\llama.cpp
+```
 
 ## Text-as-Tool Parser
 Robust fallback parser for when models output tool calls as text instead of structured tool_calls.
@@ -384,7 +411,7 @@ POST /ingest/batch
 - Cloud tool-use: DONE (anthropic_client.py fully built, dormant until API key)
 - Persistence (SQLite): DONE (history + budget + session export survive restarts)
 - Smarter RAG: DONE (multi-query expansion, source reranking, recency bias, source/age filtering)
-- Training pipeline: DONE (dataset CRUD, export, few-shot model creation, auto-capture, racing dataset)
+- Training pipeline: DONE (dataset CRUD, export, QLoRA fine-tuning, GGUF export, Ollama registration, A/B eval, few-shot fallback, auto-capture, racing dataset)
 - Text-as-tool parser: DONE (balanced brace extraction, Windows paths, Python literals, Ollama arrays)
 - Error recovery UX: DONE (tool retry, friendly errors, retry events)
 - Voice module: DONE (STT via faster-whisper, TTS via edge-tts, full voice chat loop)
@@ -419,5 +446,5 @@ POST /ingest/batch
 6. ~~Conversation history is ephemeral~~ — FIXED: now persisted to SQLite
 7. ~~Cloud budget resets on restart~~ — FIXED: now persisted to SQLite
 8. Voice STT loads Whisper model on first use — ~2-5 second cold start on first transcription
-9. Training uses few-shot embedding (not true LoRA fine-tuning) since Ollama doesn't expose training API
+9. ~~LoRA training requires external deps~~ — INSTALLED: PyTorch 2.10.0+cu126, transformers 5.3, peft 0.18, trl 0.29, bitsandbytes 0.49, accelerate 1.13, datasets 4.8. llama.cpp cloned and built at `C:\e3n\tools\llama.cpp`. Full pipeline verified (33/33 tests). Only Qwen2.5-3B is trainable on 12GB VRAM.
 10. Session mode without API key falls back to CPU-only local inference — functional but slow. Cloud is strongly recommended for racing sessions.

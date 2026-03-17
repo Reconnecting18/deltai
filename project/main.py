@@ -1487,6 +1487,7 @@ class TrainingStart(BaseModel):
     dataset: str
     base_model: str = "e3n-qwen3b"
     output_model: str | None = None
+    mode: str = "auto"  # "lora", "fewshot", or "auto"
 
 
 @app.post("/training/start")
@@ -1497,6 +1498,7 @@ def training_start(req: TrainingStart):
         dataset_name=req.dataset,
         base_model=req.base_model,
         output_model=req.output_model,
+        mode=req.mode,
     )
 
 
@@ -1505,6 +1507,32 @@ def training_stop():
     if not TRAINING_AVAILABLE:
         return {"error": "Training system unavailable"}
     return stop_training()
+
+
+@app.get("/training/lora/status")
+def training_lora_status():
+    """Check if LoRA training dependencies are installed."""
+    if not TRAINING_AVAILABLE:
+        return {"available": False, "reason": "Training system unavailable"}
+    from training import check_lora_deps
+    ok, reason = check_lora_deps()
+    return {"available": ok, "reason": reason if not ok else "ready"}
+
+
+class ABEvalRequest(BaseModel):
+    model_a: str
+    model_b: str
+    dataset: str
+    max_examples: int = 20
+
+
+@app.post("/training/eval/ab")
+def training_ab_eval(req: ABEvalRequest):
+    """Run A/B evaluation comparing two models on a dataset."""
+    if not TRAINING_AVAILABLE:
+        return {"error": "Training system unavailable"}
+    from training import run_ab_eval
+    return run_ab_eval(req.model_a, req.model_b, req.dataset, req.max_examples)
 
 
 # ── VOICE ENDPOINTS ──────────────────────────────────────────────────

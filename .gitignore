@@ -58,6 +58,9 @@ data/training/
 # Knowledge base files (add manually if desired)
 data/knowledge/
 
+# External tools (cloned repos)
+tools/llama.cpp/
+
 # Temp
 *.tmp
 *.bak
