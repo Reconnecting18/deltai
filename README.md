@@ -325,7 +325,7 @@ Tactical operations center aesthetic with a muted grey-green palette. Features i
 - **Header**: Subsystem health monitor (X/8 ONLINE) + cloud budget + session badge (auto-detected, timer, GPU protect warning)
 - **3D particle sphere**: Network node map with speech waveform animation during voice chat
 - **Terminal**: Streaming chat with conversation history (CLR + turn counter)
-- **Live voice chat**: Click VOICE to start recording, click again to send (or Space bar). Button changes state: recording (red) → processing (amber) → speaking (teal). Transcription + response appear in terminal, TTS plays with sphere waveform animation
+- **Live voice chat**: Always-listening Alexa/JARVIS style. Click VOICE to activate — just talk naturally, VAD auto-detects speech and silence. Split pipeline: STT (instant transcription) → streaming chat (response appears in real-time) → TTS (audio playback with sphere waveform). Auto-cycles back to listening after each response
 - **Settings panel**: Audio device selection (mic input/speaker output), TTS voice + speed config, system status overview
 - **Training pipeline**: Start/stop training, mode selector (auto/lora/fewshot), live progress bar + loss, LoRA status chip
 - **Diagnostics panel**: Circuit breaker state, VRAM monitor, self-heal status, resource action log, health event timeline

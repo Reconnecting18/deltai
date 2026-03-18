@@ -1613,145 +1613,235 @@ toggleWin=function(name){
   }
 }
 
-// ── LIVE VOICE CHAT ──
-// Single-button design: VOICE button in header does everything.
-// Click 1: acquire mic + start recording. Click 2: stop + send. Then plays response.
-let _voiceStream=null,_voiceRecorder=null,_voiceChunks=[]
-let _voiceState='off' // off, recording, processing, playing
-let _voiceAnimFrame=null
-function _voiceUpdateBtn(){
+// ── LIVE VOICE CHAT — ALWAYS-LISTENING (JARVIS/ALEXA STYLE) ──
+// VOICE button toggles always-listening mode. VAD auto-detects speech.
+// Pipeline: detect speech → record → STT → streaming chat → TTS → back to listening.
+let _vStream=null,_vAnalyser=null,_vAudioCtx=null
+let _vState='off' // off, listening, recording, transcribing, thinking, speaking
+let _vRecorder=null,_vChunks=[],_vAnimFrame=null
+let _vSpeechStart=0,_vSilenceStart=0,_vVadFrame=null
+const _V_SPEECH_THRESHOLD=12   // amplitude to detect speech (0-255 scale)
+const _V_SILENCE_MS=1500       // ms of silence before auto-send
+const _V_MIN_SPEECH_MS=400     // minimum speech duration to avoid false triggers
+
+function _vSetState(state,detail){
+  _vState=state
   const btn=document.getElementById('btn-voice')
   const st=document.getElementById('voice-status')
+  const ov=document.getElementById('voice-overlay')
   btn.className='tb-btn'
-  switch(_voiceState){
+  const base='-webkit-app-region:no-drag;'
+  switch(state){
     case 'off':
-      btn.textContent='VOICE';btn.style.cssText='-webkit-app-region:no-drag'
-      st.textContent='';document.getElementById('voice-overlay').style.display='none'
+      btn.textContent='VOICE';btn.style.cssText=base
+      st.textContent='';ov.style.display='none'
+      break
+    case 'listening':
+      btn.textContent='VOICE ●';btn.style.cssText=base+'border-color:var(--teal);color:var(--teal);background:rgba(0,212,184,0.1)'
+      st.textContent='LISTENING...';ov.style.display='flex'
       break
     case 'recording':
-      btn.textContent='● RECORDING';btn.classList.add('active')
-      btn.style.cssText='-webkit-app-region:no-drag;border-color:var(--danger);color:var(--danger);background:rgba(184,58,58,0.15)'
-      st.textContent='CLICK VOICE TO SEND';document.getElementById('voice-overlay').style.display='flex'
+      btn.textContent='● REC';btn.style.cssText=base+'border-color:var(--danger);color:var(--danger);background:rgba(184,58,58,0.15);animation:pulse 1s infinite'
+      st.textContent='SPEAKING DETECTED...'
       break
-    case 'processing':
-      btn.textContent='PROCESSING...';btn.classList.add('active')
-      btn.style.cssText='-webkit-app-region:no-drag;border-color:var(--amber);color:var(--amber);background:rgba(200,137,58,0.1)'
-      st.textContent='TRANSCRIBING + THINKING...'
+    case 'transcribing':
+      btn.textContent='STT...';btn.style.cssText=base+'border-color:var(--amber);color:var(--amber);background:rgba(200,137,58,0.1)'
+      st.textContent='TRANSCRIBING...'
       break
-    case 'playing':
-      btn.textContent='▶ E3N';btn.classList.add('active')
-      btn.style.cssText='-webkit-app-region:no-drag;border-color:var(--teal);color:var(--teal);background:rgba(0,212,184,0.15)'
+    case 'thinking':
+      btn.textContent='THINKING';btn.style.cssText=base+'border-color:var(--amber);color:var(--amber);background:rgba(200,137,58,0.1)'
+      st.textContent=detail||'E3N THINKING...'
+      break
+    case 'speaking':
+      btn.textContent='▶ E3N';btn.style.cssText=base+'border-color:var(--teal);color:var(--teal);background:rgba(0,212,184,0.15)'
       st.textContent='E3N SPEAKING...'
       break
   }
 }
 async function toggleVoice(){
-  if(_voiceState==='processing'||_voiceState==='playing')return // busy
-  if(_voiceState==='recording'){
-    // Stop recording and send
-    if(_voiceRecorder&&_voiceRecorder.state==='recording')_voiceRecorder.stop()
+  if(_vState!=='off'&&_vState!=='listening'){
+    // If busy, force stop everything and go to off
+    _vStopAll()
     return
   }
-  if(_voiceState==='off'){
-    // Acquire mic and start recording
-    try{
-      const vs=await(await fetch(API+'/voice/status')).json()
-      if(!vs.enabled){addLine('','Voice module disabled — set VOICE_ENABLED=true in .env','dim','meta');return}
-    }catch(e){addLine('','Voice subsystem unreachable','dim','meta');return}
-    try{
-      if(_voiceStream){_voiceStream.getTracks().forEach(t=>t.stop())}
-      const deviceId=_cfgSettings.voiceInputDevice||undefined
-      const constraints={audio:deviceId?{deviceId:{exact:deviceId}}:true}
-      _voiceStream=await navigator.mediaDevices.getUserMedia(constraints)
-    }catch(e){addLine('','Microphone access denied: '+e.message+' — check Settings > Audio Devices','dim','meta');return}
-    // Start recording
-    _voiceChunks=[]
-    try{
-      _voiceRecorder=new MediaRecorder(_voiceStream,{mimeType:'audio/webm'})
-    }catch(e){
-      try{_voiceRecorder=new MediaRecorder(_voiceStream)}
-      catch(e2){addLine('','MediaRecorder not supported','dim','meta');return}
-    }
-    _voiceRecorder.ondataavailable=e=>{if(e.data.size>0)_voiceChunks.push(e.data)}
-    _voiceRecorder.onstop=()=>{
-      if(_voiceChunks.length===0){_voiceState='off';_voiceUpdateBtn();return}
-      const blob=new Blob(_voiceChunks,{type:_voiceRecorder.mimeType||'audio/webm'})
-      _voiceState='processing';_voiceUpdateBtn()
-      voiceSend(blob)
-    }
-    _voiceRecorder.start()
-    _voiceState='recording';_voiceUpdateBtn()
-    addLine('','Recording... click VOICE or press Space when done','dim','meta')
+  if(_vState==='listening'){
+    // Turn off
+    _vStopAll()
+    addLine('','Voice mode OFF','dim','meta')
     return
   }
-}
-async function voiceSend(blob){
+  // Turn on — acquire mic and start listening
   try{
-    const params=[]
-    if(_cfgSettings.ttsVoice)params.push('voice='+encodeURIComponent(_cfgSettings.ttsVoice))
-    if(_cfgSettings.ttsRate)params.push('rate='+encodeURIComponent(_cfgSettings.ttsRate))
-    const qs=params.length?'?'+params.join('&'):''
-    const res=await fetch(API+'/voice/chat'+qs,{method:'POST',body:blob,headers:{'Content-Type':'application/octet-stream'}})
-    const d=await res.json()
-    if(d.error){addLine('','Voice error: '+d.error,'dim','meta');_voiceState='off';_voiceUpdateBtn();return}
-    if(d.stt&&d.stt.text)addLine('&gt;',d.stt.text,'','user')
-    if(d.response){
-      const node=addLine('E3N&gt;','','e3n','e3n-msg')
-      node.innerHTML=renderMd(d.response)
-    }
-    // Play TTS audio
-    if(d.tts&&d.tts.audio_base64){
-      const raw=atob(d.tts.audio_base64)
-      const arr=new Uint8Array(raw.length)
-      for(let i=0;i<raw.length;i++)arr[i]=raw.charCodeAt(i)
-      const audioBlob=new Blob([arr],{type:'audio/'+(d.tts.format||'mp3')})
-      const url=URL.createObjectURL(audioBlob)
-      const audio=new Audio(url)
-      const outDevice=_cfgSettings.voiceOutputDevice
-      if(outDevice&&audio.setSinkId)try{await audio.setSinkId(outDevice)}catch(e){}
-      _voiceState='playing';_voiceUpdateBtn()
-      if(typeof aiCore!=='undefined')aiCore.simSpeech=true
-      // Waveform animation
-      try{
-        const playCtx=new AudioContext()
-        if(playCtx.state==='suspended')await playCtx.resume()
-        const mediaSrc=playCtx.createMediaElementSource(audio)
-        const analyser=playCtx.createAnalyser();analyser.fftSize=64
-        mediaSrc.connect(analyser);analyser.connect(playCtx.destination)
-        const buf=new Uint8Array(analyser.frequencyBinCount)
-        function animLoop(){
-          if(!audio.paused&&!audio.ended){
-            analyser.getByteFrequencyData(buf)
-            const amp=buf.reduce((a,b)=>a+b,0)/buf.length/255
-            if(typeof aiCore!=='undefined')aiCore.setSpeechState(true,amp,Array.from(buf.slice(0,32)).map(v=>v/255))
-            _voiceAnimFrame=requestAnimationFrame(animLoop)
-          }
-        }
-        audio.addEventListener('play',animLoop)
-      }catch(e){/* fallback: audio plays without waveform */}
-      audio.onended=()=>{
-        _voiceState='off';_voiceUpdateBtn()
-        if(typeof aiCore!=='undefined'){aiCore.simSpeech=false;aiCore.setSpeechState(false,0,null)}
-        if(_voiceAnimFrame){cancelAnimationFrame(_voiceAnimFrame);_voiceAnimFrame=null}
-        URL.revokeObjectURL(url)
+    const vs=await(await fetch(API+'/voice/status')).json()
+    if(!vs.enabled){addLine('','Voice module disabled — set VOICE_ENABLED=true in .env','dim','meta');return}
+  }catch(e){addLine('','Voice subsystem unreachable','dim','meta');return}
+  try{
+    if(_vStream){_vStream.getTracks().forEach(t=>t.stop())}
+    const deviceId=_cfgSettings.voiceInputDevice||undefined
+    const constraints={audio:deviceId?{deviceId:{exact:deviceId}}:true}
+    _vStream=await navigator.mediaDevices.getUserMedia(constraints)
+  }catch(e){addLine('','Microphone access denied: '+e.message,'dim','meta');return}
+  _vAudioCtx=new AudioContext()
+  if(_vAudioCtx.state==='suspended')await _vAudioCtx.resume()
+  const src=_vAudioCtx.createMediaStreamSource(_vStream)
+  _vAnalyser=_vAudioCtx.createAnalyser()
+  _vAnalyser.fftSize=256
+  src.connect(_vAnalyser)
+  _vSetState('listening')
+  _vStartVAD()
+  addLine('','Voice mode ON — just talk, I\'m listening','dim','meta')
+}
+function _vStopAll(){
+  if(_vVadFrame){cancelAnimationFrame(_vVadFrame);_vVadFrame=null}
+  if(_vRecorder&&_vRecorder.state==='recording')try{_vRecorder.stop()}catch(e){}
+  if(_vStream){_vStream.getTracks().forEach(t=>t.stop());_vStream=null}
+  if(_vAudioCtx){try{_vAudioCtx.close()}catch(e){}_vAudioCtx=null;_vAnalyser=null}
+  if(_vAnimFrame){cancelAnimationFrame(_vAnimFrame);_vAnimFrame=null}
+  if(typeof aiCore!=='undefined'){aiCore.simSpeech=false;aiCore.setSpeechState(false,0,null)}
+  _vState='off';_vSetState('off')
+}
+// ── VAD (Voice Activity Detection) ──
+function _vStartVAD(){
+  const buf=new Uint8Array(_vAnalyser.frequencyBinCount)
+  let speaking=false
+  function tick(){
+    if(_vState!=='listening'&&_vState!=='recording'){return}
+    _vAnalyser.getByteFrequencyData(buf)
+    const amp=buf.reduce((a,b)=>a+b,0)/buf.length
+    const now=Date.now()
+    if(!speaking&&amp>_V_SPEECH_THRESHOLD){
+      // Speech started
+      speaking=true
+      _vSpeechStart=now
+      _vSilenceStart=0
+      if(_vState==='listening')_vStartRecording()
+    }else if(speaking&&amp<=_V_SPEECH_THRESHOLD){
+      if(!_vSilenceStart)_vSilenceStart=now
+      if(now-_vSilenceStart>_V_SILENCE_MS&&now-_vSpeechStart>_V_MIN_SPEECH_MS){
+        // Silence detected after speech — auto-send
+        speaking=false
+        _vSilenceStart=0
+        if(_vRecorder&&_vRecorder.state==='recording')_vRecorder.stop()
+        return // VAD pauses — resumes after response cycle
       }
-      audio.onerror=()=>{addLine('','Audio playback error','dim','meta');_voiceState='off';_voiceUpdateBtn();URL.revokeObjectURL(url)}
-      try{await audio.play()}catch(e){addLine('','Audio autoplay blocked','dim','meta');_voiceState='off';_voiceUpdateBtn();URL.revokeObjectURL(url)}
-    }else{
-      if(d.tts&&d.tts.error)addLine('','TTS error: '+d.tts.error,'dim','meta')
-      _voiceState='off';_voiceUpdateBtn()
+    }else if(speaking&&amp>_V_SPEECH_THRESHOLD){
+      _vSilenceStart=0 // reset silence timer if speech resumes
     }
+    _vVadFrame=requestAnimationFrame(tick)
+  }
+  _vVadFrame=requestAnimationFrame(tick)
+}
+function _vStartRecording(){
+  _vChunks=[]
+  try{
+    _vRecorder=new MediaRecorder(_vStream,{mimeType:'audio/webm'})
   }catch(e){
-    addLine('','Voice chat error: '+e.message,'dim','meta')
-    _voiceState='off';_voiceUpdateBtn()
+    try{_vRecorder=new MediaRecorder(_vStream)}catch(e2){return}
+  }
+  _vRecorder.ondataavailable=e=>{if(e.data.size>0)_vChunks.push(e.data)}
+  _vRecorder.onstop=()=>{
+    if(_vChunks.length===0){_vSetState('listening');_vStartVAD();return}
+    const blob=new Blob(_vChunks,{type:_vRecorder.mimeType||'audio/webm'})
+    _vProcessSpeech(blob)
+  }
+  _vRecorder.start()
+  _vSetState('recording')
+}
+// ── SPLIT PIPELINE: STT → streaming chat → TTS ──
+async function _vProcessSpeech(blob){
+  _vSetState('transcribing')
+  try{
+    // Step 1: STT — show transcription immediately
+    const sttRes=await fetch(API+'/voice/stt',{method:'POST',body:blob,headers:{'Content-Type':'application/octet-stream'}})
+    const stt=await sttRes.json()
+    if(stt.error||!stt.text||!stt.text.trim()){
+      addLine('','(no speech detected)','dim','meta')
+      _vSetState('listening');_vStartVAD();return
+    }
+    addLine('&gt;',stt.text,'','user')
+    // Step 2: Streaming chat — show response as it arrives
+    _vSetState('thinking')
+    const chatRes=await fetch(API+'/chat',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({message:stt.text})
+    })
+    const reader=chatRes.body.getReader(),dec=new TextDecoder()
+    let chatBuf='',fullResponse='',responseNode=null
+    while(true){
+      const{done,value}=await reader.read()
+      if(done)break
+      chatBuf+=dec.decode(value,{stream:true})
+      const lines=chatBuf.split('\n');chatBuf=lines.pop()||''
+      for(const line of lines){
+        if(!line.trim())continue
+        try{
+          const ev=JSON.parse(line)
+          if(ev.t==='text'){
+            fullResponse+=ev.c
+            if(!responseNode)responseNode=addLine('E3N&gt;','','e3n','e3n-msg')
+            responseNode.textContent=fullResponse
+            tLog.scrollTop=tLog.scrollHeight
+          }else if(ev.t==='done'){
+            if(responseNode)responseNode.innerHTML=renderMd(fullResponse)
+            if(ev.turns)updateHistoryCounter(ev.turns)
+          }else if(ev.t==='route'){
+            _vSetState('thinking','routing → '+ev.model)
+          }
+        }catch(pe){}
+      }
+    }
+    if(!fullResponse){_vSetState('listening');_vStartVAD();return}
+    // Step 3: TTS — synthesize and play
+    _vSetState('speaking')
+    const ttsParams=[]
+    if(_cfgSettings.ttsVoice)ttsParams.push('voice='+encodeURIComponent(_cfgSettings.ttsVoice))
+    if(_cfgSettings.ttsRate)ttsParams.push('rate='+encodeURIComponent(_cfgSettings.ttsRate))
+    const ttsRes=await fetch(API+'/voice/tts',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({text:fullResponse,voice:_cfgSettings.ttsVoice||null,rate:_cfgSettings.ttsRate||null})
+    })
+    if(!ttsRes.ok){_vSetState('listening');_vStartVAD();return}
+    const audioData=await ttsRes.arrayBuffer()
+    if(!audioData.byteLength){_vSetState('listening');_vStartVAD();return}
+    const audioBlob=new Blob([audioData],{type:ttsRes.headers.get('content-type')||'audio/mp3'})
+    const url=window.URL.createObjectURL(audioBlob)
+    const audio=new Audio(url)
+    const outDevice=_cfgSettings.voiceOutputDevice
+    if(outDevice&&audio.setSinkId)try{await audio.setSinkId(outDevice)}catch(e){}
+    if(typeof aiCore!=='undefined')aiCore.simSpeech=true
+    // Waveform animation
+    try{
+      const playCtx=new AudioContext()
+      if(playCtx.state==='suspended')await playCtx.resume()
+      const mediaSrc=playCtx.createMediaElementSource(audio)
+      const analyser=playCtx.createAnalyser();analyser.fftSize=64
+      mediaSrc.connect(analyser);analyser.connect(playCtx.destination)
+      const buf=new Uint8Array(analyser.frequencyBinCount)
+      function animLoop(){
+        if(!audio.paused&&!audio.ended){
+          analyser.getByteFrequencyData(buf)
+          const amp=buf.reduce((a,b)=>a+b,0)/buf.length/255
+          if(typeof aiCore!=='undefined')aiCore.setSpeechState(true,amp,Array.from(buf.slice(0,32)).map(v=>v/255))
+          _vAnimFrame=requestAnimationFrame(animLoop)
+        }
+      }
+      audio.addEventListener('play',animLoop)
+    }catch(e){}
+    audio.onended=()=>{
+      if(typeof aiCore!=='undefined'){aiCore.simSpeech=false;aiCore.setSpeechState(false,0,null)}
+      if(_vAnimFrame){cancelAnimationFrame(_vAnimFrame);_vAnimFrame=null}
+      window.URL.revokeObjectURL(url)
+      // Auto-cycle back to listening
+      if(_vState==='speaking'&&_vStream){_vSetState('listening');_vStartVAD()}
+      else{_vSetState('off')}
+    }
+    audio.onerror=()=>{window.URL.revokeObjectURL(url);_vSetState('listening');_vStartVAD()}
+    try{await audio.play()}catch(e){_vSetState('listening');_vStartVAD()}
+  }catch(e){
+    addLine('','Voice error: '+e.message,'dim','meta')
+    if(_vStream){_vSetState('listening');_vStartVAD()}else{_vSetState('off')}
   }
 }
-// Space bar shortcut: same as clicking VOICE
-document.addEventListener('keydown',e=>{
-  if(e.code==='Space'&&document.activeElement.tagName!=='TEXTAREA'&&document.activeElement.tagName!=='INPUT'){
-    if(_voiceState==='off'||_voiceState==='recording'){e.preventDefault();toggleVoice()}
-  }
-})
 
 </script>
 <div id="voice-overlay" style="display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:600;flex-direction:column;align-items:center;gap:4px">
