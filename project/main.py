@@ -5,6 +5,7 @@ from fastapi.responses import StreamingResponse, FileResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from typing import Optional
 import httpx
 import json
 import re
@@ -2064,8 +2065,8 @@ def training_ab_eval(req: ABEvalRequest):
 
 class TTSRequest(BaseModel):
     text: str
-    voice: str = None
-    rate: str = None
+    voice: Optional[str] = None
+    rate: Optional[str] = None
 
 
 @app.get("/voice/status")

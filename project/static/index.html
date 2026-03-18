@@ -1696,7 +1696,16 @@ async function toggleVoice(){
   _vAnalyser.fftSize=256
   src.connect(_vAnalyser)
   // Pre-create playback AudioContext on user gesture (required for Electron autoplay)
-  await _vEnsurePlayCtx()
+  const pCtx=await _vEnsurePlayCtx()
+  // Play a brief confirmation tone so user knows audio output works
+  try{
+    const osc=pCtx.createOscillator();const g=pCtx.createGain()
+    osc.connect(g);g.connect(pCtx.destination)
+    osc.frequency.value=880;g.gain.value=0.15
+    g.gain.setTargetAtTime(0,pCtx.currentTime+0.1,0.05)
+    osc.start(pCtx.currentTime);osc.stop(pCtx.currentTime+0.2)
+    console.log('[VOICE] Audio confirmed — played activation beep')
+  }catch(e){console.error('[VOICE] Audio output test failed:',e)}
   _vSetState('listening')
   _vStartVAD()
   addLine('','Voice mode ON — just talk, I\'m listening','dim','meta')
@@ -1714,6 +1723,7 @@ function _vStopAll(){
 }
 // ── VAD (Voice Activity Detection) ──
 function _vStartVAD(){
+  if(!_vAnalyser){console.warn('[VOICE] No analyser, cannot start VAD');return}
   const buf=new Uint8Array(_vAnalyser.frequencyBinCount)
   let speaking=false
   function tick(){
@@ -1761,9 +1771,79 @@ function _vStartRecording(){
   _vRecorder.start()
   _vSetState('recording')
 }
+// ── TTS PLAYBACK — tries 3 methods until one works ──
+async function _vPlayTTS(text){
+  const _vResume=()=>{
+    if(typeof aiCore!=='undefined'){aiCore.simSpeech=false;aiCore.setSpeechState(false,0,null)}
+    if(_vState==='speaking'&&_vStream){_vSetState('listening');_vStartVAD()}
+    else{_vSetState('off')}
+  }
+  try{
+    // Fetch TTS audio
+    const ttsBody={text:text}
+    if(_cfgSettings.ttsVoice)ttsBody.voice=_cfgSettings.ttsVoice
+    if(_cfgSettings.ttsRate)ttsBody.rate=_cfgSettings.ttsRate
+    const ttsRes=await fetch(API+'/voice/tts',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(ttsBody)
+    })
+    if(!ttsRes.ok){addLine('','[voice] TTS HTTP '+ttsRes.status,'dim','meta');_vResume();return}
+    const raw=await ttsRes.arrayBuffer()
+    if(!raw.byteLength){_vResume();return}
+    if(typeof aiCore!=='undefined')aiCore.simSpeech=true
+
+    // Method 1: AudioContext.decodeAudioData (best for Electron)
+    let played=false
+    try{
+      const ctx=await _vEnsurePlayCtx()
+      const buf=await ctx.decodeAudioData(raw.slice(0))
+      const src=ctx.createBufferSource()
+      src.buffer=buf;src.connect(ctx.destination)
+      src.onended=_vResume
+      src.start(0);played=true
+      console.log('[VOICE] Method 1 OK: AudioContext, '+buf.duration.toFixed(1)+'s')
+    }catch(e1){console.warn('[VOICE] Method 1 fail:',e1.message)}
+
+    // Method 2: Blob URL + Audio element
+    if(!played){
+      try{
+        const blob=new Blob([raw],{type:'audio/mpeg'})
+        const url=URL.createObjectURL(blob)
+        const a=new Audio(url);a.volume=1.0
+        a.onended=()=>{URL.revokeObjectURL(url);_vResume()}
+        a.onerror=()=>{URL.revokeObjectURL(url)}
+        await a.play();played=true
+        console.log('[VOICE] Method 2 OK: Audio element blob URL')
+      }catch(e2){console.warn('[VOICE] Method 2 fail:',e2.message)}
+    }
+
+    // Method 3: Base64 data URI (most compatible, works everywhere)
+    if(!played){
+      try{
+        const bytes=new Uint8Array(raw)
+        let binary='';for(let i=0;i<bytes.length;i++)binary+=String.fromCharCode(bytes[i])
+        const b64=btoa(binary)
+        const a=new Audio('data:audio/mpeg;base64,'+b64)
+        a.volume=1.0;a.onended=_vResume
+        await a.play();played=true
+        console.log('[VOICE] Method 3 OK: data URI')
+      }catch(e3){console.warn('[VOICE] Method 3 fail:',e3.message)}
+    }
+
+    if(!played){
+      addLine('','[voice] All audio methods failed — check audio output device in Settings','dim','meta')
+      _vResume()
+    }
+  }catch(e){
+    addLine('','[voice] TTS error: '+e.message,'dim','meta')
+    if(typeof aiCore!=='undefined'){aiCore.simSpeech=false}
+    if(_vStream){_vSetState('listening');_vStartVAD()}else{_vSetState('off')}
+  }
+}
 // ── SPLIT PIPELINE: STT → streaming chat → TTS ──
 async function _vProcessSpeech(blob){
   _vSetState('transcribing')
+  console.log('[VOICE] Processing speech blob:',blob.size,'bytes')
   try{
     // Step 1: STT — show transcription immediately
     const sttRes=await fetch(API+'/voice/stt',{method:'POST',body:blob,headers:{'Content-Type':'application/octet-stream'}})
@@ -1774,6 +1854,7 @@ async function _vProcessSpeech(blob){
     if(stt.error||!sttText||sttText.length<3||_whisperJunk.test(sttText)){
       _vSetState('listening');_vStartVAD();return
     }
+    console.log('[VOICE] STT result:',sttText)
     addLine('&gt;',sttText,'','user')
     // Step 2: Streaming chat — show response as it arrives
     _vSetState('thinking')
@@ -1807,57 +1888,10 @@ async function _vProcessSpeech(blob){
       }
     }
     if(!fullResponse){_vSetState('listening');_vStartVAD();return}
-    // Step 3: TTS — synthesize and play via AudioContext (most reliable in Electron)
+    // Step 3: TTS — synthesize and play
+    addLine('','[voice] Speaking...','dim','meta')
     _vSetState('speaking')
-    const ttsRes=await fetch(API+'/voice/tts',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({text:fullResponse,voice:_cfgSettings.ttsVoice||null,rate:_cfgSettings.ttsRate||null})
-    })
-    if(!ttsRes.ok){
-      addLine('','TTS failed: HTTP '+ttsRes.status,'dim','meta')
-      if(_vStream){_vSetState('listening');_vStartVAD()}else{_vSetState('off')};return
-    }
-    const audioData=await ttsRes.arrayBuffer()
-    if(!audioData.byteLength){
-      if(_vStream){_vSetState('listening');_vStartVAD()}else{_vSetState('off')};return
-    }
-    if(typeof aiCore!=='undefined')aiCore.simSpeech=true
-    // Primary method: decode + play via AudioContext (bypasses <audio> autoplay restrictions)
-    try{
-      const ctx=await _vEnsurePlayCtx()
-      const audioBuffer=await ctx.decodeAudioData(audioData.slice(0))
-      const source=ctx.createBufferSource()
-      source.buffer=audioBuffer
-      // Connect to output device if set, otherwise default destination
-      source.connect(ctx.destination)
-      source.onended=()=>{
-        if(typeof aiCore!=='undefined'){aiCore.simSpeech=false;aiCore.setSpeechState(false,0,null)}
-        if(_vState==='speaking'&&_vStream){_vSetState('listening');_vStartVAD()}
-        else{_vSetState('off')}
-      }
-      source.start(0)
-    }catch(decodeErr){
-      // Fallback: try <audio> element if AudioContext decode fails
-      try{
-        const blob=new Blob([audioData],{type:ttsRes.headers.get('content-type')||'audio/mp3'})
-        const url=URL.createObjectURL(blob)
-        const audio=new Audio(url)
-        audio.volume=1.0
-        const outDevice=_cfgSettings.voiceOutputDevice
-        if(outDevice&&audio.setSinkId)try{await audio.setSinkId(outDevice)}catch(e){}
-        audio.onended=()=>{
-          if(typeof aiCore!=='undefined'){aiCore.simSpeech=false;aiCore.setSpeechState(false,0,null)}
-          URL.revokeObjectURL(url)
-          if(_vState==='speaking'&&_vStream){_vSetState('listening');_vStartVAD()}
-          else{_vSetState('off')}
-        }
-        audio.onerror=()=>{URL.revokeObjectURL(url);if(_vStream){_vSetState('listening');_vStartVAD()}else{_vSetState('off')}}
-        await audio.play()
-      }catch(playErr){
-        addLine('','Audio play failed: '+playErr.message+' (try: '+decodeErr.message+')','dim','meta')
-        if(_vStream){_vSetState('listening');_vStartVAD()}else{_vSetState('off')}
-      }
-    }
+    await _vPlayTTS(fullResponse)
   }catch(e){
     addLine('','Voice error: '+e.message,'dim','meta')
     if(_vStream){_vSetState('listening');_vStartVAD()}else{_vSetState('off')}
