@@ -185,13 +185,14 @@ During active sessions, queries are classified into 4 categories with tailored p
 | `telemetry_debrief` | "full race analysis" | Deep analysis, no time pressure |
 
 ### Training Pipeline
-Progressive improvement loop: **use E3N → auto-capture → accumulate dataset → QLoRA fine-tune → deploy → repeat.**
+Two improvement paths: **RAG knowledge enrichment** (preferred for 3B) and **QLoRA fine-tuning** (for larger datasets).
 
-- **QLoRA**: 4-bit training on Qwen2.5-3B (~6-7GB VRAM) via PEFT/TRL
-- **GGUF export**: Merge adapter → convert to GGUF Q4_K_M → register in Ollama
+- **Knowledge enrichment**: 8 reference documents (143 expert examples) covering anti-hallucination, engineering, race strategy, data interpretation, personality, MechE, reasoning, and race simulations. Ingested into ChromaDB, retrieved via RAG at query time
+- **QLoRA**: 4-bit training on Qwen2.5-3B (~6-7GB VRAM) via PEFT/TRL — full pipeline verified end-to-end (LoRA → merge → GGUF Q4_K_M → Ollama registration)
 - **A/B evaluation**: Compare two models on a dataset with latency + quality metrics
 - **Auto-capture**: Good exchanges automatically saved; racing exchanges routed to `e3n-racing` dataset with RAG context
 - **Safety**: Blocked during racing sessions or when sim is running; cancellable mid-training
+- **Finding**: RAG enrichment outperforms LoRA on 3B models with small datasets (143 examples) — model retains instruction-following behavior while gaining expert reference context
 
 ### Voice Module
 - **STT**: faster-whisper (CTranslate2) — GPU or CPU, VRAM-aware

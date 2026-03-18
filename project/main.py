@@ -1953,8 +1953,9 @@ class DatasetCreate(BaseModel):
     name: str
 
 class ExampleAdd(BaseModel):
-    input: str
+    input: Optional[str] = ""
     output: str
+    instruction: Optional[str] = ""
     category: str = "general"
 
 class ExportRequest(BaseModel):
@@ -1988,7 +1989,11 @@ def training_get_dataset(name: str):
 def training_add_example(name: str, req: ExampleAdd):
     if not TRAINING_AVAILABLE:
         return {"error": "Training system unavailable"}
-    return add_example(name, req.input, req.output, req.category)
+    # Combine instruction + input for Alpaca-style training
+    input_text = req.input or ""
+    if req.instruction:
+        input_text = req.instruction + ("\n" + input_text if input_text else "")
+    return add_example(name, input_text, req.output, req.category)
 
 @app.delete("/training/datasets/{name}/{idx}")
 def training_remove_example(name: str, idx: int):

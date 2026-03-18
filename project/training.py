@@ -142,8 +142,8 @@ def add_example(name: str, input_text: str, output_text: str, category: str = "g
     path = _dataset_path(name)
     if not os.path.exists(path):
         return {"status": "error", "reason": "Dataset not found"}
-    if not input_text.strip() or not output_text.strip():
-        return {"status": "error", "reason": "Input and output cannot be empty"}
+    if not output_text.strip():
+        return {"status": "error", "reason": "Output cannot be empty"}
     example = {
         "input": input_text.strip(),
         "output": output_text.strip(),
@@ -617,11 +617,11 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str):
     import torch
     from transformers import (
         AutoModelForCausalLM, AutoTokenizer,
-        BitsAndBytesConfig, TrainingArguments,
+        BitsAndBytesConfig,
         TrainerCallback,
     )
     from peft import LoraConfig, get_peft_model, PeftModel
-    from trl import SFTTrainer
+    from trl import SFTTrainer, SFTConfig
 
     adapter_dir = os.path.join(ADAPTERS_PATH, output_model)
     merged_dir = os.path.join(ADAPTERS_PATH, f"{output_model}-merged")
@@ -710,7 +710,18 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str):
         # ── Step 7: Training ──
         _update_state(progress=35, status="training (this takes a while)")
 
-        training_args = TrainingArguments(
+        # Format conversations into text using tokenizer's chat template
+        def _format_messages(example):
+            text = tokenizer.apply_chat_template(
+                example["messages"], tokenize=False, add_generation_prompt=False
+            )
+            return {"text": text}
+
+        train_ds = train_ds.map(_format_messages)
+        if eval_ds is not None:
+            eval_ds = eval_ds.map(_format_messages)
+
+        training_args = SFTConfig(
             output_dir=checkpoint_dir,
             num_train_epochs=LORA_EPOCHS,
             per_device_train_batch_size=LORA_BATCH_SIZE,
@@ -726,6 +737,8 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str):
             max_grad_norm=0.3,
             report_to="none",
             dataloader_pin_memory=False,
+            max_length=LORA_MAX_SEQ_LEN,
+            dataset_text_field="text",
         )
 
         # Progress callback — updates training state with step/loss info
@@ -760,9 +773,8 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str):
             model=model,
             train_dataset=train_ds,
             eval_dataset=eval_ds,
-            tokenizer=tokenizer,
+            processing_class=tokenizer,
             args=training_args,
-            max_seq_length=LORA_MAX_SEQ_LEN,
             callbacks=[ProgressCallback(), SafetyCallback()],
         )
 
