@@ -1620,9 +1620,10 @@ let _vStream=null,_vAnalyser=null,_vAudioCtx=null
 let _vState='off' // off, listening, recording, transcribing, thinking, speaking
 let _vRecorder=null,_vChunks=[],_vAnimFrame=null
 let _vSpeechStart=0,_vSilenceStart=0,_vVadFrame=null
-const _V_SPEECH_THRESHOLD=12   // amplitude to detect speech (0-255 scale)
-const _V_SILENCE_MS=1500       // ms of silence before auto-send
-const _V_MIN_SPEECH_MS=400     // minimum speech duration to avoid false triggers
+const _V_SPEECH_THRESHOLD=25   // amplitude to detect speech (0-255 avg, raised to avoid noise triggers)
+const _V_SILENCE_MS=1800       // ms of silence before auto-send
+const _V_MIN_SPEECH_MS=800     // minimum speech duration to avoid false triggers
+const _V_MIN_BLOB_SIZE=5000    // minimum audio blob size in bytes (filters out tiny noise clips)
 
 function _vSetState(state,detail){
   _vState=state
@@ -1742,6 +1743,8 @@ function _vStartRecording(){
   _vRecorder.onstop=()=>{
     if(_vChunks.length===0){_vSetState('listening');_vStartVAD();return}
     const blob=new Blob(_vChunks,{type:_vRecorder.mimeType||'audio/webm'})
+    // Filter out tiny noise clips that cause Whisper hallucinations
+    if(blob.size<_V_MIN_BLOB_SIZE){_vSetState('listening');_vStartVAD();return}
     _vProcessSpeech(blob)
   }
   _vRecorder.start()
@@ -1754,16 +1757,18 @@ async function _vProcessSpeech(blob){
     // Step 1: STT — show transcription immediately
     const sttRes=await fetch(API+'/voice/stt',{method:'POST',body:blob,headers:{'Content-Type':'application/octet-stream'}})
     const stt=await sttRes.json()
-    if(stt.error||!stt.text||!stt.text.trim()){
-      addLine('','(no speech detected)','dim','meta')
+    const sttText=(stt.text||'').trim()
+    // Filter: no speech, too short, or known Whisper hallucination patterns
+    const _whisperJunk=/^(\.+|,+|!+|\?+|you|the|a|i|okay|so|bye|thank you\.?|thanks\.?)$/i
+    if(stt.error||!sttText||sttText.length<3||_whisperJunk.test(sttText)){
       _vSetState('listening');_vStartVAD();return
     }
-    addLine('&gt;',stt.text,'','user')
+    addLine('&gt;',sttText,'','user')
     // Step 2: Streaming chat — show response as it arrives
     _vSetState('thinking')
     const chatRes=await fetch(API+'/chat',{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({message:stt.text})
+      body:JSON.stringify({message:sttText})
     })
     const reader=chatRes.body.getReader(),dec=new TextDecoder()
     let chatBuf='',fullResponse='',responseNode=null
@@ -1808,35 +1813,26 @@ async function _vProcessSpeech(blob){
     const audio=new Audio(url)
     const outDevice=_cfgSettings.voiceOutputDevice
     if(outDevice&&audio.setSinkId)try{await audio.setSinkId(outDevice)}catch(e){}
+    // Play audio DIRECTLY — no createMediaElementSource (that breaks audio output)
+    // Use simSpeech flag for sphere animation instead of real waveform analysis
     if(typeof aiCore!=='undefined')aiCore.simSpeech=true
-    // Waveform animation
-    try{
-      const playCtx=new AudioContext()
-      if(playCtx.state==='suspended')await playCtx.resume()
-      const mediaSrc=playCtx.createMediaElementSource(audio)
-      const analyser=playCtx.createAnalyser();analyser.fftSize=64
-      mediaSrc.connect(analyser);analyser.connect(playCtx.destination)
-      const buf=new Uint8Array(analyser.frequencyBinCount)
-      function animLoop(){
-        if(!audio.paused&&!audio.ended){
-          analyser.getByteFrequencyData(buf)
-          const amp=buf.reduce((a,b)=>a+b,0)/buf.length/255
-          if(typeof aiCore!=='undefined')aiCore.setSpeechState(true,amp,Array.from(buf.slice(0,32)).map(v=>v/255))
-          _vAnimFrame=requestAnimationFrame(animLoop)
-        }
-      }
-      audio.addEventListener('play',animLoop)
-    }catch(e){}
     audio.onended=()=>{
       if(typeof aiCore!=='undefined'){aiCore.simSpeech=false;aiCore.setSpeechState(false,0,null)}
-      if(_vAnimFrame){cancelAnimationFrame(_vAnimFrame);_vAnimFrame=null}
       window.URL.revokeObjectURL(url)
       // Auto-cycle back to listening
       if(_vState==='speaking'&&_vStream){_vSetState('listening');_vStartVAD()}
       else{_vSetState('off')}
     }
-    audio.onerror=()=>{window.URL.revokeObjectURL(url);_vSetState('listening');_vStartVAD()}
-    try{await audio.play()}catch(e){_vSetState('listening');_vStartVAD()}
+    audio.onerror=(e)=>{
+      addLine('','TTS playback error: '+(e.message||'unknown'),'dim','meta')
+      window.URL.revokeObjectURL(url)
+      if(_vStream){_vSetState('listening');_vStartVAD()}else{_vSetState('off')}
+    }
+    try{await audio.play()}
+    catch(e){
+      addLine('','Audio play failed: '+e.message,'dim','meta')
+      if(_vStream){_vSetState('listening');_vStartVAD()}else{_vSetState('off')}
+    }
   }catch(e){
     addLine('','Voice error: '+e.message,'dim','meta')
     if(_vStream){_vSetState('listening');_vStartVAD()}else{_vSetState('off')}
