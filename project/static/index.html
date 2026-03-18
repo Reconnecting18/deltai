@@ -1619,20 +1619,24 @@ toggleWin=function(name){
 }
 
 // ── LIVE VOICE CHAT ──
+// Click-to-toggle: click MIC to start recording, click again (or press Space) to stop and send
 let _voiceMode=false,_voiceRecording=false,_voiceStream=null,_voiceRecorder=null,_voiceChunks=[]
-let _voiceAudioCtx=null,_voiceAnalyser=null,_voiceAnimFrame=null
+let _voiceAudioCtx=null,_voiceAnalyser=null,_voiceAnimFrame=null,_voiceBusy=false
 async function toggleVoice(){
   const btn=document.getElementById('btn-voice')
   const overlay=document.getElementById('voice-overlay')
   if(_voiceMode){
+    // Stop any active recording first
+    if(_voiceRecording)voiceStopRecording()
     _voiceMode=false
     btn.classList.remove('active')
     overlay.style.display='none'
     if(_voiceStream){_voiceStream.getTracks().forEach(t=>t.stop());_voiceStream=null}
-    if(_voiceAudioCtx){_voiceAudioCtx.close();_voiceAudioCtx=null;_voiceAnalyser=null}
+    if(_voiceAudioCtx){try{_voiceAudioCtx.close()}catch(e){}_voiceAudioCtx=null;_voiceAnalyser=null}
     if(_voiceAnimFrame){cancelAnimationFrame(_voiceAnimFrame);_voiceAnimFrame=null}
     if(typeof aiCore!=='undefined')aiCore.setSpeechState(false,0,null)
-    document.getElementById('voice-status').textContent='VOICE MODE'
+    document.getElementById('voice-status').textContent='VOICE OFF'
+    addLine('','Voice mode deactivated','dim','meta')
     return
   }
   // Check voice subsystem
@@ -1647,53 +1651,64 @@ async function toggleVoice(){
     _voiceStream=await navigator.mediaDevices.getUserMedia(constraints)
   }catch(e){addLine('','Microphone access denied: '+e.message+' — check Settings > Audio Devices','dim','meta');return}
   _voiceAudioCtx=new AudioContext()
-  const src=_voiceAudioCtx.createMediaStreamSource(_voiceStream)
-  _voiceAnalyser=_voiceAudioCtx.createAnalyser()
-  _voiceAnalyser.fftSize=64
-  src.connect(_voiceAnalyser)
+  if(_voiceAudioCtx.state==='suspended')await _voiceAudioCtx.resume()
   _voiceMode=true
   btn.classList.add('active')
   overlay.style.display='flex'
-  document.getElementById('voice-status').textContent='VOICE MODE'
-  addLine('','Voice mode activated — hold MIC or press Space to talk','dim','meta')
+  document.getElementById('voice-status').textContent='READY — CLICK MIC TO TALK'
+  addLine('','Voice mode ON — click MIC or press Space to talk, click again to send','dim','meta')
 }
-function voicePTTDown(){
-  if(!_voiceMode||_voiceRecording)return
+function voiceToggleRecord(){
+  if(!_voiceMode||_voiceBusy)return
+  if(_voiceRecording){voiceStopRecording()}
+  else{voiceStartRecording()}
+}
+function voiceStartRecording(){
+  if(!_voiceMode||_voiceRecording||_voiceBusy)return
   _voiceRecording=true;_voiceChunks=[]
   const ptt=document.getElementById('voice-ptt')
   const st=document.getElementById('voice-status')
   try{
     _voiceRecorder=new MediaRecorder(_voiceStream,{mimeType:'audio/webm'})
   }catch(e){
-    _voiceRecorder=new MediaRecorder(_voiceStream)
+    try{_voiceRecorder=new MediaRecorder(_voiceStream)}
+    catch(e2){addLine('','MediaRecorder not supported','dim','meta');_voiceRecording=false;return}
   }
   _voiceRecorder.ondataavailable=e=>{if(e.data.size>0)_voiceChunks.push(e.data)}
   _voiceRecorder.onstop=()=>{
-    if(_voiceChunks.length===0){_voiceRecording=false;ptt.className='';st.textContent='VOICE MODE';return}
+    if(_voiceChunks.length===0){_voiceRecording=false;ptt.className='';ptt.textContent='MIC';st.textContent='READY — CLICK MIC TO TALK';return}
     const blob=new Blob(_voiceChunks,{type:_voiceRecorder.mimeType||'audio/webm'})
+    _voiceBusy=true
     ptt.className='processing';ptt.textContent='...';st.textContent='PROCESSING...'
     voiceSend(blob)
   }
   _voiceRecorder.start()
-  ptt.className='recording';ptt.textContent='REC';st.textContent='LISTENING...'
+  ptt.className='recording';ptt.textContent='● REC';st.textContent='RECORDING — CLICK MIC TO SEND'
 }
-function voicePTTUp(){
+function voiceStopRecording(){
   if(!_voiceRecording||!_voiceRecorder)return
   _voiceRecording=false
   if(_voiceRecorder.state==='recording')_voiceRecorder.stop()
+}
+function _voiceReset(){
+  const ptt=document.getElementById('voice-ptt')
+  const st=document.getElementById('voice-status')
+  ptt.className='';ptt.textContent='MIC';st.textContent='READY — CLICK MIC TO TALK'
+  _voiceBusy=false
+  if(typeof aiCore!=='undefined'){aiCore.simSpeech=false;aiCore.setSpeechState(false,0,null)}
+  if(_voiceAnimFrame){cancelAnimationFrame(_voiceAnimFrame);_voiceAnimFrame=null}
 }
 async function voiceSend(blob){
   const ptt=document.getElementById('voice-ptt')
   const st=document.getElementById('voice-status')
   try{
-    const ttsVoice=_cfgSettings.ttsVoice||undefined
-    const ttsRate=_cfgSettings.ttsRate||undefined
-    // Build form data with optional TTS params
-    const formData=new FormData()
-    formData.append('audio',blob,'recording.webm')
-    const res=await fetch(API+'/voice/chat'+(ttsVoice||ttsRate?'?'+(ttsVoice?'voice='+encodeURIComponent(ttsVoice)+'&':'')+(ttsRate?'rate='+encodeURIComponent(ttsRate):''):''),{method:'POST',body:blob,headers:{'Content-Type':'application/octet-stream'}})
+    const params=[]
+    if(_cfgSettings.ttsVoice)params.push('voice='+encodeURIComponent(_cfgSettings.ttsVoice))
+    if(_cfgSettings.ttsRate)params.push('rate='+encodeURIComponent(_cfgSettings.ttsRate))
+    const qs=params.length?'?'+params.join('&'):''
+    const res=await fetch(API+'/voice/chat'+qs,{method:'POST',body:blob,headers:{'Content-Type':'application/octet-stream'}})
     const d=await res.json()
-    if(d.error){addLine('','Voice error: '+d.error,'dim','meta');ptt.className='';ptt.textContent='MIC';st.textContent='VOICE MODE';return}
+    if(d.error){addLine('','Voice error: '+d.error,'dim','meta');_voiceReset();return}
     // Show transcription and response in terminal
     if(d.stt&&d.stt.text)addLine('&gt;',d.stt.text,'','user')
     if(d.response){
@@ -1711,15 +1726,18 @@ async function voiceSend(blob){
       // Set output device if configured
       const outDevice=_cfgSettings.voiceOutputDevice
       if(outDevice&&audio.setSinkId)try{await audio.setSinkId(outDevice)}catch(e){}
-      ptt.className='playing';ptt.textContent='▶';st.textContent='SPEAKING...'
+      ptt.className='playing';ptt.textContent='▶';st.textContent='E3N SPEAKING...'
       if(typeof aiCore!=='undefined')aiCore.simSpeech=true
-      // Waveform animation during playback
+      // Waveform animation during playback (with fallback)
+      let waveformActive=false
       try{
-        const playCtx=_voiceAudioCtx||new AudioContext()
+        const playCtx=new AudioContext()
+        if(playCtx.state==='suspended')await playCtx.resume()
         const mediaSrc=playCtx.createMediaElementSource(audio)
         const analyser=playCtx.createAnalyser();analyser.fftSize=64
         mediaSrc.connect(analyser);analyser.connect(playCtx.destination)
         const buf=new Uint8Array(analyser.frequencyBinCount)
+        waveformActive=true
         function animLoop(){
           if(!audio.paused&&!audio.ended){
             analyser.getByteFrequencyData(buf)
@@ -1728,45 +1746,43 @@ async function voiceSend(blob){
             _voiceAnimFrame=requestAnimationFrame(animLoop)
           }
         }
-        audio.onplay=animLoop
-      }catch(e){/* fallback: no waveform, just simSpeech */}
-      audio.onended=()=>{
-        ptt.className='';ptt.textContent='MIC';st.textContent='VOICE MODE'
-        if(typeof aiCore!=='undefined'){aiCore.simSpeech=false;aiCore.setSpeechState(false,0,null)}
-        if(_voiceAnimFrame){cancelAnimationFrame(_voiceAnimFrame);_voiceAnimFrame=null}
-        URL.revokeObjectURL(url)
+        audio.addEventListener('play',animLoop)
+      }catch(e){
+        // Fallback: play without waveform analysis (audio still plays)
+        waveformActive=false
       }
-      audio.onerror=()=>{ptt.className='';ptt.textContent='MIC';st.textContent='VOICE MODE'}
-      audio.play().catch(()=>{ptt.className='';ptt.textContent='MIC';st.textContent='VOICE MODE'})
-    }else{ptt.className='';ptt.textContent='MIC';st.textContent='VOICE MODE'}
+      audio.onended=()=>{_voiceReset();URL.revokeObjectURL(url)}
+      audio.onerror=(e)=>{addLine('','Audio playback error','dim','meta');_voiceReset();URL.revokeObjectURL(url)}
+      try{
+        await audio.play()
+      }catch(e){
+        addLine('','Audio autoplay blocked — click anywhere first','dim','meta')
+        _voiceReset();URL.revokeObjectURL(url)
+      }
+    }else{
+      if(d.tts&&d.tts.error)addLine('','TTS error: '+d.tts.error,'dim','meta')
+      _voiceReset()
+    }
   }catch(e){
     addLine('','Voice chat error: '+e.message,'dim','meta')
-    ptt.className='';ptt.textContent='MIC';st.textContent='VOICE MODE'
+    _voiceReset()
   }
 }
-// PTT event bindings
-document.getElementById('voice-ptt').addEventListener('mousedown',voicePTTDown)
-document.getElementById('voice-ptt').addEventListener('mouseup',voicePTTUp)
-document.getElementById('voice-ptt').addEventListener('mouseleave',voicePTTUp)
-document.getElementById('voice-ptt').addEventListener('touchstart',e=>{e.preventDefault();voicePTTDown()})
-document.getElementById('voice-ptt').addEventListener('touchend',e=>{e.preventDefault();voicePTTUp()})
-// Space bar push-to-talk
+// Click-to-toggle MIC button
+document.getElementById('voice-ptt').addEventListener('click',voiceToggleRecord)
+// Space bar toggle
 document.addEventListener('keydown',e=>{
-  if(!_voiceMode||_voiceRecording)return
+  if(!_voiceMode||_voiceBusy)return
   if(e.code==='Space'&&document.activeElement.tagName!=='TEXTAREA'&&document.activeElement.tagName!=='INPUT'){
-    e.preventDefault();voicePTTDown()
+    e.preventDefault();voiceToggleRecord()
   }
-})
-document.addEventListener('keyup',e=>{
-  if(!_voiceMode)return
-  if(e.code==='Space'&&_voiceRecording){e.preventDefault();voicePTTUp()}
 })
 
 </script>
 <div id="voice-overlay" style="display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:600;flex-direction:column;align-items:center;gap:8px">
   <div id="voice-status" style="font-family:var(--mono);font-size:10px;letter-spacing:0.15em;color:var(--text2);text-transform:uppercase">VOICE MODE</div>
   <button id="voice-ptt" style="width:64px;height:64px;border-radius:50%;border:2px solid var(--teal2);background:rgba(0,212,184,0.08);color:var(--teal);font-family:var(--mono);font-size:10px;letter-spacing:0.1em;cursor:pointer;transition:all 0.15s;display:flex;align-items:center;justify-content:center;-webkit-app-region:no-drag">MIC</button>
-  <div id="voice-hint" style="font-family:var(--mono);font-size:8px;color:var(--text3);letter-spacing:0.1em">HOLD TO TALK · SPACE</div>
+  <div id="voice-hint" style="font-family:var(--mono);font-size:8px;color:var(--text3);letter-spacing:0.1em">CLICK TO TALK · SPACE</div>
 </div>
 <div id="toast-container"></div>
 </body>
