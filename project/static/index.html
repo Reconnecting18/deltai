@@ -231,11 +231,6 @@ canvas.spark{width:100%;height:28px;display:block}
 .tr-status{font-family:var(--mono);font-size:10px;color:var(--text2)}
 .tr-count{font-family:var(--mono);font-size:10px;color:var(--text2);margin-left:auto}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
-#voice-ptt:hover{border-color:var(--teal);background:rgba(0,212,184,0.12)}
-#voice-ptt.recording{border-color:var(--danger);background:rgba(184,58,58,0.15);color:var(--danger);box-shadow:0 0 20px rgba(184,58,58,0.2);animation:pulse 1s infinite}
-#voice-ptt.processing{border-color:var(--amber);background:rgba(200,137,58,0.1);color:var(--amber);pointer-events:none}
-#voice-ptt.playing{border-color:var(--teal);background:rgba(0,212,184,0.15);color:var(--teal);box-shadow:0 0 20px rgba(0,212,184,0.15)}
-#btn-voice.active{background:rgba(0,212,184,0.15);color:var(--teal);border-color:var(--teal)}
 </style>
 </head>
 <body>
@@ -1619,88 +1614,78 @@ toggleWin=function(name){
 }
 
 // ── LIVE VOICE CHAT ──
-// Click-to-toggle: click MIC to start recording, click again (or press Space) to stop and send
-let _voiceMode=false,_voiceRecording=false,_voiceStream=null,_voiceRecorder=null,_voiceChunks=[]
-let _voiceAudioCtx=null,_voiceAnalyser=null,_voiceAnimFrame=null,_voiceBusy=false
-async function toggleVoice(){
+// Single-button design: VOICE button in header does everything.
+// Click 1: acquire mic + start recording. Click 2: stop + send. Then plays response.
+let _voiceStream=null,_voiceRecorder=null,_voiceChunks=[]
+let _voiceState='off' // off, recording, processing, playing
+let _voiceAnimFrame=null
+function _voiceUpdateBtn(){
   const btn=document.getElementById('btn-voice')
-  const overlay=document.getElementById('voice-overlay')
-  if(_voiceMode){
-    // Stop any active recording first
-    if(_voiceRecording)voiceStopRecording()
-    _voiceMode=false
-    btn.classList.remove('active')
-    overlay.style.display='none'
-    if(_voiceStream){_voiceStream.getTracks().forEach(t=>t.stop());_voiceStream=null}
-    if(_voiceAudioCtx){try{_voiceAudioCtx.close()}catch(e){}_voiceAudioCtx=null;_voiceAnalyser=null}
-    if(_voiceAnimFrame){cancelAnimationFrame(_voiceAnimFrame);_voiceAnimFrame=null}
-    if(typeof aiCore!=='undefined')aiCore.setSpeechState(false,0,null)
-    document.getElementById('voice-status').textContent='VOICE OFF'
-    addLine('','Voice mode deactivated','dim','meta')
+  const st=document.getElementById('voice-status')
+  btn.className='tb-btn'
+  switch(_voiceState){
+    case 'off':
+      btn.textContent='VOICE';btn.style.cssText='-webkit-app-region:no-drag'
+      st.textContent='';document.getElementById('voice-overlay').style.display='none'
+      break
+    case 'recording':
+      btn.textContent='● RECORDING';btn.classList.add('active')
+      btn.style.cssText='-webkit-app-region:no-drag;border-color:var(--danger);color:var(--danger);background:rgba(184,58,58,0.15)'
+      st.textContent='CLICK VOICE TO SEND';document.getElementById('voice-overlay').style.display='flex'
+      break
+    case 'processing':
+      btn.textContent='PROCESSING...';btn.classList.add('active')
+      btn.style.cssText='-webkit-app-region:no-drag;border-color:var(--amber);color:var(--amber);background:rgba(200,137,58,0.1)'
+      st.textContent='TRANSCRIBING + THINKING...'
+      break
+    case 'playing':
+      btn.textContent='▶ E3N';btn.classList.add('active')
+      btn.style.cssText='-webkit-app-region:no-drag;border-color:var(--teal);color:var(--teal);background:rgba(0,212,184,0.15)'
+      st.textContent='E3N SPEAKING...'
+      break
+  }
+}
+async function toggleVoice(){
+  if(_voiceState==='processing'||_voiceState==='playing')return // busy
+  if(_voiceState==='recording'){
+    // Stop recording and send
+    if(_voiceRecorder&&_voiceRecorder.state==='recording')_voiceRecorder.stop()
     return
   }
-  // Check voice subsystem
-  try{
-    const vs=await(await fetch(API+'/voice/status')).json()
-    if(!vs.enabled){addLine('','Voice module disabled — set VOICE_ENABLED=true in .env','dim','meta');return}
-  }catch(e){addLine('','Voice subsystem unreachable','dim','meta');return}
-  // Request mic with selected device
-  try{
-    const deviceId=_cfgSettings.voiceInputDevice||undefined
-    const constraints={audio:deviceId?{deviceId:{exact:deviceId}}:true}
-    _voiceStream=await navigator.mediaDevices.getUserMedia(constraints)
-  }catch(e){addLine('','Microphone access denied: '+e.message+' — check Settings > Audio Devices','dim','meta');return}
-  _voiceAudioCtx=new AudioContext()
-  if(_voiceAudioCtx.state==='suspended')await _voiceAudioCtx.resume()
-  _voiceMode=true
-  btn.classList.add('active')
-  overlay.style.display='flex'
-  document.getElementById('voice-status').textContent='READY — CLICK MIC TO TALK'
-  addLine('','Voice mode ON — click MIC or press Space to talk, click again to send','dim','meta')
-}
-function voiceToggleRecord(){
-  if(!_voiceMode||_voiceBusy)return
-  if(_voiceRecording){voiceStopRecording()}
-  else{voiceStartRecording()}
-}
-function voiceStartRecording(){
-  if(!_voiceMode||_voiceRecording||_voiceBusy)return
-  _voiceRecording=true;_voiceChunks=[]
-  const ptt=document.getElementById('voice-ptt')
-  const st=document.getElementById('voice-status')
-  try{
-    _voiceRecorder=new MediaRecorder(_voiceStream,{mimeType:'audio/webm'})
-  }catch(e){
-    try{_voiceRecorder=new MediaRecorder(_voiceStream)}
-    catch(e2){addLine('','MediaRecorder not supported','dim','meta');_voiceRecording=false;return}
+  if(_voiceState==='off'){
+    // Acquire mic and start recording
+    try{
+      const vs=await(await fetch(API+'/voice/status')).json()
+      if(!vs.enabled){addLine('','Voice module disabled — set VOICE_ENABLED=true in .env','dim','meta');return}
+    }catch(e){addLine('','Voice subsystem unreachable','dim','meta');return}
+    try{
+      if(_voiceStream){_voiceStream.getTracks().forEach(t=>t.stop())}
+      const deviceId=_cfgSettings.voiceInputDevice||undefined
+      const constraints={audio:deviceId?{deviceId:{exact:deviceId}}:true}
+      _voiceStream=await navigator.mediaDevices.getUserMedia(constraints)
+    }catch(e){addLine('','Microphone access denied: '+e.message+' — check Settings > Audio Devices','dim','meta');return}
+    // Start recording
+    _voiceChunks=[]
+    try{
+      _voiceRecorder=new MediaRecorder(_voiceStream,{mimeType:'audio/webm'})
+    }catch(e){
+      try{_voiceRecorder=new MediaRecorder(_voiceStream)}
+      catch(e2){addLine('','MediaRecorder not supported','dim','meta');return}
+    }
+    _voiceRecorder.ondataavailable=e=>{if(e.data.size>0)_voiceChunks.push(e.data)}
+    _voiceRecorder.onstop=()=>{
+      if(_voiceChunks.length===0){_voiceState='off';_voiceUpdateBtn();return}
+      const blob=new Blob(_voiceChunks,{type:_voiceRecorder.mimeType||'audio/webm'})
+      _voiceState='processing';_voiceUpdateBtn()
+      voiceSend(blob)
+    }
+    _voiceRecorder.start()
+    _voiceState='recording';_voiceUpdateBtn()
+    addLine('','Recording... click VOICE or press Space when done','dim','meta')
+    return
   }
-  _voiceRecorder.ondataavailable=e=>{if(e.data.size>0)_voiceChunks.push(e.data)}
-  _voiceRecorder.onstop=()=>{
-    if(_voiceChunks.length===0){_voiceRecording=false;ptt.className='';ptt.textContent='MIC';st.textContent='READY — CLICK MIC TO TALK';return}
-    const blob=new Blob(_voiceChunks,{type:_voiceRecorder.mimeType||'audio/webm'})
-    _voiceBusy=true
-    ptt.className='processing';ptt.textContent='...';st.textContent='PROCESSING...'
-    voiceSend(blob)
-  }
-  _voiceRecorder.start()
-  ptt.className='recording';ptt.textContent='● REC';st.textContent='RECORDING — CLICK MIC TO SEND'
-}
-function voiceStopRecording(){
-  if(!_voiceRecording||!_voiceRecorder)return
-  _voiceRecording=false
-  if(_voiceRecorder.state==='recording')_voiceRecorder.stop()
-}
-function _voiceReset(){
-  const ptt=document.getElementById('voice-ptt')
-  const st=document.getElementById('voice-status')
-  ptt.className='';ptt.textContent='MIC';st.textContent='READY — CLICK MIC TO TALK'
-  _voiceBusy=false
-  if(typeof aiCore!=='undefined'){aiCore.simSpeech=false;aiCore.setSpeechState(false,0,null)}
-  if(_voiceAnimFrame){cancelAnimationFrame(_voiceAnimFrame);_voiceAnimFrame=null}
 }
 async function voiceSend(blob){
-  const ptt=document.getElementById('voice-ptt')
-  const st=document.getElementById('voice-status')
   try{
     const params=[]
     if(_cfgSettings.ttsVoice)params.push('voice='+encodeURIComponent(_cfgSettings.ttsVoice))
@@ -1708,8 +1693,7 @@ async function voiceSend(blob){
     const qs=params.length?'?'+params.join('&'):''
     const res=await fetch(API+'/voice/chat'+qs,{method:'POST',body:blob,headers:{'Content-Type':'application/octet-stream'}})
     const d=await res.json()
-    if(d.error){addLine('','Voice error: '+d.error,'dim','meta');_voiceReset();return}
-    // Show transcription and response in terminal
+    if(d.error){addLine('','Voice error: '+d.error,'dim','meta');_voiceState='off';_voiceUpdateBtn();return}
     if(d.stt&&d.stt.text)addLine('&gt;',d.stt.text,'','user')
     if(d.response){
       const node=addLine('E3N&gt;','','e3n','e3n-msg')
@@ -1723,13 +1707,11 @@ async function voiceSend(blob){
       const audioBlob=new Blob([arr],{type:'audio/'+(d.tts.format||'mp3')})
       const url=URL.createObjectURL(audioBlob)
       const audio=new Audio(url)
-      // Set output device if configured
       const outDevice=_cfgSettings.voiceOutputDevice
       if(outDevice&&audio.setSinkId)try{await audio.setSinkId(outDevice)}catch(e){}
-      ptt.className='playing';ptt.textContent='▶';st.textContent='E3N SPEAKING...'
+      _voiceState='playing';_voiceUpdateBtn()
       if(typeof aiCore!=='undefined')aiCore.simSpeech=true
-      // Waveform animation during playback (with fallback)
-      let waveformActive=false
+      // Waveform animation
       try{
         const playCtx=new AudioContext()
         if(playCtx.state==='suspended')await playCtx.resume()
@@ -1737,7 +1719,6 @@ async function voiceSend(blob){
         const analyser=playCtx.createAnalyser();analyser.fftSize=64
         mediaSrc.connect(analyser);analyser.connect(playCtx.destination)
         const buf=new Uint8Array(analyser.frequencyBinCount)
-        waveformActive=true
         function animLoop(){
           if(!audio.paused&&!audio.ended){
             analyser.getByteFrequencyData(buf)
@@ -1747,42 +1728,34 @@ async function voiceSend(blob){
           }
         }
         audio.addEventListener('play',animLoop)
-      }catch(e){
-        // Fallback: play without waveform analysis (audio still plays)
-        waveformActive=false
+      }catch(e){/* fallback: audio plays without waveform */}
+      audio.onended=()=>{
+        _voiceState='off';_voiceUpdateBtn()
+        if(typeof aiCore!=='undefined'){aiCore.simSpeech=false;aiCore.setSpeechState(false,0,null)}
+        if(_voiceAnimFrame){cancelAnimationFrame(_voiceAnimFrame);_voiceAnimFrame=null}
+        URL.revokeObjectURL(url)
       }
-      audio.onended=()=>{_voiceReset();URL.revokeObjectURL(url)}
-      audio.onerror=(e)=>{addLine('','Audio playback error','dim','meta');_voiceReset();URL.revokeObjectURL(url)}
-      try{
-        await audio.play()
-      }catch(e){
-        addLine('','Audio autoplay blocked — click anywhere first','dim','meta')
-        _voiceReset();URL.revokeObjectURL(url)
-      }
+      audio.onerror=()=>{addLine('','Audio playback error','dim','meta');_voiceState='off';_voiceUpdateBtn();URL.revokeObjectURL(url)}
+      try{await audio.play()}catch(e){addLine('','Audio autoplay blocked','dim','meta');_voiceState='off';_voiceUpdateBtn();URL.revokeObjectURL(url)}
     }else{
       if(d.tts&&d.tts.error)addLine('','TTS error: '+d.tts.error,'dim','meta')
-      _voiceReset()
+      _voiceState='off';_voiceUpdateBtn()
     }
   }catch(e){
     addLine('','Voice chat error: '+e.message,'dim','meta')
-    _voiceReset()
+    _voiceState='off';_voiceUpdateBtn()
   }
 }
-// Click-to-toggle MIC button
-document.getElementById('voice-ptt').addEventListener('click',voiceToggleRecord)
-// Space bar toggle
+// Space bar shortcut: same as clicking VOICE
 document.addEventListener('keydown',e=>{
-  if(!_voiceMode||_voiceBusy)return
   if(e.code==='Space'&&document.activeElement.tagName!=='TEXTAREA'&&document.activeElement.tagName!=='INPUT'){
-    e.preventDefault();voiceToggleRecord()
+    if(_voiceState==='off'||_voiceState==='recording'){e.preventDefault();toggleVoice()}
   }
 })
 
 </script>
-<div id="voice-overlay" style="display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:600;flex-direction:column;align-items:center;gap:8px">
-  <div id="voice-status" style="font-family:var(--mono);font-size:10px;letter-spacing:0.15em;color:var(--text2);text-transform:uppercase">VOICE MODE</div>
-  <button id="voice-ptt" style="width:64px;height:64px;border-radius:50%;border:2px solid var(--teal2);background:rgba(0,212,184,0.08);color:var(--teal);font-family:var(--mono);font-size:10px;letter-spacing:0.1em;cursor:pointer;transition:all 0.15s;display:flex;align-items:center;justify-content:center;-webkit-app-region:no-drag">MIC</button>
-  <div id="voice-hint" style="font-family:var(--mono);font-size:8px;color:var(--text3);letter-spacing:0.1em">CLICK TO TALK · SPACE</div>
+<div id="voice-overlay" style="display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:600;flex-direction:column;align-items:center;gap:4px">
+  <div id="voice-status" style="font-family:var(--mono);font-size:10px;letter-spacing:0.15em;color:var(--text2);text-transform:uppercase;background:var(--glass);backdrop-filter:var(--glass-blur);padding:4px 12px;border-radius:4px;border:1px solid var(--bdr)"></div>
 </div>
 <div id="toast-container"></div>
 </body>
