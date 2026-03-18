@@ -51,19 +51,20 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
+      autoplayPolicy: 'no-user-gesture-required',
     },
     show: false,
   })
 
   mainWindow.webContents.session.clearCache()
 
-  // Grant media permissions (microphone/camera) automatically for localhost
+  // Grant media permissions (microphone/camera/audio) automatically for localhost
   mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
-    const allowed = ['media', 'microphone', 'audioCapture'].includes(permission)
+    const allowed = ['media', 'microphone', 'audioCapture', 'speaker', 'audioOutput'].includes(permission)
     callback(allowed)
   })
   mainWindow.webContents.session.setPermissionCheckHandler((webContents, permission) => {
-    return ['media', 'microphone', 'audioCapture'].includes(permission)
+    return ['media', 'microphone', 'audioCapture', 'speaker', 'audioOutput'].includes(permission)
   })
 
   mainWindow.loadURL(URL)

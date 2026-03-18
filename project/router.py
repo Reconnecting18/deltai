@@ -338,6 +338,8 @@ TELEMETRY_PATTERNS = {
         r"\b(brake temp|brake bias|brake balance)\b",
         r"\b(water temp|oil temp|engine temp)\b",
         r"\b(drs|ers|battery|energy)\b",
+        r"\b(how many laps)\b(?!.{0,15}(tire|tyre|fuel))",
+        r"\b(remaining laps|laps to go)\b",
     ],
     "telemetry_coaching": [
         r"\b(why am i slow|where am i losing|losing time)\b",
@@ -352,8 +354,11 @@ TELEMETRY_PATTERNS = {
         r"\b(tire strategy|tyre strategy|compound|stint)\b",
         r"\b(fuel strategy|fuel save|fuel target|lift.and.coast)\b",
         r"\b(undercut|overcut|gap for pit)\b",
-        r"\b(weather change|rain|dry|inters|wets)\b",
+        r"\b(weather change|weather changing|rain|dry|inters|wets|intermediates)\b",
         r"\b(safety car|vsc|yellow flag)\b",
+        r"\b(damage|hit.*wall|wing damage|puncture|crashed)\b",
+        r"\b(how many laps|laps remaining|laps left).{0,15}(tire|tyre|fuel|stint)\b",
+        r"\b(what tire|what tyre|which compound|which tire)\b",
     ],
     "telemetry_debrief": [
         r"\b(race analysis|race review|race debrief|post.?race)\b",

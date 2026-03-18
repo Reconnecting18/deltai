@@ -2077,6 +2077,18 @@ def voice_status():
     return get_voice_status()
 
 
+@app.post("/voice/warm")
+async def voice_warm():
+    """Pre-warm the Whisper STT model. Call when voice mode activates to avoid cold start."""
+    if not VOICE_AVAILABLE:
+        return {"ok": False, "error": "Voice module not loaded"}
+    try:
+        await asyncio.to_thread(transcribe_audio, b"RIFF$\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x80>\x00\x00\x00}\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00")
+        return {"ok": True, "stt": "warmed"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @app.post("/voice/stt")
 async def voice_stt(request: Request):
     """Transcribe uploaded audio to text.
