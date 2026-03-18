@@ -268,6 +268,7 @@ canvas.spark{width:100%;height:28px;display:block}
   </div>
   <div class="tb-spacer"></div>
   <button class="tb-btn" id="btn-voice" onclick="toggleVoice()" style="-webkit-app-region:no-drag">VOICE</button>
+  <button class="tb-btn" id="btn-settings" onclick="toggleWin('settings')">SETTINGS</button>
   <button class="tb-btn" id="btn-memory" onclick="toggleWin('memory')">MEMORY</button>
   <button class="tb-btn" id="btn-terminal" onclick="toggleWin('terminal')">TERMINAL</button>
   <div class="tb-div"></div>
@@ -573,6 +574,77 @@ canvas.spark{width:100%;height:28px;display:block}
   <div class="fwin-resize" id="fwin-memory-resize"></div>
 </div>
 
+<!-- FLOATING SETTINGS WINDOW -->
+<div class="fwin" id="fwin-settings" style="width:420px;height:400px;top:100px;left:50%;transform:translateX(-50%)">
+  <div class="fwin-header" id="fwin-settings-header">
+    <span class="fwin-title">E3N - SETTINGS</span>
+    <button class="fwin-close" onclick="toggleWin('settings')">&#x2715;</button>
+  </div>
+  <div style="padding:12px;overflow-y:auto;flex:1">
+    <div class="mlabel" style="margin-bottom:6px">Voice — Audio Devices</div>
+    <div class="block"><div class="c-tr"></div><div class="c-bl"></div>
+      <div class="stbl">
+        <div class="srow" style="flex-direction:column;align-items:flex-start;gap:4px">
+          <span class="sk">Input Device (Microphone)</span>
+          <select id="cfg-mic-device" class="tr-select" style="width:100%" onchange="cfgSaveSetting('voiceInputDevice',this.value)">
+            <option value="">Default</option>
+          </select>
+        </div>
+        <div class="srow" style="flex-direction:column;align-items:flex-start;gap:4px;margin-top:8px">
+          <span class="sk">Output Device (Speaker)</span>
+          <select id="cfg-spk-device" class="tr-select" style="width:100%" onchange="cfgSaveSetting('voiceOutputDevice',this.value)">
+            <option value="">Default</option>
+          </select>
+        </div>
+        <div class="srow" style="margin-top:8px">
+          <span class="sk">Voice Status</span>
+          <span class="sv" id="cfg-voice-status">--</span>
+        </div>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:8px">
+        <button class="tb-btn" onclick="cfgRefreshDevices()">Refresh Devices</button>
+        <button class="tb-btn" onclick="cfgTestMic()">Test Mic</button>
+      </div>
+    </div>
+
+    <div class="mlabel" style="margin-top:14px;margin-bottom:6px">Voice — TTS</div>
+    <div class="block"><div class="c-tr"></div><div class="c-bl"></div>
+      <div class="stbl">
+        <div class="srow" style="flex-direction:column;align-items:flex-start;gap:4px">
+          <span class="sk">TTS Voice</span>
+          <select id="cfg-tts-voice" class="tr-select" style="width:100%" onchange="cfgSaveSetting('ttsVoice',this.value)">
+            <option value="en-US-GuyNeural">en-US-GuyNeural (default)</option>
+            <option value="en-US-ChristopherNeural">en-US-ChristopherNeural</option>
+            <option value="en-US-EricNeural">en-US-EricNeural</option>
+            <option value="en-US-AriaNeural">en-US-AriaNeural</option>
+            <option value="en-GB-RyanNeural">en-GB-RyanNeural</option>
+            <option value="en-AU-WilliamNeural">en-AU-WilliamNeural</option>
+          </select>
+        </div>
+        <div class="srow" style="flex-direction:column;align-items:flex-start;gap:4px;margin-top:8px">
+          <span class="sk">TTS Speed</span>
+          <select id="cfg-tts-rate" class="tr-select" style="width:100%" onchange="cfgSaveSetting('ttsRate',this.value)">
+            <option value="-20%">Slow (-20%)</option>
+            <option value="+0%" selected>Normal</option>
+            <option value="+15%">Fast (+15%)</option>
+            <option value="+30%">Very Fast (+30%)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="mlabel" style="margin-top:14px;margin-bottom:6px">System</div>
+    <div class="block"><div class="c-tr"></div><div class="c-bl"></div>
+      <div class="stbl">
+        <div class="srow"><span class="sk">Self-Heal</span><span class="sv" id="cfg-self-heal">--</span></div>
+        <div class="srow"><span class="sk">Backup System</span><span class="sv" id="cfg-backup">--</span></div>
+        <div class="srow"><span class="sk">Cloud Budget</span><span class="sv" id="cfg-budget">--</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="fwin-resize" id="fwin-settings-resize"></div>
+</div>
+
 </div>
 <script src="/static/js/ai-core.js"></script>
 <script>
@@ -638,6 +710,7 @@ function makeFloating(winId,headerId,resizeId){
 
 makeFloating('fwin-terminal','fwin-terminal-header','fwin-terminal-resize')
 makeFloating('fwin-memory','fwin-memory-header','fwin-memory-resize')
+makeFloating('fwin-settings','fwin-settings-header','fwin-settings-resize')
 
 function toggleWin(name){
   const win=document.getElementById('fwin-'+name)
@@ -1455,6 +1528,96 @@ async function dxPoll(){
 function dxStartPoll(){dxPoll();_dxPollInterval=setInterval(dxPoll,5000)}
 function dxStopPoll(){if(_dxPollInterval){clearInterval(_dxPollInterval);_dxPollInterval=null}}
 
+// ── SETTINGS PANEL ──
+let _cfgSettings=JSON.parse(localStorage.getItem('e3n_settings')||'{}')
+function cfgSaveSetting(key,val){_cfgSettings[key]=val;localStorage.setItem('e3n_settings',JSON.stringify(_cfgSettings))}
+async function cfgRefreshDevices(){
+  try{
+    const devices=await navigator.mediaDevices.enumerateDevices()
+    const micSel=document.getElementById('cfg-mic-device')
+    const spkSel=document.getElementById('cfg-spk-device')
+    const micVal=micSel.value||_cfgSettings.voiceInputDevice||''
+    const spkVal=spkSel.value||_cfgSettings.voiceOutputDevice||''
+    micSel.innerHTML='<option value="">Default</option>'
+    spkSel.innerHTML='<option value="">Default</option>'
+    devices.forEach(d=>{
+      if(d.kind==='audioinput'){
+        const o=document.createElement('option')
+        o.value=d.deviceId;o.textContent=d.label||'Microphone '+d.deviceId.slice(0,8)
+        micSel.appendChild(o)
+      }else if(d.kind==='audiooutput'){
+        const o=document.createElement('option')
+        o.value=d.deviceId;o.textContent=d.label||'Speaker '+d.deviceId.slice(0,8)
+        spkSel.appendChild(o)
+      }
+    })
+    if(micVal)micSel.value=micVal
+    if(spkVal)spkSel.value=spkVal
+  }catch(e){console.warn('Device enumeration failed:',e)}
+}
+async function cfgTestMic(){
+  const st=document.getElementById('cfg-voice-status')
+  st.textContent='Testing...'
+  st.style.color='var(--amber)'
+  try{
+    const deviceId=_cfgSettings.voiceInputDevice||undefined
+    const constraints={audio:deviceId?{deviceId:{exact:deviceId}}:true}
+    const stream=await navigator.mediaDevices.getUserMedia(constraints)
+    const ctx=new AudioContext()
+    const src=ctx.createMediaStreamSource(stream)
+    const analyser=ctx.createAnalyser()
+    analyser.fftSize=256
+    src.connect(analyser)
+    const buf=new Uint8Array(analyser.frequencyBinCount)
+    let maxAmp=0,checks=0
+    const check=()=>{
+      analyser.getByteFrequencyData(buf)
+      const amp=buf.reduce((a,b)=>a+b,0)/buf.length
+      if(amp>maxAmp)maxAmp=amp
+      checks++
+      if(checks<30)requestAnimationFrame(check)
+      else{
+        stream.getTracks().forEach(t=>t.stop())
+        ctx.close()
+        if(maxAmp>5){st.textContent='Mic OK (level: '+Math.round(maxAmp)+')';st.style.color='var(--teal)'}
+        else{st.textContent='No audio detected — check device';st.style.color='var(--danger)'}
+        setTimeout(()=>{st.style.color=''},3000)
+      }
+    }
+    check()
+  }catch(e){st.textContent='Mic error: '+e.message;st.style.color='var(--danger)'}
+}
+async function cfgLoadSettings(){
+  cfgRefreshDevices()
+  // Load TTS voice/rate from saved settings
+  const ttsVoice=document.getElementById('cfg-tts-voice')
+  const ttsRate=document.getElementById('cfg-tts-rate')
+  if(_cfgSettings.ttsVoice)ttsVoice.value=_cfgSettings.ttsVoice
+  if(_cfgSettings.ttsRate)ttsRate.value=_cfgSettings.ttsRate
+  // Load system info
+  try{
+    const h=await(await fetch(API+'/self-heal/status')).json()
+    document.getElementById('cfg-self-heal').textContent=h.enabled?'Enabled':'Disabled'
+  }catch(e){}
+  try{
+    const b=await(await fetch(API+'/backup/status')).json()
+    document.getElementById('cfg-backup').textContent=b.enabled?'Enabled':'Disabled'
+  }catch(e){}
+  try{
+    const bu=await(await fetch(API+'/budget/status')).json()
+    document.getElementById('cfg-budget').textContent='$'+bu.daily_spent.toFixed(2)+'/$'+bu.daily_budget.toFixed(2)
+  }catch(e){}
+}
+// Load settings when settings window opens
+const _origToggleWin=toggleWin
+toggleWin=function(name){
+  _origToggleWin(name)
+  if(name==='settings'){
+    const win=document.getElementById('fwin-settings')
+    if(win.classList.contains('visible'))cfgLoadSettings()
+  }
+}
+
 // ── LIVE VOICE CHAT ──
 let _voiceMode=false,_voiceRecording=false,_voiceStream=null,_voiceRecorder=null,_voiceChunks=[]
 let _voiceAudioCtx=null,_voiceAnalyser=null,_voiceAnimFrame=null
@@ -1462,7 +1625,6 @@ async function toggleVoice(){
   const btn=document.getElementById('btn-voice')
   const overlay=document.getElementById('voice-overlay')
   if(_voiceMode){
-    // Deactivate
     _voiceMode=false
     btn.classList.remove('active')
     overlay.style.display='none'
@@ -1478,10 +1640,12 @@ async function toggleVoice(){
     const vs=await(await fetch(API+'/voice/status')).json()
     if(!vs.enabled){addLine('','Voice module disabled — set VOICE_ENABLED=true in .env','dim','meta');return}
   }catch(e){addLine('','Voice subsystem unreachable','dim','meta');return}
-  // Request mic
+  // Request mic with selected device
   try{
-    _voiceStream=await navigator.mediaDevices.getUserMedia({audio:true})
-  }catch(e){addLine('','Microphone access denied','dim','meta');return}
+    const deviceId=_cfgSettings.voiceInputDevice||undefined
+    const constraints={audio:deviceId?{deviceId:{exact:deviceId}}:true}
+    _voiceStream=await navigator.mediaDevices.getUserMedia(constraints)
+  }catch(e){addLine('','Microphone access denied: '+e.message+' — check Settings > Audio Devices','dim','meta');return}
   _voiceAudioCtx=new AudioContext()
   const src=_voiceAudioCtx.createMediaStreamSource(_voiceStream)
   _voiceAnalyser=_voiceAudioCtx.createAnalyser()
@@ -1522,7 +1686,12 @@ async function voiceSend(blob){
   const ptt=document.getElementById('voice-ptt')
   const st=document.getElementById('voice-status')
   try{
-    const res=await fetch(API+'/voice/chat',{method:'POST',body:blob,headers:{'Content-Type':'application/octet-stream'}})
+    const ttsVoice=_cfgSettings.ttsVoice||undefined
+    const ttsRate=_cfgSettings.ttsRate||undefined
+    // Build form data with optional TTS params
+    const formData=new FormData()
+    formData.append('audio',blob,'recording.webm')
+    const res=await fetch(API+'/voice/chat'+(ttsVoice||ttsRate?'?'+(ttsVoice?'voice='+encodeURIComponent(ttsVoice)+'&':'')+(ttsRate?'rate='+encodeURIComponent(ttsRate):''):''),{method:'POST',body:blob,headers:{'Content-Type':'application/octet-stream'}})
     const d=await res.json()
     if(d.error){addLine('','Voice error: '+d.error,'dim','meta');ptt.className='';ptt.textContent='MIC';st.textContent='VOICE MODE';return}
     // Show transcription and response in terminal
@@ -1539,6 +1708,9 @@ async function voiceSend(blob){
       const audioBlob=new Blob([arr],{type:'audio/'+(d.tts.format||'mp3')})
       const url=URL.createObjectURL(audioBlob)
       const audio=new Audio(url)
+      // Set output device if configured
+      const outDevice=_cfgSettings.voiceOutputDevice
+      if(outDevice&&audio.setSinkId)try{await audio.setSinkId(outDevice)}catch(e){}
       ptt.className='playing';ptt.textContent='▶';st.textContent='SPEAKING...'
       if(typeof aiCore!=='undefined')aiCore.simSpeech=true
       // Waveform animation during playback

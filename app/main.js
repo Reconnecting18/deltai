@@ -56,6 +56,16 @@ function createWindow() {
   })
 
   mainWindow.webContents.session.clearCache()
+
+  // Grant media permissions (microphone/camera) automatically for localhost
+  mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
+    const allowed = ['media', 'microphone', 'audioCapture'].includes(permission)
+    callback(allowed)
+  })
+  mainWindow.webContents.session.setPermissionCheckHandler((webContents, permission) => {
+    return ['media', 'microphone', 'audioCapture'].includes(permission)
+  })
+
   mainWindow.loadURL(URL)
   mainWindow.once('ready-to-show', () => mainWindow.show())
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {

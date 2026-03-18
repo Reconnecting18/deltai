@@ -2113,10 +2113,11 @@ async def voice_tts(req: TTSRequest):
 
 
 @app.post("/voice/chat")
-async def voice_chat(request: Request):
+async def voice_chat(request: Request, voice: str = None, rate: str = None):
     """Full voice loop: transcribe audio → chat → synthesize response.
 
     POST raw audio → returns JSON with transcription + base64 audio response.
+    Optional query params: voice (TTS voice ID), rate (TTS speed e.g. "+15%").
     """
     if not VOICE_AVAILABLE:
         return {"error": "Voice module not available"}
@@ -2153,8 +2154,8 @@ async def voice_chat(request: Request):
 
         _append_to_history(user_text, response_text)
 
-    # Step 3: TTS
-    tts_result = await synthesize_speech(response_text)
+    # Step 3: TTS (use custom voice/rate if provided via query params)
+    tts_result = await synthesize_speech(response_text, voice=voice, rate=rate)
     audio_b64 = None
     if "audio" in tts_result:
         audio_b64 = base64.b64encode(tts_result["audio"]).decode("ascii")

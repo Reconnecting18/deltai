@@ -313,7 +313,7 @@ C:\e3n\
 | 3 | **Complete** | Cloud tool-use, split workload, cost budget, conversation history, SQLite persistence |
 | 4 | **Complete** | Smarter RAG, training pipeline, text-as-tool hardening, error recovery, voice module |
 | 5 | **Complete** | Telemetry prep — session mode, GPU protection, query classification, racing prompts, WebSocket alerts, batch ingest, racing auto-capture |
-| 6 | **Complete** | Dashboard Tier 1 — training pipeline UI, session auto-detect badge, diagnostics panel, live voice chat, resource self-manager, circuit breaker, AI self-heal |
+| 6 | **Complete** | Dashboard Tier 1 — training pipeline UI, session auto-detect badge, diagnostics panel, live voice chat, settings panel (audio devices, TTS config), resource self-manager, circuit breaker, AI self-heal |
 | — | **Separate project** | Telemetry API for Le Mans Ultimate — connects to E3N via /ingest |
 
 ---
@@ -326,6 +326,7 @@ Tactical operations center aesthetic with a muted grey-green palette. Features i
 - **3D particle sphere**: Network node map with speech waveform animation during voice chat
 - **Terminal**: Streaming chat with conversation history (CLR + turn counter)
 - **Live voice chat**: Push-to-talk (MIC button or Space bar) — captures audio, transcribes, chats, plays TTS response with sphere animation
+- **Settings panel**: Audio device selection (mic input/speaker output), TTS voice + speed config, system status overview
 - **Training pipeline**: Start/stop training, mode selector (auto/lora/fewshot), live progress bar + loss, LoRA status chip
 - **Diagnostics panel**: Circuit breaker state, VRAM monitor, self-heal status, resource action log, health event timeline
 - **Live widgets**: GPU/CPU/RAM stats with 60s sparklines
