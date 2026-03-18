@@ -25,7 +25,7 @@ import httpx
 logger = logging.getLogger("e3n.anthropic")
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-ANTHROPIC_VERSION = "2023-06-01"
+ANTHROPIC_VERSION = "2023-06-01"  # Pinned for stability; update when new features needed
 
 # ── E3N SYSTEM PROMPT FOR CLOUD MODELS ──────────────────────────────────
 

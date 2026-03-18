@@ -481,8 +481,14 @@ def query_knowledge(query: str, n_results: int = 5, threshold: float = 0.75,
     return reranked[:n_results]
 
 
+_file_details_cache = {"data": None, "ts": 0}
+
 def get_file_details() -> list[dict]:
-    """Get per-file details from ChromaDB (source, chunk count)."""
+    """Get per-file details from ChromaDB (source, chunk count). Cached for 30s."""
+    now = _time.time()
+    if _file_details_cache["data"] is not None and (now - _file_details_cache["ts"]) < 30:
+        return _file_details_cache["data"]
+
     collection = get_collection()
     if collection.count() == 0:
         return []
@@ -495,7 +501,10 @@ def get_file_details() -> list[dict]:
             if src not in file_chunks:
                 file_chunks[src] = 0
             file_chunks[src] += 1
-        return [{"source": s, "chunks": c} for s, c in sorted(file_chunks.items())]
+        result = [{"source": s, "chunks": c} for s, c in sorted(file_chunks.items())]
+        _file_details_cache["data"] = result
+        _file_details_cache["ts"] = now
+        return result
     except Exception:
         return []
 
@@ -512,15 +521,9 @@ def get_memory_stats() -> dict:
     collection = get_collection()
     count = collection.count()
 
-    # Count unique sources
-    sources = set()
-    if count > 0:
-        try:
-            all_meta = collection.get(include=["metadatas"])
-            for m in all_meta["metadatas"]:
-                sources.add(m.get("source", "?"))
-        except Exception:
-            pass
+    # Reuse get_file_details() cache for source counting instead of a separate full scan
+    file_details = get_file_details()
+    sources = {f["source"] for f in file_details}
 
     # ChromaDB disk size
     total_bytes = 0
@@ -676,34 +679,41 @@ def ingest_context_batch(items: list[dict]) -> dict:
     }
 
 
+_cleanup_last_run = 0.0
+_CLEANUP_MIN_INTERVAL = 10  # seconds — avoid hammering ChromaDB on rapid chat requests
+
 def cleanup_expired() -> dict:
     """
     Remove TTL-expired ingested entries from ChromaDB.
     Call periodically (e.g., on each /chat request or via background task).
+    Rate-limited to run at most once every 10 seconds.
 
     Returns:
         {"removed": N, "checked": N}
     """
-    collection = get_collection()
+    global _cleanup_last_run
     now = _time.time()
 
+    # Rate-limit: skip if we ran recently
+    if now - _cleanup_last_run < _CLEANUP_MIN_INTERVAL:
+        return {"removed": 0, "checked": 0, "skipped": "rate-limited"}
+    _cleanup_last_run = now
+
+    collection = get_collection()
+
     try:
-        # Get all entries that have an expires_at metadata field > 0
-        # ChromaDB where filters only support simple comparisons,
-        # so we fetch all ingested entries and filter in Python
-        all_data = collection.get(
-            where={"source": {"$ne": ""}},
+        # Only query ingested entries (source starts with "ingest:") that have TTL
+        # Using $gt filter on expires_at to only fetch entries with active TTL
+        ttl_data = collection.get(
+            where={"$and": [
+                {"expires_at": {"$gt": 0}},
+                {"expires_at": {"$lte": now}},
+            ]},
             include=["metadatas"],
         )
 
-        expired_ids = []
-        checked = 0
-        for i, meta in enumerate(all_data["metadatas"]):
-            expires_at = meta.get("expires_at", 0)
-            if isinstance(expires_at, (int, float)) and expires_at > 0:
-                checked += 1
-                if now >= expires_at:
-                    expired_ids.append(all_data["ids"][i])
+        expired_ids = ttl_data["ids"] if ttl_data["ids"] else []
+        checked = len(expired_ids)
 
         if expired_ids:
             collection.delete(ids=expired_ids)
@@ -711,4 +721,20 @@ def cleanup_expired() -> dict:
         return {"removed": len(expired_ids), "checked": checked}
 
     except Exception as e:
-        return {"removed": 0, "checked": 0, "error": str(e)}
+        # Fallback: if $and filter fails (older ChromaDB), use the old approach
+        # but only fetch ingested entries, not knowledge files
+        try:
+            ingest_data = collection.get(
+                where={"expires_at": {"$gt": 0}},
+                include=["metadatas"],
+            )
+            expired_ids = []
+            for i, meta in enumerate(ingest_data["metadatas"]):
+                expires_at = meta.get("expires_at", 0)
+                if isinstance(expires_at, (int, float)) and expires_at > 0 and now >= expires_at:
+                    expired_ids.append(ingest_data["ids"][i])
+            if expired_ids:
+                collection.delete(ids=expired_ids)
+            return {"removed": len(expired_ids), "checked": len(ingest_data["ids"])}
+        except Exception as e2:
+            return {"removed": 0, "checked": 0, "error": str(e2)}

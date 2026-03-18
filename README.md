@@ -226,7 +226,9 @@ C:\e3n\
 │   ├── static/
 │   │   └── index.html            Full dashboard UI (single file — CSS + HTML + JS)
 │   ├── tests/
-│   │   └── verify_full.py        33-test verification suite
+│   │   ├── verify_full.py        33 core tests
+│   │   ├── verify_stress.py      30 stress simulation tests
+│   │   └── verify_resource_mgmt.py  29 resource management tests
 │   └── .env                      Configuration (not committed)
 ├── modelfiles\                   Ollama modelfiles (identical prompts, different FROM)
 │   ├── E3N-qwen14b.modelfile
@@ -286,7 +288,11 @@ C:\e3n\
 | GET | `/stats` | System stats + model info + budget |
 | GET | `/budget/status` | Cloud spend tracking |
 | GET | `/backup/status` | Emergency backup diagnostics |
+| GET | `/resources/status` | VRAM, circuit breaker, resource manager state |
+| GET | `/self-heal/status` | AI self-heal loop status + recent actions |
+| GET | `/health/events` | Timestamped health event log |
 | WS | `/ws/alerts` | Real-time alert notifications |
+| WS | `/ws/health` | Real-time health state events |
 
 ### Voice
 | Method | Endpoint | Description |
@@ -307,6 +313,7 @@ C:\e3n\
 | 3 | **Complete** | Cloud tool-use, split workload, cost budget, conversation history, SQLite persistence |
 | 4 | **Complete** | Smarter RAG, training pipeline, text-as-tool hardening, error recovery, voice module |
 | 5 | **Complete** | Telemetry prep — session mode, GPU protection, query classification, racing prompts, WebSocket alerts, batch ingest, racing auto-capture |
+| 6 | **Complete** | Dashboard Tier 1 — training pipeline UI, session auto-detect badge, diagnostics panel, live voice chat, resource self-manager, circuit breaker, AI self-heal |
 | — | **Separate project** | Telemetry API for Le Mans Ultimate — connects to E3N via /ingest |
 
 ---
@@ -315,9 +322,12 @@ C:\e3n\
 
 Tactical operations center aesthetic with a muted grey-green palette. Features include:
 
-- **Header**: Subsystem health monitor (X/8 ONLINE) + cloud budget display
-- **3D particle sphere**: Network node map with labeled subsystems
+- **Header**: Subsystem health monitor (X/8 ONLINE) + cloud budget + session badge (auto-detected, timer, GPU protect warning)
+- **3D particle sphere**: Network node map with speech waveform animation during voice chat
 - **Terminal**: Streaming chat with conversation history (CLR + turn counter)
+- **Live voice chat**: Push-to-talk (MIC button or Space bar) — captures audio, transcribes, chats, plays TTS response with sphere animation
+- **Training pipeline**: Start/stop training, mode selector (auto/lora/fewshot), live progress bar + loss, LoRA status chip
+- **Diagnostics panel**: Circuit breaker state, VRAM monitor, self-heal status, resource action log, health event timeline
 - **Live widgets**: GPU/CPU/RAM stats with 60s sparklines
 - **WebSocket toasts**: Real-time alert notifications with priority coloring
 - **Drag-and-drop**: Alt+drag widgets between panels
@@ -326,12 +336,14 @@ Tactical operations center aesthetic with a muted grey-green palette. Features i
 
 ## Verification
 
-Run the full test suite (33 tests across all subsystems):
+Run the full test suites (92 tests across all subsystems):
 
 ```powershell
 cd C:\e3n\project
 .\venv\Scripts\activate
-python tests/verify_full.py
+python tests/verify_full.py          # 33 tests — core systems
+python tests/verify_stress.py        # 30 tests — stress simulations
+python tests/verify_resource_mgmt.py # 29 tests — resource management
 ```
 
 ---

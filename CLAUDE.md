@@ -19,7 +19,9 @@ E3N is ONLY the AI intelligence layer — reasoning, memory, tool execution, and
 - **Knowledge:** Drop files in `C:\e3n\data\knowledge\` — watchdog auto-ingests
 - **Ingest connector:** `POST /ingest` — external services push structured context into ChromaDB with source tags and TTL
 - **Router:** `C:\e3n\project\router.py` — VRAM-aware GPU detection, sim process detection, tier classification, model cascade, emergency backup chain, cloud budget enforcement, split workload detection, session mode, telemetry query classification
-- **Tools:** 7 core tools + 4 conditional telemetry tools in `C:\e3n\project\tools\` (core: read_file, write_file, list_directory, run_powershell, get_system_info, search_knowledge, memory_stats; telemetry: get_session_status, get_lap_summary, get_tire_status, get_strategy_recommendation — only loaded when TELEMETRY_API_URL is set)
+- **Tools:** 7 core tools + 4 diagnostic/self-management tools + 4 conditional telemetry tools in `C:\e3n\project\tools\` (core: read_file, write_file, list_directory, run_powershell, get_system_info, search_knowledge, memory_stats; diagnostic: self_diagnostics, manage_ollama_models, repair_subsystem, resource_status; telemetry: get_session_status, get_lap_summary, get_tire_status, get_strategy_recommendation — only loaded when TELEMETRY_API_URL is set)
+- **Resource self-manager:** Background loop (30s interval) — auto VRAM lifecycle, Ollama health monitoring + auto-restart, watcher recovery, TTL cleanup
+- **Circuit breaker:** Protects Ollama inference path — 3-failure threshold, exponential backoff (5s→60s max), half-open recovery testing
 - **Anthropic client:** `C:\e3n\project\anthropic_client.py` — cloud inference with tool use, split workload mode, telemetry mode prompt injection, conversation history support (dormant — no API key set)
 - **Conversation history:** In-memory rolling 10-turn window + SQLite persistence across all chat paths, session-aware tagging
 - **Split workload:** Local 3B gathers data via tools → cloud reasons over enriched context
@@ -57,25 +59,29 @@ E3N does NOT directly process telemetry, UDP packets, or game data. Instead:
 - Voice module (STT/TTS)
 - Session mode + GPU protection for active racing
 - Telemetry query classification and prompt injection
+- Resource self-management (VRAM lifecycle, auto-recovery, circuit breaker)
+- Self-diagnostic tools (AI-driven inspection and repair of own subsystems)
 - WebSocket alerts for proactive racing notifications
 - Batch ingest for high-frequency data sources
 
 ## Key Files
 | File | Purpose |
 |------|---------|
-| `project/main.py` | FastAPI app — chat (3 paths: local, cloud, split), conversation history, stats, health, budget, memory, ingest, batch ingest, session mode, WebSocket alerts, backup, training, voice endpoints |
-| `project/router.py` | Smart routing: VRAM detection, sim detection, tier classification, split workload detection, cloud budget enforcement + persistence, emergency backup chain, session mode (GPU protection), telemetry query classification |
+| `project/main.py` | FastAPI app — chat (3 paths: local, cloud, split), conversation history, stats, health, budget, memory, ingest, batch ingest, session mode, WebSocket alerts, backup, training, voice endpoints, resource self-manager loop, circuit breaker, resource status endpoint |
+| `project/router.py` | Smart routing: consolidated VRAM detection (_get_vram_info), sim detection, tier classification, split workload detection, cloud budget enforcement + persistence, emergency backup chain, session mode (GPU protection), telemetry query classification |
 | `project/memory.py` | ChromaDB RAG: chunking, embedding, multi-query expansion, source-grouped reranking, recency bias, ingest with TTL, batch ingest, source/age filtering |
 | `project/watcher.py` | Watchdog file watcher for knowledge dir |
 | `project/anthropic_client.py` | Anthropic API streaming with tool use, split_mode, telemetry_mode prompt injection, conversation history support (dormant — no API key) |
 | `project/persistence.py` | SQLite backing store for conversation history (session-aware), cloud budget, session history export (WAL mode, short-lived connections) |
 | `project/training.py` | Training pipeline: dataset CRUD, export (alpaca/sharegpt/chatml), QLoRA fine-tuning + GGUF export + Ollama registration, few-shot fallback, A/B eval, auto-capture with racing category support |
 | `project/voice.py` | Voice module: STT (faster-whisper, VRAM-aware device selection), TTS (edge-tts + Windows SAPI fallback), audio cleanup |
-| `project/tools/executor.py` | Tool execution with type coercion, safety checks, tool retry on error, conditional telemetry tool implementations |
-| `project/tools/definitions.py` | 7 core + 4 conditional telemetry tool JSON schemas |
+| `project/tools/executor.py` | Tool execution with type coercion, safety checks, tool retry on error, self-diagnostics (7 subsystem deep checks), manage_ollama_models (status/unload/preload with sim guard), repair_subsystem (4 allowlisted repairs), resource_status, conditional telemetry tools |
+| `project/tools/definitions.py` | 7 core + 4 diagnostic + 4 conditional telemetry tool JSON schemas |
 | `project/static/index.html` | Full dashboard UI (single file) — header health monitor, budget display, terminal with history CLR, WebSocket alert toasts |
 | `project/.env` | Config (models, VRAM thresholds, backup, budget, history, paths, cloud settings, voice, session mode, telemetry) |
 | `project/tests/verify_full.py` | 33-test verification suite — training, safety guards, router stress, persistence, RAG, CUDA, anthropic client |
+| `project/tests/verify_stress.py` | 30-test stress suite — review fix verification (10), high-stress simulations (20): low VRAM, backup cascade, concurrent routing, tool safety |
+| `project/tests/verify_resource_mgmt.py` | 29-test resource management suite — circuit breaker (5), resource manager (3), diagnostic tools (11), stress simulations (10) |
 | `app/main.js` | Electron main process |
 | `tools/llama.cpp/` | GGUF conversion toolchain — `convert_hf_to_gguf.py` + `build/bin/Release/llama-quantize.exe` |
 
@@ -395,6 +401,84 @@ POST /ingest/batch
 - Header: subsystem health monitor (X/8 ONLINE) + cloud budget display ($X/$X)
 - Terminal: CLR button + turn counter for conversation history
 
+## Resource Self-Manager
+Background task in main.py that runs every 30 seconds, monitoring system resources and taking automatic corrective actions.
+
+**Automatic actions (no AI reasoning needed):**
+| Trigger | Action | Cooldown |
+|---------|--------|----------|
+| VRAM < 1500MB for 2+ readings | Unloads large models (14B during sim), or all-but-smallest under extreme pressure | 60s between actions |
+| VRAM < 1000MB with multiple models loaded | Keeps only smallest model loaded | 60s |
+| 3 consecutive Ollama connectivity failures | Attempts `ollama serve` auto-restart | 2min between attempts |
+| File watcher dies | Auto-restart (capped at 5 restarts/session) | Immediate |
+| Session active | Periodic TTL cleanup of expired RAG entries | Rate-limited (10s) |
+
+**State tracking:** `_resource_state` dict with vram_warnings, ollama_failures, watcher_restarts, actions_taken (last 50 entries).
+
+**Endpoint:** `GET /resources/status` — exposes resource manager + circuit breaker state.
+
+## Circuit Breaker (Ollama)
+Protects the Ollama inference path from hammering a dead service. Integrated into `_try_ollama_inference`.
+
+- **States:** closed (normal) -> open (blocking) -> half-open (testing) -> closed
+- **Threshold:** 3 consecutive connectivity failures opens the circuit
+- **Backoff:** 5s -> 10s -> 20s -> 40s -> 60s (max), doubles on each cycle
+- **Recovery:** half-open allows 1 test call; success resets to closed with 5s backoff
+- **Model errors** (wrong model name, etc.) do NOT trigger the circuit breaker — only connectivity failures do
+
+## Self-Diagnostic Tools (AI-Driven)
+4 tools the AI model can call to inspect and repair its own subsystems:
+
+| Tool | Purpose |
+|------|---------|
+| `self_diagnostics(subsystem?)` | Full sweep or deep-check one of 7 subsystems (ollama, chromadb, gpu, voice, watcher, backup, paths). Returns actionable fix suggestions. |
+| `manage_ollama_models(action, model?)` | status (list loaded + available + VRAM), unload (free VRAM), preload (with sim-guard blocking 14B during racing + VRAM sufficiency check) |
+| `repair_subsystem(repair)` | 4 allowlisted repairs: restart_watcher, clear_vram, reindex_knowledge, check_ollama |
+| `resource_status()` | Current VRAM pressure/tier, loaded models, circuit breaker state, auto-recovery action log, sim/session detection |
+
+**AI reasoning chain example:**
+1. E3N calls `self_diagnostics()` -> sees "GPU: Tier C, 1200MB free"
+2. E3N calls `manage_ollama_models('status')` -> sees 14B loaded during sim
+3. E3N calls `manage_ollama_models('unload', model='e3n-qwen14b')` -> frees VRAM
+4. E3N calls `self_diagnostics(subsystem='gpu')` -> confirms Tier B restored
+
+## Health Event Bus
+Lightweight pub/sub for subsystem state changes. Pushes events to frontend via WebSocket.
+
+- **Sync emitter:** `_record_health_event(type, data)` — safe for sync contexts (circuit breaker)
+- **Async emitter:** `_emit_health_event(type, data)` — records + broadcasts to WebSocket clients
+- **Event types:** `subsystem_changed`, `vram_tier_changed`, `circuit_breaker_changed`, `sim_state_changed`, `model_loaded`, `model_unloaded`, `repair_attempted`, `self_heal_action`
+- **Storage:** `_health_events` deque (maxlen=100)
+- **Endpoints:** `WebSocket /ws/health` (real-time push), `GET /health/events?limit=50` (REST)
+- **Wired into:** circuit breaker state transitions, resource manager actions, model lifecycle, self-heal loop
+
+## Proactive Model Lifecycle
+Automatic model swap on sim start/stop transitions. Integrated into `_resource_manager_loop`.
+
+- **Sim starts:** Unload 14B from VRAM, preload 3B (if VRAM >= 2500MB)
+- **Sim stops:** Wait ~30s for cleanup, then preload 14B (if VRAM >= 9000MB / Tier A)
+- **State tracking:** `_resource_state["last_sim_state"]`, `sim_stop_detected_at`, `pending_14b_preload`
+- **Events emitted:** `sim_state_changed`, `model_loaded`, `model_unloaded`
+
+## AI Self-Heal Loop
+Background task that periodically runs diagnostics, has the LLM reason about issues, and executes repairs.
+
+- **Interval:** 5 minutes (configurable via `SELF_HEAL_INTERVAL_SEC`)
+- **Model:** Always uses smallest (e3n-qwen3b) to avoid VRAM contention
+- **Skip conditions:** chat active, racing session, circuit breaker open
+- **Short-circuit:** if diagnostics show "No issues detected", skips LLM call entirely
+- **LLM prompt:** constrained to output `NO_ACTION` or `REPAIR:<name>` with fuzzy fallback
+- **Available repairs:** `restart_watcher`, `clear_vram`, `reindex_knowledge`, `check_ollama`
+- **Verification:** re-runs diagnostics after repair to confirm fix
+- **Safety:** blocks `clear_vram` during sim, respects all existing safety guards
+- **Endpoint:** `GET /self-heal/status` — enabled, interval, model, idle state, recent actions
+
+**Config (.env):**
+```
+SELF_HEAL_ENABLED=true
+SELF_HEAL_INTERVAL_SEC=300
+```
+
 ## Current Status
 - Phase 1-4 complete (dashboard, RAG, tools, router, cloud client, split workload, budget, voice, training)
 - Phase 5 complete (telemetry prep — all 11 issues implemented, verified 50/50, debugged)
@@ -424,7 +508,13 @@ POST /ingest/batch
 - Session-aware history: DONE (tagged turns, JSONL export on session end)
 - Racing auto-capture: DONE (e3n-racing dataset, RAG context in training input)
 - Dynamic health monitor: DONE (conditional 9th telemetry subsystem)
-- Stress tests: PASSED (50/50 telemetry prep + 75/75 Phase 1-4)
+- Resource self-manager: DONE (VRAM lifecycle, auto-unload during sim, Ollama auto-restart, watcher recovery)
+- Circuit breaker: DONE (3-failure threshold, exponential backoff 5s-60s, half-open recovery)
+- Self-diagnostic tools: DONE (self_diagnostics with 7 deep checks, manage_ollama_models with sim guard, repair_subsystem with 4 allowlisted repairs, resource_status)
+- Health event bus: DONE (typed events, sync/async emitters, WebSocket /ws/health, REST /health/events, CB wiring)
+- Proactive model lifecycle: DONE (auto-unload 14B on sim start, auto-preload on sim stop after 30s cooldown)
+- AI self-heal loop: DONE (5min interval, LLM-driven diagnostics, repair execution, verification, idle/session/CB guards)
+- Stress tests: PASSED (33/33 verification + 30/30 stress + 29/29 resource mgmt + 25/25 self-mgmt = 117/117 total)
 - Future (separate projects): Telemetry API for LMU
 
 ## Build Phases
@@ -435,6 +525,7 @@ POST /ingest/batch
 | 3 | DONE | Cloud tool-use, split workload, cost budget, conversation history, header health monitor, SQLite persistence |
 | 4 | DONE | Smarter RAG, training pipeline execution, text-as-tool hardening, error recovery UX, voice module (STT/TTS) |
 | 5 | DONE | Telemetry prep — session mode, GPU protection, query classification, racing prompts, RAG recency tuning, telemetry tools, WebSocket alerts, session-aware history, batch ingest, dynamic health, racing auto-capture |
+| 6 | DONE | Self-management — resource self-manager, circuit breaker, self-diagnostic tools (4), auto-recovery watchdog, VRAM lifecycle management |
 | — | SEPARATE PROJECT | Telemetry API (LMU race engineer) — connects to E3N via /ingest |
 
 ## Known Issues

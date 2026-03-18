@@ -82,35 +82,33 @@ def get_gpu_utilization() -> int:
         return 0
 
 
-def get_vram_used_mb() -> int:
-    """Returns VRAM used in MB, or 0 if unavailable."""
+def _get_vram_info() -> tuple[int, int, int]:
+    """Returns (used_mb, total_mb, free_mb) in a single pynvml call, or (0,0,0) if unavailable."""
     try:
         import pynvml
         _ensure_nvml()
         handle = pynvml.nvmlDeviceGetHandleByIndex(0)
         mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
-        return round(mem.used / 1e6)
+        used = round(mem.used / 1e6)
+        total = round(mem.total / 1e6)
+        return used, total, max(0, total - used)
     except Exception:
-        return 0
+        return 0, 0, 0
+
+
+def get_vram_used_mb() -> int:
+    """Returns VRAM used in MB, or 0 if unavailable."""
+    return _get_vram_info()[0]
 
 
 def get_vram_total_mb() -> int:
     """Returns total VRAM in MB, or 0 if unavailable."""
-    try:
-        import pynvml
-        _ensure_nvml()
-        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-        mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
-        return round(mem.total / 1e6)
-    except Exception:
-        return 0
+    return _get_vram_info()[1]
 
 
 def get_vram_free_mb() -> int:
     """Returns free VRAM in MB."""
-    total = get_vram_total_mb()
-    used = get_vram_used_mb()
-    return max(0, total - used)
+    return _get_vram_info()[2]
 
 
 def is_gpu_loaded() -> bool:
@@ -645,8 +643,8 @@ def _pick_local_model() -> tuple[str, bool, str | None]:
 
     backup_model is the emergency fallback if the primary fails.
     """
-    strong_model = os.getenv("E3N_STRONG_MODEL", "e3n-nemo")
-    default_model = os.getenv("E3N_MODEL", "e3n")
+    strong_model = os.getenv("E3N_STRONG_MODEL", "e3n-qwen14b")
+    default_model = os.getenv("E3N_MODEL", "e3n-qwen3b")
     sim_model = os.getenv("E3N_SIM_MODEL", default_model)
 
     tier_a_min = _env_int("VRAM_TIER_A_MIN_MB", 9000)

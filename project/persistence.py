@@ -11,6 +11,7 @@ DB location: configured via SQLITE_PATH in .env (default: C:\\e3n\\data\\sqlite\
 import sqlite3
 import os
 import time
+import json
 import logging
 
 logger = logging.getLogger("e3n.persistence")
@@ -21,14 +22,13 @@ _db_path = os.getenv("SQLITE_PATH", r"C:\e3n\data\sqlite\e3n.db")
 def _connect() -> sqlite3.Connection:
     """Open a short-lived connection. Caller should use `with` or close manually."""
     os.makedirs(os.path.dirname(_db_path), exist_ok=True)
-    conn = sqlite3.connect(_db_path)
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+    return sqlite3.connect(_db_path)
 
 
 def init_db():
     """Create tables if they don't exist. Call once at startup."""
     with _connect() as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS conversation_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -138,7 +138,6 @@ def export_session_history(session_id: str, output_path: str) -> dict:
     if not rows:
         return {"status": "skipped", "reason": "no history for session"}
     try:
-        import json
         with open(output_path, "w", encoding="utf-8") as f:
             for role, content, created_at in rows:
                 f.write(json.dumps({"role": role, "content": content, "ts": created_at}) + "\n")

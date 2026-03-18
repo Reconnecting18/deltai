@@ -111,6 +111,50 @@ async def _broadcast_alert(alert: dict):
             pass
 
 
+# ── HEALTH EVENT BUS ─────────────────────────────────────────────────
+# Typed events for subsystem state changes, pushed to frontend via WebSocket.
+_health_clients: list[WebSocket] = []
+_health_events: deque = deque(maxlen=100)
+
+
+def _record_health_event(event_type: str, data: dict) -> dict:
+    """Sync: record event in deque + log. Safe to call from sync contexts (circuit breaker)."""
+    event = {"type": event_type, "ts": _time.time(), **data}
+    _health_events.append(event)
+    logger.info(f"Health event: {event_type} — {data}")
+    return event
+
+
+async def _emit_health_event(event_type: str, data: dict):
+    """Async: record + broadcast to WebSocket health clients."""
+    event = _record_health_event(event_type, data)
+    dead = []
+    for ws in _health_clients:
+        try:
+            await ws.send_json(event)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        try:
+            _health_clients.remove(ws)
+        except ValueError:
+            pass
+
+
+# ── IDLE TRACKING (for self-heal) ─────────────────────────────────────
+_last_chat_start: float = 0.0
+_last_chat_end: float = 0.0
+
+
+def _is_idle() -> bool:
+    """Check if E3N is idle (no active chat, 30s breathing room after last chat)."""
+    if _last_chat_start > _last_chat_end:
+        return False  # chat in progress
+    if _time.time() - _last_chat_end < 30:
+        return False  # recently finished
+    return True
+
+
 # ── TELEMETRY PROMPT TEMPLATES ───────────────────────────────────────
 
 _COACH_TEMPLATE = """You are in COACHING MODE. The operator is asking about driving performance.
@@ -146,6 +190,8 @@ _current_session_id: str | None = None  # tracks active session for history tagg
 def _append_to_history(user_message: str, assistant_response: str,
                        query_category: str = "general", rag_context: str = ""):
     """Store a clean user-assistant exchange. Skip if either is empty."""
+    global _last_chat_end
+    _last_chat_end = _time.time()
     if not user_message.strip() or not assistant_response.strip():
         return
     _conversation_history.append({"role": "user", "content": user_message})
@@ -180,23 +226,36 @@ def _get_history() -> list[dict]:
 async def _try_ollama_inference(client: httpx.AsyncClient, model: str,
                                 messages: list, tools: list | None = None) -> tuple[dict | None, str | None]:
     """
-    Attempt a single Ollama inference call.
+    Attempt a single Ollama inference call with circuit breaker protection.
     Returns (data, None) on success or (None, error_string) on failure.
     """
+    # Circuit breaker: don't hammer Ollama when it's down
+    if not _cb_check():
+        return None, f"Circuit breaker open — Ollama unreachable (backoff {_circuit_breaker['backoff_sec']}s)"
+
     payload = {"model": model, "messages": messages, "stream": False}
     if tools:
         payload["tools"] = tools
     try:
         resp = await client.post(f"{OLLAMA_URL}/api/chat", json=payload)
         if resp.status_code != 200:
+            _cb_failure()
             return None, f"HTTP {resp.status_code}: {resp.text[:200]}"
         data = resp.json()
         if "error" in data:
+            # Model errors aren't Ollama connectivity failures
+            _cb_success()
             return None, data["error"]
+        _cb_success()
         return data, None
     except httpx.TimeoutException:
+        _cb_failure()
         return None, "Ollama request timed out"
+    except (httpx.ConnectError, httpx.ConnectTimeout):
+        _cb_failure()
+        return None, "Cannot connect to Ollama"
     except Exception as e:
+        _cb_failure()
         return None, str(e)
 
 
@@ -248,7 +307,7 @@ async def _backup_health_loop():
     to verify it remains functional. Dormant infrastructure check.
     """
     interval = int(os.getenv("BACKUP_HEALTH_INTERVAL_SEC", "3600"))
-    if not os.getenv("BACKUP_ENABLED", "true").lower() in ("true", "1", "yes"):
+    if os.getenv("BACKUP_ENABLED", "true").lower() not in ("true", "1", "yes"):
         logger.info("Backup system disabled — health loop not started")
         return
 
@@ -268,6 +327,403 @@ async def _backup_health_loop():
             else:
                 logger.warning(f"BACKUP HEALTH FAIL: {model} — emergency generator offline")
             await asyncio.sleep(15)  # pause between pings to avoid VRAM contention
+
+
+# ── RESOURCE SELF-MANAGER ──────────────────────────────────────────────
+# Background task that monitors VRAM, model lifecycle, and subsystem health.
+# Takes automatic corrective actions when resources are constrained.
+
+_resource_state = {
+    "last_vram_action": 0.0,     # timestamp of last VRAM management action
+    "last_recovery": 0.0,        # timestamp of last auto-recovery attempt
+    "vram_warnings": 0,          # consecutive low-VRAM readings
+    "ollama_failures": 0,        # consecutive Ollama connectivity failures
+    "watcher_restarts": 0,       # number of watcher auto-restarts this session
+    "actions_taken": [],         # log of automatic actions (last 50)
+    "last_sim_state": False,     # previous sim running state (for transition detection)
+    "sim_stop_detected_at": 0.0, # when sim stop was first detected
+    "pending_14b_preload": False, # waiting to preload 14B after sim stop
+}
+_RESOURCE_CHECK_INTERVAL = 30    # seconds between resource checks
+_VRAM_CRITICAL_MB = 1500        # below this, aggressively free VRAM
+_VRAM_WARN_MB = 3000            # below this, start monitoring closely
+_MAX_WATCHER_RESTARTS = 5       # don't restart watcher more than this
+_OLLAMA_FAILURE_THRESHOLD = 3   # consecutive failures before auto-restart attempt
+_RESOURCE_ACTION_COOLDOWN = 60  # seconds between automatic VRAM actions
+
+
+def _log_resource_action(action: str):
+    """Record an automatic resource management action."""
+    entry = {"action": action, "ts": _time.time()}
+    _resource_state["actions_taken"].append(entry)
+    if len(_resource_state["actions_taken"]) > 50:
+        _resource_state["actions_taken"] = _resource_state["actions_taken"][-50:]
+    logger.info(f"Resource manager: {action}")
+
+
+async def _resource_manager_loop():
+    """
+    Background resource manager. Monitors VRAM, Ollama, watcher, and
+    takes automatic corrective actions:
+
+    1. VRAM management: Unloads idle models when VRAM is critical
+    2. Model lifecycle: Preloads appropriate model for current tier
+    3. Ollama health: Detects failures and attempts restart
+    4. Watcher recovery: Restarts file watcher if it dies
+    5. TTL cleanup: Periodic cleanup of expired RAG entries
+    """
+    await asyncio.sleep(15)  # let startup finish
+    logger.info("Resource self-manager started")
+
+    while True:
+        try:
+            await asyncio.sleep(_RESOURCE_CHECK_INTERVAL)
+            now = _time.time()
+
+            # ── 1. VRAM MANAGEMENT ──
+            vram_free = get_vram_free_mb()
+            sim_active = is_sim_running()
+
+            if vram_free < _VRAM_CRITICAL_MB:
+                _resource_state["vram_warnings"] += 1
+                # Critical VRAM — aggressive action after 2 consecutive readings
+                if (_resource_state["vram_warnings"] >= 2 and
+                        now - _resource_state["last_vram_action"] > _RESOURCE_ACTION_COOLDOWN):
+                    # Check what's loaded and unload non-essential models
+                    try:
+                        async with httpx.AsyncClient(timeout=5) as client:
+                            resp = await client.get(f"{OLLAMA_URL}/api/ps")
+                            if resp.status_code == 200:
+                                loaded = resp.json().get("models", [])
+                                # During sim, unload the 14B if it's loaded
+                                for m in loaded:
+                                    name = m.get("name", "").split(":")[0]
+                                    if sim_active and "14b" in name:
+                                        await client.post(f"{OLLAMA_URL}/api/generate",
+                                            json={"model": m["name"], "prompt": "", "keep_alive": 0},
+                                            timeout=10)
+                                        _log_resource_action(f"Unloaded {m['name']} (VRAM critical: {vram_free}MB, sim active)")
+                                    elif vram_free < 1000 and len(loaded) > 1:
+                                        # Extreme pressure — unload everything except smallest
+                                        sizes = [(m2.get("name", ""), m2.get("size_vram", m2.get("size", 0)))
+                                                 for m2 in loaded]
+                                        sizes.sort(key=lambda x: x[1], reverse=True)
+                                        for model_name, _ in sizes[:-1]:  # keep smallest
+                                            await client.post(f"{OLLAMA_URL}/api/generate",
+                                                json={"model": model_name, "prompt": "", "keep_alive": 0},
+                                                timeout=10)
+                                            _log_resource_action(f"Unloaded {model_name} (VRAM extreme: {vram_free}MB)")
+                                        break
+                                _resource_state["last_vram_action"] = now
+                    except Exception as e:
+                        logger.debug(f"VRAM management failed: {e}")
+
+            elif vram_free < _VRAM_WARN_MB:
+                _resource_state["vram_warnings"] = max(1, _resource_state["vram_warnings"])
+            else:
+                _resource_state["vram_warnings"] = 0
+
+            # ── 2. MODEL LIFECYCLE (proactive sim transitions) ──
+            prev_sim = _resource_state["last_sim_state"]
+            _resource_state["last_sim_state"] = sim_active
+
+            # Sim just STARTED (False -> True)
+            if sim_active and not prev_sim:
+                _log_resource_action("Sim started — proactive model swap")
+                await _emit_health_event("sim_state_changed", {"running": True})
+                try:
+                    async with httpx.AsyncClient(timeout=10) as mc:
+                        ps_resp = await mc.get(f"{OLLAMA_URL}/api/ps")
+                        if ps_resp.status_code == 200:
+                            for m in ps_resp.json().get("models", []):
+                                if "14b" in m.get("name", "").lower():
+                                    await mc.post(f"{OLLAMA_URL}/api/generate",
+                                        json={"model": m["name"], "prompt": "", "keep_alive": 0},
+                                        timeout=10)
+                                    _log_resource_action(f"Unloaded {m['name']} (sim started)")
+                                    await _emit_health_event("model_unloaded", {"model": m["name"], "reason": "sim_start"})
+                        # Preload 3B if VRAM allows
+                        vram_now = get_vram_free_mb()
+                        sim_model = os.getenv("E3N_SIM_MODEL", os.getenv("E3N_MODEL", "e3n-qwen3b"))
+                        if vram_now >= 2500:
+                            await mc.post(f"{OLLAMA_URL}/api/generate",
+                                json={"model": sim_model, "prompt": "ping", "keep_alive": "5m",
+                                      "options": {"num_predict": 1}}, timeout=60)
+                            _log_resource_action(f"Preloaded {sim_model} (sim started, {vram_now}MB free)")
+                            await _emit_health_event("model_loaded", {"model": sim_model, "reason": "sim_start"})
+                except Exception as e:
+                    logger.debug(f"Sim-start model swap failed: {e}")
+                _resource_state["pending_14b_preload"] = False
+
+            # Sim just STOPPED (True -> False)
+            elif not sim_active and prev_sim:
+                _log_resource_action("Sim stopped — scheduling 14B preload")
+                await _emit_health_event("sim_state_changed", {"running": False})
+                _resource_state["sim_stop_detected_at"] = now
+                _resource_state["pending_14b_preload"] = True
+
+            # Pending 14B preload (~30s after sim stop)
+            if _resource_state["pending_14b_preload"]:
+                elapsed_since_stop = now - _resource_state["sim_stop_detected_at"]
+                if elapsed_since_stop >= 30:
+                    _resource_state["pending_14b_preload"] = False
+                    vram_now = get_vram_free_mb()
+                    strong_model = os.getenv("E3N_STRONG_MODEL", "e3n-qwen14b")
+                    if vram_now >= 9000:
+                        try:
+                            async with httpx.AsyncClient(timeout=60) as mc:
+                                await mc.post(f"{OLLAMA_URL}/api/generate",
+                                    json={"model": strong_model, "prompt": "ping",
+                                          "keep_alive": "5m", "options": {"num_predict": 1}},
+                                    timeout=60)
+                                _log_resource_action(f"Preloaded {strong_model} (sim stopped, {vram_now}MB free)")
+                                await _emit_health_event("model_loaded", {"model": strong_model, "reason": "sim_stop"})
+                        except Exception as e:
+                            logger.debug(f"Post-sim 14B preload failed: {e}")
+                    else:
+                        _log_resource_action(f"Skipped 14B preload — only {vram_now}MB VRAM free")
+
+            # ── 3. OLLAMA HEALTH ──
+            try:
+                async with httpx.AsyncClient(timeout=3) as client:
+                    resp = await client.get(f"{OLLAMA_URL}/api/tags")
+                    if resp.status_code == 200:
+                        _resource_state["ollama_failures"] = 0
+                    else:
+                        _resource_state["ollama_failures"] += 1
+            except Exception:
+                _resource_state["ollama_failures"] += 1
+
+            if _resource_state["ollama_failures"] >= _OLLAMA_FAILURE_THRESHOLD:
+                if now - _resource_state["last_recovery"] > 120:  # 2min cooldown
+                    _log_resource_action(f"Ollama unreachable ({_resource_state['ollama_failures']} failures), attempting restart")
+                    try:
+                        import subprocess
+                        subprocess.Popen(
+                            ["ollama", "serve"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+                        )
+                        _resource_state["last_recovery"] = now
+                        _resource_state["ollama_failures"] = 0
+                        await asyncio.sleep(5)  # give it time to start
+                    except Exception as e:
+                        logger.error(f"Ollama auto-restart failed: {e}")
+
+            # ── 4. WATCHER RECOVERY ──
+            if RAG_AVAILABLE:
+                try:
+                    if not watcher_running() and _resource_state["watcher_restarts"] < _MAX_WATCHER_RESTARTS:
+                        _log_resource_action("File watcher died, restarting")
+                        stop_watcher()
+                        start_watcher()
+                        _resource_state["watcher_restarts"] += 1
+                except Exception as e:
+                    logger.debug(f"Watcher recovery check failed: {e}")
+
+            # ── 5. PERIODIC TTL CLEANUP ──
+            if RAG_AVAILABLE and is_session_active():
+                try:
+                    cleanup_expired()
+                except Exception:
+                    pass
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Resource manager error: {e}")
+            await asyncio.sleep(10)
+
+
+# ── AI-DRIVEN SELF-HEAL LOOP ──────────────────────────────────────────
+# Periodically runs diagnostics, has the LLM reason about issues, and
+# executes repairs autonomously. Only runs when idle + not in session.
+
+_SELF_HEAL_ENABLED = os.getenv("SELF_HEAL_ENABLED", "true").lower() in ("true", "1", "yes")
+_SELF_HEAL_INTERVAL = int(os.getenv("SELF_HEAL_INTERVAL_SEC", "300"))  # 5 minutes
+_SELF_HEAL_MODEL = os.getenv("E3N_MODEL", "e3n-qwen3b")
+
+_SELF_HEAL_SYSTEM_PROMPT = """You are E3N's internal diagnostics AI. You receive a system diagnostics report and must decide if any repairs are needed.
+
+RULES:
+- Only suggest repairs if there are actual issues (DOWN, ERROR, STOPPED, WARNING, DEGRADED)
+- Available repairs: restart_watcher, clear_vram, reindex_knowledge, check_ollama
+- If no issues found, respond with exactly: NO_ACTION
+- If repair needed, respond with exactly: REPAIR:<repair_name>
+- Only suggest ONE repair per cycle (most critical first)
+- Never suggest clear_vram during an active racing session
+- Never suggest repairs for cosmetic warnings
+
+Examples:
+- Diagnostics show "Watcher: STOPPED" -> REPAIR:restart_watcher
+- Diagnostics show "Ollama: DOWN" -> REPAIR:check_ollama
+- Diagnostics show everything nominal -> NO_ACTION
+"""
+
+
+async def _ai_self_heal_loop():
+    """
+    AI-driven self-healing loop. Periodically runs diagnostics,
+    has the LLM reason about results, and executes repairs.
+    """
+    if not _SELF_HEAL_ENABLED:
+        logger.info("Self-heal loop disabled")
+        return
+
+    await asyncio.sleep(60)  # let startup + first resource manager cycle finish
+    logger.info("AI self-heal loop started")
+
+    while True:
+        try:
+            await asyncio.sleep(_SELF_HEAL_INTERVAL)
+
+            # Skip if not idle
+            if not _is_idle():
+                logger.debug("Self-heal: skipping (chat active)")
+                continue
+
+            # Skip during active racing sessions (GPU protection)
+            if is_session_active():
+                logger.debug("Self-heal: skipping (racing session active)")
+                continue
+
+            # Skip if circuit breaker is open (Ollama down — can't run LLM)
+            if not _cb_check():
+                logger.debug("Self-heal: skipping (circuit breaker open)")
+                continue
+
+            # ── Step 1: Run diagnostics ──
+            diag_output = execute_tool("self_diagnostics", {})
+
+            # Short-circuit: if no issues, skip LLM call entirely
+            if "No issues detected" in diag_output:
+                logger.debug("Self-heal: all clear, no LLM call needed")
+                continue
+
+            # ── Step 2: LLM reasoning ──
+            messages = [
+                {"role": "system", "content": _SELF_HEAL_SYSTEM_PROMPT},
+                {"role": "user", "content": f"Current diagnostics:\n\n{diag_output}"},
+            ]
+
+            try:
+                async with httpx.AsyncClient(timeout=30) as client:
+                    resp = await client.post(f"{OLLAMA_URL}/api/chat", json={
+                        "model": _SELF_HEAL_MODEL,
+                        "messages": messages,
+                        "stream": False,
+                        "options": {"num_predict": 50},
+                    })
+                    if resp.status_code != 200:
+                        logger.warning(f"Self-heal LLM call failed: HTTP {resp.status_code}")
+                        continue
+                    data = resp.json()
+                    llm_response = data.get("message", {}).get("content", "").strip()
+            except Exception as e:
+                logger.warning(f"Self-heal LLM call failed: {e}")
+                continue
+
+            # ── Step 3: Parse and execute repair ──
+            valid_repairs = {"restart_watcher", "clear_vram", "reindex_knowledge", "check_ollama"}
+
+            if llm_response.startswith("REPAIR:"):
+                repair_name = llm_response.split("REPAIR:", 1)[1].strip().lower()
+            else:
+                # Fuzzy fallback: check if any valid repair name appears in response
+                repair_name = None
+                for r in valid_repairs:
+                    if r in llm_response.lower():
+                        repair_name = r
+                        break
+
+            if repair_name and repair_name in valid_repairs:
+                # Safety: don't clear VRAM during sim
+                if repair_name == "clear_vram" and is_sim_running():
+                    logger.info("Self-heal: blocked clear_vram during sim")
+                    continue
+
+                _log_resource_action(f"Self-heal: executing {repair_name} (LLM-decided)")
+                await _emit_health_event("self_heal_action", {
+                    "repair": repair_name,
+                    "diagnostics_summary": diag_output[:200],
+                })
+
+                # ── Step 4: Execute repair ──
+                result = execute_tool("repair_subsystem", {"repair": repair_name})
+                _log_resource_action(f"Self-heal result: {result[:100]}")
+
+                # ── Step 5: Verify fix ──
+                await asyncio.sleep(5)
+                verify_output = execute_tool("self_diagnostics", {})
+                success = "No issues detected" in verify_output
+                _log_resource_action(f"Self-heal verify: {'passed' if success else 'issues persist'}")
+                await _emit_health_event("repair_attempted", {
+                    "repair": repair_name, "success": success,
+                })
+
+            elif "NO_ACTION" in llm_response.upper():
+                logger.debug("Self-heal: LLM says no action needed")
+            else:
+                logger.warning(f"Self-heal: unexpected LLM response: {llm_response[:100]}")
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Self-heal loop error: {e}")
+            await asyncio.sleep(30)
+
+
+# ── CIRCUIT BREAKER FOR OLLAMA ────────────────────────────────────────
+# Prevents hammering Ollama when it's down, with exponential backoff.
+
+_circuit_breaker = {
+    "state": "closed",    # closed (normal), open (blocking), half-open (testing)
+    "failures": 0,
+    "last_failure": 0.0,
+    "backoff_sec": 5,     # starts at 5s, doubles up to 60s
+}
+_CB_FAILURE_THRESHOLD = 3
+_CB_MAX_BACKOFF = 60
+
+
+def _cb_check() -> bool:
+    """Returns True if calls should proceed, False if circuit is open."""
+    if _circuit_breaker["state"] == "closed":
+        return True
+    if _circuit_breaker["state"] == "open":
+        elapsed = _time.time() - _circuit_breaker["last_failure"]
+        if elapsed >= _circuit_breaker["backoff_sec"]:
+            _circuit_breaker["state"] = "half-open"
+            return True
+        return False
+    return True  # half-open: allow one test call
+
+
+def _cb_success():
+    """Record a successful Ollama call."""
+    prev_state = _circuit_breaker["state"]
+    _circuit_breaker["state"] = "closed"
+    _circuit_breaker["failures"] = 0
+    _circuit_breaker["backoff_sec"] = 5
+    if prev_state != "closed":
+        _record_health_event("circuit_breaker_changed", {"state": "closed", "prev": prev_state})
+
+
+def _cb_failure():
+    """Record a failed Ollama call."""
+    _circuit_breaker["failures"] += 1
+    _circuit_breaker["last_failure"] = _time.time()
+    if _circuit_breaker["failures"] >= _CB_FAILURE_THRESHOLD:
+        prev_state = _circuit_breaker["state"]
+        _circuit_breaker["state"] = "open"
+        _circuit_breaker["backoff_sec"] = min(
+            _circuit_breaker["backoff_sec"] * 2, _CB_MAX_BACKOFF
+        )
+        if prev_state != "open":
+            _record_health_event("circuit_breaker_changed", {
+                "state": "open", "failures": _circuit_breaker["failures"],
+                "backoff_sec": _circuit_breaker["backoff_sec"],
+            })
 
 
 # ── LIFESPAN ───────────────────────────────────────────────────────────
@@ -320,17 +776,20 @@ async def lifespan(app: FastAPI):
         else:
             logger.warning(f"Model check: {model} ({role}) — MISSING (emergency generator unavailable)")
 
-    # ── Start backup health loop ──
+    # ── Start background tasks ──
     health_task = asyncio.create_task(_backup_health_loop())
+    resource_task = asyncio.create_task(_resource_manager_loop())
+    self_heal_task = asyncio.create_task(_ai_self_heal_loop())
 
     yield
 
     # ── Shutdown ──
-    health_task.cancel()
-    try:
-        await health_task
-    except asyncio.CancelledError:
-        pass
+    for task in (health_task, resource_task, self_heal_task):
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
     if RAG_AVAILABLE:
         try:
@@ -650,6 +1109,8 @@ async def chat(req: ChatRequest):
       {"t":"done"}
       {"t":"error","c":"message"}
     """
+    global _last_chat_start
+    _last_chat_start = _time.time()
     # ── ROUTE DECISION ──────────────────────────────────────
     decision = await route(
         message=req.message,
@@ -790,8 +1251,7 @@ async def chat(req: ChatRequest):
                             name = fn.get("name", "unknown")
                             args = fn.get("arguments", {})
                             yield json.dumps({"t": "tool", "n": name, "a": args}) + "\n"
-                            loop = asyncio.get_event_loop()
-                            result = await loop.run_in_executor(None, execute_tool, name, args)
+                            result = await asyncio.to_thread(execute_tool, name, args)
                             summary = result[:300].replace("\n", " ").replace("\r", "")
                             if len(result) > 300:
                                 summary += "..."
@@ -1013,9 +1473,8 @@ async def chat(req: ChatRequest):
                     name = fn.get("name", "unknown")
                     args = fn.get("arguments", {})
                     yield json.dumps({"t": "tool", "n": name, "a": args}) + "\n"
-                    loop = asyncio.get_event_loop()
                     try:
-                        result = await loop.run_in_executor(None, execute_tool, name, args)
+                        result = await asyncio.to_thread(execute_tool, name, args)
                     except Exception as tool_err:
                         result = f"ERROR: Tool execution crashed: {tool_err}"
                     # If tool errored, retry once with sanitized args
@@ -1027,7 +1486,7 @@ async def chat(req: ChatRequest):
                         if "timeout" in sanitized_args and name == "run_powershell":
                             sanitized_args["timeout"] = min(int(sanitized_args.get("timeout", 15)), 30)
                         try:
-                            result2 = await loop.run_in_executor(None, execute_tool, name, sanitized_args)
+                            result2 = await asyncio.to_thread(execute_tool, name, sanitized_args)
                             if not result2.startswith("ERROR:"):
                                 result = result2
                         except Exception:
@@ -1197,7 +1656,8 @@ async def ingest_endpoint(req: IngestRequest):
         # Auto-set session_id when ingest triggers session activation
         if not was_active and is_session_active() and not _current_session_id:
             _current_session_id = f"auto_{int(_time.time())}"
-        result = ingest_context(
+        result = await asyncio.to_thread(
+            ingest_context,
             source=req.source.strip(),
             context=req.context.strip(),
             ttl=req.ttl,
@@ -1234,7 +1694,7 @@ async def ingest_batch_endpoint(req: IngestBatchRequest):
             src = item.get("source", "")
             if src:
                 activate_session_from_ingest(src)
-        result = ingest_context_batch(req.items)
+        result = await asyncio.to_thread(ingest_context_batch, req.items)
         # Forward any alerts
         for item in req.items:
             tags = item.get("tags", [])
@@ -1326,6 +1786,71 @@ async def websocket_alerts(websocket: WebSocket):
 def recent_alerts():
     """Get the last 20 alerts."""
     return {"alerts": list(_recent_alerts)}
+
+
+# ── HEALTH EVENT BUS ENDPOINTS ────────────────────────────────────────
+
+@app.websocket("/ws/health")
+async def websocket_health(websocket: WebSocket):
+    """WebSocket endpoint for real-time health state events."""
+    await websocket.accept()
+    _health_clients.append(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        try:
+            _health_clients.remove(websocket)
+        except ValueError:
+            pass
+
+
+@app.get("/health/events")
+def health_events(limit: int = 50):
+    """Get recent health events."""
+    return {"events": list(_health_events)[-limit:]}
+
+
+# ── SELF-HEAL STATUS ─────────────────────────────────────────────────
+
+@app.get("/self-heal/status")
+def self_heal_status():
+    """AI self-heal loop status."""
+    heal_actions = [a for a in _resource_state["actions_taken"] if "Self-heal" in a.get("action", "")]
+    return {
+        "enabled": _SELF_HEAL_ENABLED,
+        "interval_sec": _SELF_HEAL_INTERVAL,
+        "model": _SELF_HEAL_MODEL,
+        "idle": _is_idle(),
+        "session_active": is_session_active(),
+        "circuit_breaker": _circuit_breaker["state"],
+        "recent_actions": heal_actions[-10:],
+    }
+
+
+# ── RESOURCE MANAGEMENT STATUS ────────────────────────────────────────
+
+@app.get("/resources/status")
+def resource_status():
+    """Resource self-manager status — VRAM, circuit breaker, auto-recovery."""
+    return {
+        "resource_manager": {
+            "vram_free_mb": get_vram_free_mb(),
+            "vram_warnings": _resource_state["vram_warnings"],
+            "ollama_failures": _resource_state["ollama_failures"],
+            "watcher_restarts": _resource_state["watcher_restarts"],
+            "last_vram_action": _resource_state["last_vram_action"] or None,
+            "last_recovery": _resource_state["last_recovery"] or None,
+            "recent_actions": _resource_state["actions_taken"][-10:],
+        },
+        "circuit_breaker": {
+            "state": _circuit_breaker["state"],
+            "failures": _circuit_breaker["failures"],
+            "backoff_sec": _circuit_breaker["backoff_sec"],
+        },
+    }
 
 
 # ── SUBSYSTEM HEALTH ──────────────────────────────────────────────────

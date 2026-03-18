@@ -144,6 +144,81 @@ TOOLS = [
     },
 ]
 
+# ── SELF-DIAGNOSTIC TOOLS ────────────────────────────────────────────
+
+DIAGNOSTIC_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "self_diagnostics",
+            "description": "Run E3N self-diagnostics. With no arguments, checks all subsystems (Ollama, ChromaDB, GPU/VRAM, voice, watcher, backup models, critical paths). With a subsystem specified, runs a deep check with fix suggestions. Use when something seems broken, slow, or after tool failures.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "subsystem": {
+                        "type": "string",
+                        "description": "Optional: deep-check one subsystem. One of: ollama, chromadb, gpu, voice, watcher, backup, paths. Omit for full sweep."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_ollama_models",
+            "description": "Manage Ollama models in VRAM. Actions: 'status' (list loaded + available models with VRAM usage), 'unload' (remove a model from VRAM to free memory), 'preload' (load a model into VRAM). Use to manage VRAM pressure or switch models.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "Action: 'status', 'unload', or 'preload'"
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "Model name for unload/preload (e.g., 'e3n-qwen14b'). Required for unload/preload."
+                    }
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "repair_subsystem",
+            "description": "Attempt a safe repair on an E3N subsystem. Available repairs: 'restart_watcher' (restart file watcher), 'clear_vram' (unload all models from VRAM), 'reindex_knowledge' (re-ingest all knowledge files), 'check_ollama' (verify/start Ollama). Use after self_diagnostics identifies an issue.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repair": {
+                        "type": "string",
+                        "description": "Repair action: 'restart_watcher', 'clear_vram', 'reindex_knowledge', or 'check_ollama'"
+                    }
+                },
+                "required": ["repair"]
+            }
+        }
+    },
+]
+
+DIAGNOSTIC_TOOLS.append({
+    "type": "function",
+    "function": {
+        "name": "resource_status",
+        "description": "Get E3N resource self-manager status: current VRAM pressure and tier, loaded models, circuit breaker state, auto-recovery actions taken, sim/session detection. Use to understand system resource health and recent automatic interventions.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    }
+})
+
+TOOLS.extend(DIAGNOSTIC_TOOLS)
+
 # Quick lookup by name
 TOOL_MAP = {t["function"]["name"]: t for t in TOOLS}
 

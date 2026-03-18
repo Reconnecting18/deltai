@@ -77,7 +77,10 @@ def list_datasets() -> list[dict]:
                         count += 1
         except Exception:
             pass
-        size_kb = round(os.path.getsize(fpath) / 1024, 1)
+        try:
+            size_kb = round(os.path.getsize(fpath) / 1024, 1)
+        except OSError:
+            size_kb = 0
         datasets.append({
             "name": name,
             "examples": count,

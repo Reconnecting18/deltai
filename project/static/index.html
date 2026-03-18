@@ -230,6 +230,12 @@ canvas.spark{width:100%;height:28px;display:block}
 .tr-ta:focus{border-color:var(--bdr2)}
 .tr-status{font-family:var(--mono);font-size:10px;color:var(--text2)}
 .tr-count{font-family:var(--mono);font-size:10px;color:var(--text2);margin-left:auto}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+#voice-ptt:hover{border-color:var(--teal);background:rgba(0,212,184,0.12)}
+#voice-ptt.recording{border-color:var(--danger);background:rgba(184,58,58,0.15);color:var(--danger);box-shadow:0 0 20px rgba(184,58,58,0.2);animation:pulse 1s infinite}
+#voice-ptt.processing{border-color:var(--amber);background:rgba(200,137,58,0.1);color:var(--amber);pointer-events:none}
+#voice-ptt.playing{border-color:var(--teal);background:rgba(0,212,184,0.15);color:var(--teal);box-shadow:0 0 20px rgba(0,212,184,0.15)}
+#btn-voice.active{background:rgba(0,212,184,0.15);color:var(--teal);border-color:var(--teal)}
 </style>
 </head>
 <body>
@@ -252,7 +258,16 @@ canvas.spark{width:100%;height:28px;display:block}
   </div>
   <div class="tb-div"></div>
   <span id="budget-display" style="font-size:10px;font-family:var(--mono);color:var(--dim);white-space:nowrap" title="Cloud daily spend / limit">$0.00/$5.00</span>
+  <div class="tb-div" id="session-div" style="display:none"></div>
+  <div id="session-badge" style="display:none;align-items:center;gap:6px;-webkit-app-region:no-drag">
+    <span id="session-dot" style="width:6px;height:6px;border-radius:50%;background:var(--teal);box-shadow:0 0 6px var(--teal);animation:pulse 2s infinite"></span>
+    <span id="session-text" style="font-family:var(--mono);font-size:9px;letter-spacing:0.1em;color:var(--teal)">SESSION</span>
+    <span id="session-timer" style="font-family:var(--mono);font-size:9px;color:var(--text2)">0:00</span>
+    <span id="session-warn" style="font-family:var(--mono);font-size:8px;color:var(--amber);display:none">CPU ONLY</span>
+    <button class="tb-btn" id="session-end-btn" onclick="sessionEnd()" style="font-size:8px;padding:2px 8px;border-color:var(--danger);color:var(--danger);-webkit-app-region:no-drag">END</button>
+  </div>
   <div class="tb-spacer"></div>
+  <button class="tb-btn" id="btn-voice" onclick="toggleVoice()" style="-webkit-app-region:no-drag">VOICE</button>
   <button class="tb-btn" id="btn-memory" onclick="toggleWin('memory')">MEMORY</button>
   <button class="tb-btn" id="btn-terminal" onclick="toggleWin('terminal')">TERMINAL</button>
   <div class="tb-div"></div>
@@ -375,6 +390,7 @@ canvas.spark{width:100%;height:28px;display:block}
     <button class="mem-tab" data-mod="status">Status</button>
     <button class="mem-tab" data-mod="memory">Memory</button>
     <button class="mem-tab" data-mod="training">Training</button>
+    <button class="mem-tab" data-mod="diagnostics">Diagnostics</button>
   </div>
   <div id="m-content">
     <div class="mem-panel active" data-panel="protocols">
@@ -491,11 +507,65 @@ canvas.spark{width:100%;height:28px;display:block}
           <span class="tr-status" id="tr-status"></span>
         </div>
       </div>
-      <div class="mlabel" style="margin-top:12px;margin-bottom:4px">Training Status</div>
+      <div class="mlabel" style="margin-top:12px;margin-bottom:4px">Training Pipeline</div>
       <div class="block"><div class="c-tr"></div><div class="c-bl"></div>
         <div class="stbl">
-          <div class="srow"><span class="sk">Status</span><span class="sv" id="tr-train-status">Idle — Phase 2</span></div>
-          <div class="srow"><span class="sk">Pipeline</span><span class="sv"><span class="chip" style="border-color:var(--text2);color:var(--text2)">Not configured</span></span></div>
+          <div class="srow"><span class="sk">Status</span><span class="sv" id="tr-train-status">Checking...</span></div>
+          <div class="srow"><span class="sk">LoRA</span><span class="sv"><span class="chip" id="tr-lora-chip" style="border-color:var(--text2);color:var(--text2)">Checking...</span></span></div>
+          <div class="srow" id="tr-progress-row" style="display:none"><span class="sk">Progress</span><span class="sv" id="tr-progress-text">0/0</span></div>
+          <div class="srow" id="tr-loss-row" style="display:none"><span class="sk">Loss</span><span class="sv" id="tr-loss-text">--</span></div>
+        </div>
+        <div id="tr-progress-bar-wrap" style="display:none;margin-top:4px">
+          <div class="btrack"><div class="bfill" id="tr-progress-fill" style="width:0%"></div></div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+          <select id="tr-mode-select" class="tr-select" style="width:auto;max-width:100px">
+            <option value="auto">auto</option>
+            <option value="lora">lora</option>
+            <option value="fewshot">fewshot</option>
+          </select>
+          <button class="tb-btn" id="tr-start-btn" onclick="trStartTraining()" disabled>Start Training</button>
+          <button class="tb-btn" id="tr-stop-btn" onclick="trStopTraining()" style="display:none;border-color:var(--danger);color:var(--danger)">Stop</button>
+          <span class="tr-status" id="tr-train-msg"></span>
+        </div>
+      </div>
+    </div>
+    <div class="mem-panel" data-panel="diagnostics" style="overflow-y:auto">
+      <div class="mlabel" style="margin-bottom:4px">Circuit Breaker</div>
+      <div class="block"><div class="c-tr"></div><div class="c-bl"></div>
+        <div class="stbl">
+          <div class="srow"><span class="sk">State</span><span class="sv"><span class="chip" id="dx-cb-chip">--</span></span></div>
+          <div class="srow"><span class="sk">Failures</span><span class="sv" id="dx-cb-failures">0</span></div>
+          <div class="srow"><span class="sk">Backoff</span><span class="sv" id="dx-cb-backoff">0s</span></div>
+        </div>
+      </div>
+      <div class="mlabel" style="margin-top:10px;margin-bottom:4px">VRAM &amp; Resources</div>
+      <div class="block"><div class="c-tr"></div><div class="c-bl"></div>
+        <div class="stbl">
+          <div class="srow"><span class="sk">Free VRAM</span><span class="sv" id="dx-vram-free">-- MB</span></div>
+          <div class="srow"><span class="sk">VRAM Warnings</span><span class="sv" id="dx-vram-warns">0</span></div>
+          <div class="srow"><span class="sk">Ollama Failures</span><span class="sv" id="dx-ollama-fails">0</span></div>
+          <div class="srow"><span class="sk">Watcher Restarts</span><span class="sv" id="dx-watcher-restarts">0</span></div>
+        </div>
+      </div>
+      <div class="mlabel" style="margin-top:10px;margin-bottom:4px">Self-Heal</div>
+      <div class="block"><div class="c-tr"></div><div class="c-bl"></div>
+        <div class="stbl">
+          <div class="srow"><span class="sk">Enabled</span><span class="sv" id="dx-heal-enabled">--</span></div>
+          <div class="srow"><span class="sk">Idle</span><span class="sv" id="dx-heal-idle">--</span></div>
+          <div class="srow"><span class="sk">Circuit Breaker</span><span class="sv" id="dx-heal-cb">--</span></div>
+        </div>
+      </div>
+      <div class="mlabel" style="margin-top:10px;margin-bottom:4px">Resource Actions</div>
+      <div class="block"><div class="c-tr"></div><div class="c-bl"></div>
+        <div id="dx-actions-list" style="max-height:120px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--bdr) transparent">
+          <div class="kb-empty">Loading...</div>
+        </div>
+      </div>
+      <div class="mlabel" style="margin-top:10px;margin-bottom:4px">Health Events</div>
+      <div class="block"><div class="c-tr"></div><div class="c-bl"></div>
+        <div id="dx-events-list" style="max-height:160px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--bdr) transparent">
+          <div class="kb-empty">Loading...</div>
         </div>
       </div>
     </div>
@@ -983,7 +1053,10 @@ document.querySelectorAll('.mem-tab').forEach(tab=>{
     const mod=this.dataset.mod
     if(['protocols','personality','pilot'].indexOf(mod)>=0)loadModule(mod)
     if(mod==='memory')loadMemoryFiles()
-    if(mod==='training')trLoadDatasets()
+    if(mod==='training'){trLoadDatasets();trCheckLoRA();trStartPoll()}
+    else{trStopPoll()}
+    if(mod==='diagnostics'){dxPoll();dxStartPoll()}
+    else{dxStopPoll()}
   })
 })
 
@@ -1144,6 +1217,8 @@ async function trLoadDataset(){
   const list=document.getElementById('tr-example-list')
   const form=document.getElementById('tr-add-form')
   _trCurrentDS=sel.value
+  const startBtn=document.getElementById('tr-start-btn')
+  if(startBtn)startBtn.disabled=!_trCurrentDS
   if(!_trCurrentDS){
     list.innerHTML='<div class="kb-empty">Select or create a dataset</div>'
     form.style.display='none';return
@@ -1229,7 +1304,298 @@ async function trExport(){
   }catch(e){alert('Error exporting')}
 }
 
+// ── TRAINING PIPELINE CONTROLS ──
+let _trPollInterval=null
+async function trCheckLoRA(){
+  const chip=document.getElementById('tr-lora-chip')
+  try{
+    const d=await(await fetch(API+'/training/lora/status')).json()
+    if(d.available){chip.textContent='READY';chip.className='chip chip-ok'}
+    else{chip.textContent='UNAVAILABLE';chip.className='chip chip-warn';chip.title=d.reason||''}
+  }catch(e){chip.textContent='ERROR';chip.className='chip chip-err'}
+}
+async function trPollStatus(){
+  try{
+    const d=await(await fetch(API+'/training/status')).json()
+    const st=document.getElementById('tr-train-status')
+    const msg=document.getElementById('tr-train-msg')
+    const startBtn=document.getElementById('tr-start-btn')
+    const stopBtn=document.getElementById('tr-stop-btn')
+    const progRow=document.getElementById('tr-progress-row')
+    const progText=document.getElementById('tr-progress-text')
+    const lossRow=document.getElementById('tr-loss-row')
+    const lossText=document.getElementById('tr-loss-text')
+    const progBar=document.getElementById('tr-progress-bar-wrap')
+    const progFill=document.getElementById('tr-progress-fill')
+    const status=d.status||'idle'
+    if(status==='idle'){
+      st.textContent='Idle';st.style.color=''
+      startBtn.style.display='';stopBtn.style.display='none'
+      progRow.style.display='none';lossRow.style.display='none';progBar.style.display='none'
+      msg.textContent=d.completed?'Last run completed':'';msg.style.color=''
+    }else if(d.running){
+      st.textContent='Training — '+(d.mode||'auto');st.style.color='var(--teal)'
+      startBtn.style.display='none';stopBtn.style.display=''
+      progRow.style.display='';lossRow.style.display='';progBar.style.display=''
+      const step=d.progress||0,total=d.examples_used||0
+      progText.textContent=step+(total?' / ~'+total:'')
+      if(d.loss!=null){lossText.textContent=Number(d.loss).toFixed(4)}
+      const pct=total>0?Math.min(100,Math.round(step/total*100)):0
+      progFill.style.width=pct+'%'
+      msg.textContent=d.trainable_params?d.trainable_params.toLocaleString()+' params':'';msg.style.color='var(--text2)'
+    }else if(status==='error'){
+      st.textContent='Error';st.style.color='var(--danger)'
+      startBtn.style.display='';stopBtn.style.display='none'
+      progRow.style.display='none';lossRow.style.display='none';progBar.style.display='none'
+      msg.textContent=d.error||'Unknown error';msg.style.color='var(--danger)'
+    }else{
+      st.textContent=status;st.style.color=''
+    }
+  }catch(e){}
+}
+function trStartPoll(){trPollStatus();_trPollInterval=setInterval(trPollStatus,3000)}
+function trStopPoll(){if(_trPollInterval){clearInterval(_trPollInterval);_trPollInterval=null}}
+async function trStartTraining(){
+  if(!_trCurrentDS){alert('Select a dataset first');return}
+  const mode=document.getElementById('tr-mode-select').value
+  const msg=document.getElementById('tr-train-msg')
+  try{
+    const d=await(await fetch(API+'/training/start',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({dataset:_trCurrentDS,mode:mode})
+    })).json()
+    if(d.status==='ok'||d.status==='started'){msg.textContent='Training started';msg.style.color='var(--teal)';trPollStatus()}
+    else{msg.textContent='Error: '+(d.reason||d.error||'unknown');msg.style.color='var(--danger)'}
+  }catch(e){msg.textContent='Failed to start training';msg.style.color='var(--danger)'}
+}
+async function trStopTraining(){
+  if(!confirm('Stop training?'))return
+  try{
+    await fetch(API+'/training/stop',{method:'POST'})
+    document.getElementById('tr-train-msg').textContent='Stopping...'
+    setTimeout(trPollStatus,1000)
+  }catch(e){}
+}
+
+// ── SESSION MODE CONTROLS ──
+let _sessionInterval=null
+async function pollSession(){
+  try{
+    const d=await(await fetch(API+'/session/status')).json()
+    const badge=document.getElementById('session-badge')
+    const div=document.getElementById('session-div')
+    const timer=document.getElementById('session-timer')
+    const warn=document.getElementById('session-warn')
+    if(d.active){
+      badge.style.display='flex';div.style.display=''
+      if(d.started_at){
+        const elapsed=Math.floor(Date.now()/1000-d.started_at)
+        const m=Math.floor(elapsed/60),s=elapsed%60
+        timer.textContent=m+':'+(s<10?'0':'')+s
+      }
+      if(d.gpu_protect&&d.force_cloud&&sysHealth&&sysHealth.anthropic!=='ready'){
+        warn.style.display='';warn.textContent='CPU ONLY'
+      }else{warn.style.display='none'}
+    }else{
+      badge.style.display='none';div.style.display='none'
+    }
+  }catch(e){}
+}
+async function sessionEnd(){
+  if(!confirm('End racing session?'))return
+  try{
+    await fetch(API+'/session/end',{method:'POST'})
+    pollSession()
+  }catch(e){alert('Failed to end session')}
+}
+pollSession();_sessionInterval=setInterval(pollSession,5000)
+
+// ── DIAGNOSTICS PANEL ──
+let _dxPollInterval=null
+function fmtTs(ts){if(!ts)return'--';const d=new Date(ts*1000);return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}
+async function dxPoll(){
+  try{
+    const [res,heal,evts]=await Promise.all([
+      fetch(API+'/resources/status').then(r=>r.json()).catch(()=>null),
+      fetch(API+'/self-heal/status').then(r=>r.json()).catch(()=>null),
+      fetch(API+'/health/events?limit=20').then(r=>r.json()).catch(()=>null),
+    ])
+    if(res){
+      const cb=res.circuit_breaker||{},rm=res.resource_manager||{}
+      const cbChip=document.getElementById('dx-cb-chip')
+      const state=cb.state||'unknown'
+      cbChip.textContent=state.toUpperCase()
+      cbChip.className='chip '+(state==='closed'?'chip-ok':state==='half-open'?'chip-warn':'chip-err')
+      document.getElementById('dx-cb-failures').textContent=cb.failures||0
+      document.getElementById('dx-cb-backoff').textContent=(cb.backoff_sec||0)+'s'
+      document.getElementById('dx-vram-free').textContent=(rm.vram_free_mb!=null?rm.vram_free_mb.toLocaleString()+' MB':'--')
+      document.getElementById('dx-vram-warns').textContent=rm.vram_warnings||0
+      document.getElementById('dx-ollama-fails').textContent=rm.ollama_failures||0
+      document.getElementById('dx-watcher-restarts').textContent=rm.watcher_restarts||0
+      const actList=document.getElementById('dx-actions-list')
+      const actions=rm.recent_actions||[]
+      if(actions.length){
+        actList.innerHTML=actions.map(a=>'<div class="mrow" style="font-size:10px;padding:2px 0;border-bottom:1px solid var(--bdr)"><span style="color:var(--text2)">'+fmtTs(a.ts)+'</span> '+esc(a.action)+'</div>').join('')
+      }else{actList.innerHTML='<div class="kb-empty">No actions recorded</div>'}
+    }
+    if(heal){
+      document.getElementById('dx-heal-enabled').textContent=heal.enabled?'Yes':'No'
+      document.getElementById('dx-heal-idle').textContent=heal.idle?'Yes':'No'
+      document.getElementById('dx-heal-cb').textContent=(heal.circuit_breaker||'--').toUpperCase()
+    }
+    if(evts){
+      const evList=document.getElementById('dx-events-list')
+      const events=(evts.events||[]).reverse()
+      if(events.length){
+        evList.innerHTML=events.map(e=>'<div class="mrow" style="font-size:10px;padding:2px 0;border-bottom:1px solid var(--bdr)"><span style="color:var(--text2)">'+fmtTs(e.ts)+'</span> <span style="color:var(--teal)">'+esc(e.type||'')+'</span> '+esc(JSON.stringify(e).substring(0,80))+'</div>').join('')
+      }else{evList.innerHTML='<div class="kb-empty">No events yet</div>'}
+    }
+  }catch(e){}
+}
+function dxStartPoll(){dxPoll();_dxPollInterval=setInterval(dxPoll,5000)}
+function dxStopPoll(){if(_dxPollInterval){clearInterval(_dxPollInterval);_dxPollInterval=null}}
+
+// ── LIVE VOICE CHAT ──
+let _voiceMode=false,_voiceRecording=false,_voiceStream=null,_voiceRecorder=null,_voiceChunks=[]
+let _voiceAudioCtx=null,_voiceAnalyser=null,_voiceAnimFrame=null
+async function toggleVoice(){
+  const btn=document.getElementById('btn-voice')
+  const overlay=document.getElementById('voice-overlay')
+  if(_voiceMode){
+    // Deactivate
+    _voiceMode=false
+    btn.classList.remove('active')
+    overlay.style.display='none'
+    if(_voiceStream){_voiceStream.getTracks().forEach(t=>t.stop());_voiceStream=null}
+    if(_voiceAudioCtx){_voiceAudioCtx.close();_voiceAudioCtx=null;_voiceAnalyser=null}
+    if(_voiceAnimFrame){cancelAnimationFrame(_voiceAnimFrame);_voiceAnimFrame=null}
+    if(typeof aiCore!=='undefined')aiCore.setSpeechState(false,0,null)
+    document.getElementById('voice-status').textContent='VOICE MODE'
+    return
+  }
+  // Check voice subsystem
+  try{
+    const vs=await(await fetch(API+'/voice/status')).json()
+    if(!vs.enabled){addLine('','Voice module disabled — set VOICE_ENABLED=true in .env','dim','meta');return}
+  }catch(e){addLine('','Voice subsystem unreachable','dim','meta');return}
+  // Request mic
+  try{
+    _voiceStream=await navigator.mediaDevices.getUserMedia({audio:true})
+  }catch(e){addLine('','Microphone access denied','dim','meta');return}
+  _voiceAudioCtx=new AudioContext()
+  const src=_voiceAudioCtx.createMediaStreamSource(_voiceStream)
+  _voiceAnalyser=_voiceAudioCtx.createAnalyser()
+  _voiceAnalyser.fftSize=64
+  src.connect(_voiceAnalyser)
+  _voiceMode=true
+  btn.classList.add('active')
+  overlay.style.display='flex'
+  document.getElementById('voice-status').textContent='VOICE MODE'
+  addLine('','Voice mode activated — hold MIC or press Space to talk','dim','meta')
+}
+function voicePTTDown(){
+  if(!_voiceMode||_voiceRecording)return
+  _voiceRecording=true;_voiceChunks=[]
+  const ptt=document.getElementById('voice-ptt')
+  const st=document.getElementById('voice-status')
+  try{
+    _voiceRecorder=new MediaRecorder(_voiceStream,{mimeType:'audio/webm'})
+  }catch(e){
+    _voiceRecorder=new MediaRecorder(_voiceStream)
+  }
+  _voiceRecorder.ondataavailable=e=>{if(e.data.size>0)_voiceChunks.push(e.data)}
+  _voiceRecorder.onstop=()=>{
+    if(_voiceChunks.length===0){_voiceRecording=false;ptt.className='';st.textContent='VOICE MODE';return}
+    const blob=new Blob(_voiceChunks,{type:_voiceRecorder.mimeType||'audio/webm'})
+    ptt.className='processing';ptt.textContent='...';st.textContent='PROCESSING...'
+    voiceSend(blob)
+  }
+  _voiceRecorder.start()
+  ptt.className='recording';ptt.textContent='REC';st.textContent='LISTENING...'
+}
+function voicePTTUp(){
+  if(!_voiceRecording||!_voiceRecorder)return
+  _voiceRecording=false
+  if(_voiceRecorder.state==='recording')_voiceRecorder.stop()
+}
+async function voiceSend(blob){
+  const ptt=document.getElementById('voice-ptt')
+  const st=document.getElementById('voice-status')
+  try{
+    const res=await fetch(API+'/voice/chat',{method:'POST',body:blob,headers:{'Content-Type':'application/octet-stream'}})
+    const d=await res.json()
+    if(d.error){addLine('','Voice error: '+d.error,'dim','meta');ptt.className='';ptt.textContent='MIC';st.textContent='VOICE MODE';return}
+    // Show transcription and response in terminal
+    if(d.stt&&d.stt.text)addLine('&gt;',d.stt.text,'','user')
+    if(d.response){
+      const node=addLine('E3N&gt;','','e3n','e3n-msg')
+      node.innerHTML=renderMd(d.response)
+    }
+    // Play TTS audio
+    if(d.tts&&d.tts.audio_base64){
+      const raw=atob(d.tts.audio_base64)
+      const arr=new Uint8Array(raw.length)
+      for(let i=0;i<raw.length;i++)arr[i]=raw.charCodeAt(i)
+      const audioBlob=new Blob([arr],{type:'audio/'+(d.tts.format||'mp3')})
+      const url=URL.createObjectURL(audioBlob)
+      const audio=new Audio(url)
+      ptt.className='playing';ptt.textContent='▶';st.textContent='SPEAKING...'
+      if(typeof aiCore!=='undefined')aiCore.simSpeech=true
+      // Waveform animation during playback
+      try{
+        const playCtx=_voiceAudioCtx||new AudioContext()
+        const mediaSrc=playCtx.createMediaElementSource(audio)
+        const analyser=playCtx.createAnalyser();analyser.fftSize=64
+        mediaSrc.connect(analyser);analyser.connect(playCtx.destination)
+        const buf=new Uint8Array(analyser.frequencyBinCount)
+        function animLoop(){
+          if(!audio.paused&&!audio.ended){
+            analyser.getByteFrequencyData(buf)
+            const amp=buf.reduce((a,b)=>a+b,0)/buf.length/255
+            if(typeof aiCore!=='undefined')aiCore.setSpeechState(true,amp,Array.from(buf.slice(0,32)).map(v=>v/255))
+            _voiceAnimFrame=requestAnimationFrame(animLoop)
+          }
+        }
+        audio.onplay=animLoop
+      }catch(e){/* fallback: no waveform, just simSpeech */}
+      audio.onended=()=>{
+        ptt.className='';ptt.textContent='MIC';st.textContent='VOICE MODE'
+        if(typeof aiCore!=='undefined'){aiCore.simSpeech=false;aiCore.setSpeechState(false,0,null)}
+        if(_voiceAnimFrame){cancelAnimationFrame(_voiceAnimFrame);_voiceAnimFrame=null}
+        URL.revokeObjectURL(url)
+      }
+      audio.onerror=()=>{ptt.className='';ptt.textContent='MIC';st.textContent='VOICE MODE'}
+      audio.play().catch(()=>{ptt.className='';ptt.textContent='MIC';st.textContent='VOICE MODE'})
+    }else{ptt.className='';ptt.textContent='MIC';st.textContent='VOICE MODE'}
+  }catch(e){
+    addLine('','Voice chat error: '+e.message,'dim','meta')
+    ptt.className='';ptt.textContent='MIC';st.textContent='VOICE MODE'
+  }
+}
+// PTT event bindings
+document.getElementById('voice-ptt').addEventListener('mousedown',voicePTTDown)
+document.getElementById('voice-ptt').addEventListener('mouseup',voicePTTUp)
+document.getElementById('voice-ptt').addEventListener('mouseleave',voicePTTUp)
+document.getElementById('voice-ptt').addEventListener('touchstart',e=>{e.preventDefault();voicePTTDown()})
+document.getElementById('voice-ptt').addEventListener('touchend',e=>{e.preventDefault();voicePTTUp()})
+// Space bar push-to-talk
+document.addEventListener('keydown',e=>{
+  if(!_voiceMode||_voiceRecording)return
+  if(e.code==='Space'&&document.activeElement.tagName!=='TEXTAREA'&&document.activeElement.tagName!=='INPUT'){
+    e.preventDefault();voicePTTDown()
+  }
+})
+document.addEventListener('keyup',e=>{
+  if(!_voiceMode)return
+  if(e.code==='Space'&&_voiceRecording){e.preventDefault();voicePTTUp()}
+})
+
 </script>
+<div id="voice-overlay" style="display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:600;flex-direction:column;align-items:center;gap:8px">
+  <div id="voice-status" style="font-family:var(--mono);font-size:10px;letter-spacing:0.15em;color:var(--text2);text-transform:uppercase">VOICE MODE</div>
+  <button id="voice-ptt" style="width:64px;height:64px;border-radius:50%;border:2px solid var(--teal2);background:rgba(0,212,184,0.08);color:var(--teal);font-family:var(--mono);font-size:10px;letter-spacing:0.1em;cursor:pointer;transition:all 0.15s;display:flex;align-items:center;justify-content:center;-webkit-app-region:no-drag">MIC</button>
+  <div id="voice-hint" style="font-family:var(--mono);font-size:8px;color:var(--text3);letter-spacing:0.1em">HOLD TO TALK · SPACE</div>
+</div>
 <div id="toast-container"></div>
 </body>
 </html>

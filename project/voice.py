@@ -240,15 +240,20 @@ async def _windows_tts(text: str) -> dict:
     """Fallback TTS using Windows SAPI via PowerShell."""
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         tmp_path = tmp.name
+    # Write text to a temp file to avoid PowerShell injection
+    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode="w", encoding="utf-8") as tf:
+        tf.write(text)
+        text_path = tf.name
 
-    # Escape for PowerShell
-    escaped = text.replace("'", "''").replace('"', '`"')
-
+    # Escape single quotes in paths for safe PowerShell string embedding
+    safe_tmp = tmp_path.replace("'", "''")
+    safe_text = text_path.replace("'", "''")
     ps_script = f"""
 Add-Type -AssemblyName System.Speech
 $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
-$synth.SetOutputToWaveFile('{tmp_path}')
-$synth.Speak('{escaped}')
+$synth.SetOutputToWaveFile('{safe_tmp}')
+$text = [System.IO.File]::ReadAllText('{safe_text}', [System.Text.Encoding]::UTF8)
+$synth.Speak($text)
 $synth.Dispose()
 """
     try:
@@ -276,15 +281,16 @@ $synth.Dispose()
     except Exception as e:
         return {"error": str(e)}
     finally:
-        try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
+        for p in (tmp_path, text_path):
+            try:
+                os.unlink(p)
+            except Exception:
+                pass
 
 
 def _clean_for_tts(text: str) -> str:
     """Clean text for TTS — remove code blocks, markdown, URLs."""
-    import re
+    import re  # noqa: local import avoids top-level dep when voice disabled
 
     # Remove code blocks
     text = re.sub(r'```[\s\S]*?```', ' code block omitted ', text)
