@@ -35,6 +35,28 @@ TTS_VOICE = os.getenv("TTS_VOICE", "en-US-GuyNeural")  # Microsoft Edge TTS voic
 TTS_RATE = os.getenv("TTS_RATE", "+0%")  # Speech rate adjustment
 VOICE_ENABLED = os.getenv("VOICE_ENABLED", "true").lower() in ("true", "1", "yes")
 
+# Vocabulary hint for Whisper — biases transcription toward expected racing/engineering terms
+# This dramatically reduces misinterpretation of technical jargon
+WHISPER_VOCAB_PROMPT = (
+    "E3N, Ethan, thermodynamics, aerodynamics, understeer, oversteer, downforce, drag, "
+    "Le Mans, Le Mans Ultimate, LMU, telemetry, chicane, apex, stint, degradation, "
+    "compound, intermediate, slick, wet, hypercar, LMDh, LMH, GTE, GT3, GT4, ECU, "
+    "kinematics, statics, dynamics, calculus, differential equations, integrals, "
+    "torque, horsepower, RPM, camber, toe, caster, ride height, anti-roll bar, "
+    "damper, spring rate, aero balance, center of pressure, center of gravity, "
+    "Ollama, ChromaDB, VRAM, FastAPI, Qwen, LoRA, QLoRA, GGUF, GPU, CPU, "
+    "PowerShell, uvicorn, Python, Electron, inference, embeddings, "
+    "pit stop, pit window, fuel load, tire pressure, tire temperature, "
+    "sector, split, delta, gap, position, DRS, ERS, MGU-K, MGU-H, "
+    "mechanical engineering, fluid dynamics, heat transfer, convection, conduction, "
+    "finite element analysis, stress analysis, material science, Young's modulus, "
+    "Ferrari, Porsche, Toyota, BMW, Cadillac, Peugeot, Alpine, Lamborghini, "
+    "Spa, Monza, Silverstone, Daytona, Sebring, Indianapolis, Nurburgring, "
+    "strategy, undercut, overcut, safety car, VSC, yellow flag, red flag, "
+    "Reynolds number, Bernoulli, Navier-Stokes, coefficient of friction, "
+    "suspension geometry, Ackermann, bump steer, roll center, pitch sensitivity"
+)
+
 # ── STT (Speech-to-Text) via faster-whisper ────────────────────────────
 
 _whisper_model = None
@@ -110,6 +132,7 @@ def transcribe_audio(audio_bytes: bytes, language: str = "en") -> dict:
             tmp_path,
             language=language,
             beam_size=5,
+            initial_prompt=WHISPER_VOCAB_PROMPT,  # Bias toward racing/engineering vocabulary
             vad_filter=True,  # Voice activity detection — skip silence
             vad_parameters=dict(
                 min_silence_duration_ms=500,

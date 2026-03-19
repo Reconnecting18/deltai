@@ -297,6 +297,93 @@ def memory_stats() -> str:
         return f"ERROR: {e}"
 
 
+# ── WEB SEARCH TOOL ──────────────────────────────────────────────────
+
+def web_search(query: str, max_results=5) -> str:
+    """Search the web via DuckDuckGo Lite. Blocked during active racing sessions."""
+    try:
+        # Session guard: block during active racing (performance protection)
+        try:
+            import sys
+            if "." not in sys.path:
+                sys.path.insert(0, ".")
+            from router import _session_active
+            if _session_active:
+                return "ERROR: Web search disabled during active racing sessions (performance protection)"
+        except (ImportError, AttributeError):
+            pass
+
+        max_results = min(_coerce_int(max_results, 5), 10)
+        if not query or not query.strip():
+            return "ERROR: Empty search query"
+
+        import httpx as _httpx
+        import re as _re
+
+        # DuckDuckGo HTML Lite — simple table-based results, no JS required, no API key
+        resp = _httpx.get(
+            "https://lite.duckduckgo.com/lite/",
+            params={"q": query.strip(), "kl": "us-en"},
+            headers={"User-Agent": "E3N/1.0 (local AI assistant)"},
+            timeout=10.0,
+            follow_redirects=True,
+        )
+        if resp.status_code != 200:
+            return f"ERROR: Search returned HTTP {resp.status_code}"
+
+        html = resp.text
+
+        # Parse DuckDuckGo Lite results
+        # Structure: <td> cells in order: number, title (with <a> link), spacer, snippet, spacer, url
+        results = []
+
+        # Extract all <a> links with DuckDuckGo redirect URLs (contain uddg= param)
+        link_pattern = _re.compile(
+            r'<a[^>]*href="([^"]*uddg=[^"]+)"[^>]*>(.+?)</a>',
+            _re.DOTALL
+        )
+        links = link_pattern.findall(html)
+
+        # Extract all <td> content for snippets
+        td_pattern = _re.compile(r'<td[^>]*>(.*?)</td>', _re.DOTALL)
+        tds = td_pattern.findall(html)
+
+        # Build snippet map: find td cells that contain substantial text (snippets)
+        snippets = []
+        for td in tds:
+            clean = _re.sub(r'<[^>]+>', '', td).strip()
+            clean = _re.sub(r'&\w+;', ' ', clean).strip()
+            # Snippets are longer text blocks (not numbers, not URLs, not spacers)
+            if len(clean) > 40 and not clean.startswith('http') and not clean.startswith('www.'):
+                snippets.append(_re.sub(r'\s+', ' ', clean))
+
+        from urllib.parse import unquote, urlparse, parse_qs
+        for i, (raw_url, raw_title) in enumerate(links[:max_results]):
+            clean_title = _re.sub(r'<[^>]+>', '', raw_title).strip()
+            clean_title = _re.sub(r'&#x27;', "'", clean_title)
+            clean_title = _re.sub(r'&amp;', '&', clean_title)
+            # Extract actual URL from DuckDuckGo redirect
+            try:
+                parsed = parse_qs(urlparse(raw_url).query)
+                actual_url = unquote(parsed.get('uddg', [raw_url])[0])
+            except Exception:
+                actual_url = raw_url
+            snippet = snippets[i] if i < len(snippets) else ""
+            if clean_title:
+                results.append(f"[{i+1}] {clean_title}\n    {actual_url}\n    {snippet}")
+
+        if not results:
+            return f"No results found for: {query}"
+
+        header = f"Web search results for: {query}\n{'=' * 40}\n"
+        return header + "\n\n".join(results)
+
+    except Exception as e:
+        if "timeout" in str(e).lower() or "timed out" in str(e).lower():
+            return "ERROR: Search timed out (10s limit). Try a simpler query."
+        return f"ERROR: Web search failed: {e}"
+
+
 # ── TELEMETRY TOOLS (conditional) ─────────────────────────────────────
 
 _TELEMETRY_API_URL = os.getenv("TELEMETRY_API_URL", "").strip()
@@ -911,6 +998,7 @@ EXECUTORS = {
     "get_system_info": get_system_info,
     "search_knowledge": search_knowledge,
     "memory_stats": memory_stats,
+    "web_search": web_search,
     "self_diagnostics": self_diagnostics,
     "manage_ollama_models": manage_ollama_models,
     "repair_subsystem": repair_subsystem,

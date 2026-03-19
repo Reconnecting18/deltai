@@ -142,6 +142,27 @@ TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "Search the web using DuckDuckGo. Use when the operator asks about current events, recent information, specifications, or topics not in the knowledge base. Returns titles, URLs, and snippets. NOT available during active racing sessions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query (e.g., 'Ferrari 296 GT3 specs', 'Python FastAPI tutorial')"
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum results to return. Default 5, max 10."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
 ]
 
 # ── SELF-DIAGNOSTIC TOOLS ────────────────────────────────────────────

@@ -1860,7 +1860,7 @@ async function _vProcessSpeech(blob){
     _vSetState('thinking')
     const chatRes=await fetch(API+'/chat',{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({message:sttText})
+      body:JSON.stringify({message:sttText,voice_input:true})
     })
     const reader=chatRes.body.getReader(),dec=new TextDecoder()
     let chatBuf='',fullResponse='',responseNode=null

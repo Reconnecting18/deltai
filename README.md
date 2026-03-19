@@ -222,7 +222,7 @@ C:\e3n\
 │   ├── voice.py                  STT (faster-whisper) + TTS (edge-tts)
 │   ├── watcher.py                Watchdog file watcher for knowledge dir
 │   ├── tools/
-│   │   ├── definitions.py        7 core + 4 conditional telemetry tool schemas
+│   │   ├── definitions.py        8 core + 4 conditional telemetry tool schemas
 │   │   └── executor.py           Tool execution with retry + telemetry API calls
 │   ├── static/
 │   │   └── index.html            Full dashboard UI (single file — CSS + HTML + JS)
@@ -326,7 +326,8 @@ Tactical operations center aesthetic with a muted grey-green palette. Features i
 - **Header**: Subsystem health monitor (X/8 ONLINE) + cloud budget + session badge (auto-detected, timer, GPU protect warning)
 - **3D particle sphere**: Network node map with speech waveform animation during voice chat
 - **Terminal**: Streaming chat with conversation history (CLR + turn counter)
-- **Live voice chat**: Always-listening Alexa/JARVIS style. Click VOICE to activate — Whisper pre-warms, just talk naturally, VAD auto-detects speech and silence. Split pipeline: STT (instant transcription) → streaming chat (response streams in real-time) → TTS (AudioContext playback with sphere animation). Whisper hallucination filtering. Auto-cycles back to listening after each response
+- **Live voice chat**: Always-listening Alexa/JARVIS style. Click VOICE to activate — Whisper pre-warms, just talk naturally, VAD auto-detects speech and silence. Split pipeline: STT (instant transcription) → streaming chat (response streams in real-time) → TTS (AudioContext playback with sphere animation). Whisper vocabulary boost (150+ racing/engineering terms) + hallucination filtering. LLM voice prefix for transcription error correction. Auto-cycles back to listening after each response
+- **Web search**: DuckDuckGo-powered web search tool — E3N can autonomously look up specs, current events, and topics not in its knowledge base. No API key required. Blocked during active racing sessions.
 - **Settings panel**: Audio device selection (mic input/speaker output), TTS voice + speed config, system status overview
 - **Training pipeline**: Start/stop training, mode selector (auto/lora/fewshot), live progress bar + loss, LoRA status chip
 - **Diagnostics panel**: Circuit breaker state, VRAM monitor, self-heal status, resource action log, health event timeline

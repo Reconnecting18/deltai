@@ -1089,6 +1089,7 @@ class ChatRequest(BaseModel):
     message: str
     deep: bool = False
     force_local: bool = False
+    voice_input: bool = False  # True when input came from speech — helps model correct STT errors
 
 MAX_TOOL_ROUNDS = 6
 
@@ -1176,6 +1177,10 @@ async def chat(req: ChatRequest):
             if rag_context:
                 chunk_count = rag_context.count("[Source:")
                 yield json.dumps({"t": "rag", "n": chunk_count}) + "\n"
+
+            split_message = req.message
+            if req.voice_input:
+                split_message = f"[Voice input — may contain transcription errors. Interpret the intended meaning.]\n{req.message}"
 
             # ── Phase 1: Local tool gathering ──
             yield json.dumps({"t": "split_phase", "phase": 1, "c": "Gathering data locally..."}) + "\n"
@@ -1351,8 +1356,12 @@ async def chat(req: ChatRequest):
 
             full_response = ""
 
+            cloud_message = req.message
+            if req.voice_input:
+                cloud_message = f"[Voice input — may contain transcription errors. Interpret the intended meaning.]\n{req.message}"
+
             async for line in anthropic_stream(
-                message=req.message,
+                message=cloud_message,
                 model=decision.model,
                 rag_context=rag_context,
                 tools=TOOLS,
@@ -1393,10 +1402,14 @@ async def chat(req: ChatRequest):
     if telemetry_prompt:
         telemetry_prefix = f"[SYSTEM NOTE]\n{telemetry_prompt}\n[END NOTE]\n\n"
 
+    voice_prefix = ""
+    if req.voice_input:
+        voice_prefix = "[Voice input — may contain transcription errors. Interpret the intended meaning.]\n"
+
     if rag_context:
-        user_content = f"{telemetry_prefix}{rag_context}\n{req.message}"
+        user_content = f"{telemetry_prefix}{voice_prefix}{rag_context}\n{req.message}"
     else:
-        user_content = f"{telemetry_prefix}{req.message}" if telemetry_prefix else req.message
+        user_content = f"{telemetry_prefix}{voice_prefix}{req.message}" if (telemetry_prefix or voice_prefix) else req.message
 
     messages = _get_history() + [{"role": "user", "content": user_content}]
 
@@ -2158,7 +2171,8 @@ async def voice_chat(request: Request, voice: str = None, rate: str = None):
         response_text = greeting_response
     else:
         rag_context = build_rag_context(user_text)
-        user_content = f"{rag_context}\n{user_text}" if rag_context else user_text
+        voice_hint = "[Voice input — may contain transcription errors. Interpret the intended meaning.]\n"
+        user_content = f"{voice_hint}{rag_context}\n{user_text}" if rag_context else f"{voice_hint}{user_text}"
         msg_list = _get_history() + [{"role": "user", "content": user_content}]
 
         async with httpx.AsyncClient(timeout=120) as client:
