@@ -1820,45 +1820,44 @@ async function _vPlayTTS(text){
       const buf=await ctx.decodeAudioData(raw.slice(0))
       const src=ctx.createBufferSource()
       src.buffer=buf
-      // ── E3N VOICE FILTER — subtle electronic AI texture ──
+      // ── E3N VOICE FILTER — subtle AI resonance (inspired by E3N/BT-7274) ──
+      // Goal: natural voice with faint metallic/electronic undertone, NOT a radio effect
       const filterOn=_cfgSettings.voiceFilter!==false // default ON
       const intensity=(_cfgSettings.voiceFilterIntensity!=null)?_cfgSettings.voiceFilterIntensity:0.20
       if(filterOn&&intensity>0){
-        const dryGain=1.0-intensity*0.8 // at 20% intensity: 84% dry
-        const wetGain=intensity*0.9      // at 20% intensity: 18% wet
-        // Dry path — clean voice
-        const dry=ctx.createGain();dry.gain.value=dryGain
-        // Wet path — processed voice with electronic character
-        const wet=ctx.createGain();wet.gain.value=wetGain
-        // Bandpass — "through a comm system" feel (emphasize mid-presence)
-        const bp=ctx.createBiquadFilter()
-        bp.type='bandpass';bp.frequency.value=2200;bp.Q.value=0.5
-        // High shelf cut — reduce airy highs for more mechanical sound
-        const hiCut=ctx.createBiquadFilter()
-        hiCut.type='highshelf';hiCut.frequency.value=6000;hiCut.gain.value=-4
-        // Soft harmonic saturation — adds subtle electronic harmonics
+        // ─ Layer 1: Subtle metallic resonance (presence peak) ─
+        // Narrow boost around 3.2kHz gives a slight "through a helmet comm" presence
+        const presence=ctx.createBiquadFilter()
+        presence.type='peaking';presence.frequency.value=3200
+        presence.Q.value=2.0;presence.gain.value=2.5*intensity/0.2 // +2.5dB at 20%
+        // Secondary resonance peak — adds slight metallic character
+        const metallic=ctx.createBiquadFilter()
+        metallic.type='peaking';metallic.frequency.value=5500
+        metallic.Q.value=3.0;metallic.gain.value=1.5*intensity/0.2 // +1.5dB at 20%
+        // ─ Layer 2: Very gentle high-shelf rolloff (removes airiness) ─
+        const hiRoll=ctx.createBiquadFilter()
+        hiRoll.type='highshelf';hiRoll.frequency.value=8000
+        hiRoll.gain.value=-1.5*intensity/0.2 // -1.5dB at 20%
+        // ─ Layer 3: Extremely subtle harmonic saturation ─
+        // Much gentler than before — just barely adds electronic edge
         const shaper=ctx.createWaveShaper()
         const nSamples=44100,curve=new Float32Array(nSamples)
-        const amt=6+intensity*20 // 6-10 range at typical intensities
+        const amt=2+intensity*4 // very gentle: 2-2.8 range at typical intensities
         for(let i=0;i<nSamples;i++){const x=(i*2)/nSamples-1;curve[i]=Math.tanh(amt*x)/Math.tanh(amt)}
         shaper.curve=curve;shaper.oversample='2x'
-        // Subtle low-frequency oscillator — electronic hum undertone
-        const osc=ctx.createOscillator()
-        const oscGain=ctx.createGain()
-        osc.type='sine';osc.frequency.value=62 // low electronic hum
-        oscGain.gain.value=0.012*intensity/0.2 // scale with intensity
-        osc.connect(oscGain)
-        // Merger node
+        // ─ Dry/wet mix — mostly clean voice ─
+        const dryGain=1.0-intensity*0.3 // at 20%: 94% dry
+        const wetGain=intensity*0.35     // at 20%: 7% wet (very subtle)
+        const dry=ctx.createGain();dry.gain.value=dryGain
+        const wet=ctx.createGain();wet.gain.value=wetGain
         const merger=ctx.createGain();merger.gain.value=1.0
-        // Wire: src → dry → merger → destination
-        src.connect(dry);dry.connect(merger)
-        // Wire: src → bp → hiCut → shaper → wet → merger
-        src.connect(bp);bp.connect(hiCut);hiCut.connect(shaper);shaper.connect(wet);wet.connect(merger)
-        // Add electronic hum
-        oscGain.connect(merger)
+        // Dry path: src → presence → metallic → hiRoll → dry → merger (clean + resonance)
+        src.connect(presence);presence.connect(metallic);metallic.connect(hiRoll)
+        hiRoll.connect(dry);dry.connect(merger)
+        // Wet path: src → shaper → wet → merger (faint harmonic edge)
+        src.connect(shaper);shaper.connect(wet);wet.connect(merger)
         merger.connect(ctx.destination)
-        osc.start(0)
-        src.onended=()=>{osc.stop();_vResume()}
+        src.onended=_vResume
         console.log('[VOICE] E3N filter ON: intensity='+intensity.toFixed(2)+', dry='+dryGain.toFixed(2)+', wet='+wetGain.toFixed(2))
       }else{
         src.connect(ctx.destination)
