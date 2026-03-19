@@ -963,6 +963,8 @@ _GREETING_MAP = {
     "hey": "Hey. What's going on?",
     "hi": "Hey. What's going on?",
     "hello": "Hey, Ethan. What do you need?",
+    "hola": "Hey, Ethan. What do you need?",
+    "oh": "Hey. What do you need?",  # common Whisper mis-transcription of "hello"
     "yo": "Yo. What's up?",
     "hey e3n": "Hey. I'm here.",
     "hi e3n": "Hey. Ready when you are.",
@@ -2072,6 +2074,146 @@ async def voice_chat(request: Request, voice: str = None, rate: str = None):
         } if audio_b64 else {"error": tts_result.get("error", "TTS failed")},
         "route": decision.to_dict(),
     }
+
+
+# ── NEW VOICE PIPELINE (Phase 1 — Piper + RVC + Effects) ─────────────────
+
+try:
+    from voice import speak as voice_speak, configure as voice_configure
+    from voice.voice_config import DEFAULT_CONFIG as _voice_cfg, VoiceConfig
+    VOICE_PIPELINE_AVAILABLE = True
+except ImportError:
+    VOICE_PIPELINE_AVAILABLE = False
+
+
+@app.post("/api/voice/speak")
+async def api_voice_speak(req: dict):
+    """Speak text through the new voice pipeline (Piper → RVC → effects → playback)."""
+    if not VOICE_PIPELINE_AVAILABLE:
+        return JSONResponse({"error": "Voice pipeline module not available"}, status_code=503)
+    text = req.get("text", "")
+    priority = req.get("priority", "normal")
+    if not text.strip():
+        return {"error": "Empty text"}
+    try:
+        await voice_speak(text, priority=priority)
+        return {"ok": True, "text": text, "priority": priority}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/voice/config")
+async def api_voice_config_get():
+    """Return current voice pipeline configuration."""
+    if not VOICE_PIPELINE_AVAILABLE:
+        return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
+    import dataclasses
+    return dataclasses.asdict(_voice_cfg)
+
+
+@app.put("/api/voice/config")
+async def api_voice_config_put(req: dict):
+    """Update voice pipeline configuration at runtime."""
+    if not VOICE_PIPELINE_AVAILABLE:
+        return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
+    try:
+        voice_configure(req)
+        return {"ok": True, "updated": list(req.keys())}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/voice/presets")
+async def api_voice_presets_list():
+    """List saved voice presets."""
+    if not VOICE_PIPELINE_AVAILABLE:
+        return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
+    from voice.voice_config import VoiceConfig
+    import os
+    preset_dir = r"C:\e3n\data\voice\presets"
+    presets = []
+    if os.path.isdir(preset_dir):
+        for f in os.listdir(preset_dir):
+            if f.endswith(".json"):
+                presets.append(f.replace(".json", ""))
+    return {"presets": presets}
+
+
+@app.post("/api/voice/presets")
+async def api_voice_preset_save(req: dict):
+    """Save current config as a named preset."""
+    if not VOICE_PIPELINE_AVAILABLE:
+        return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
+    name = req.get("name", "").strip()
+    if not name:
+        return JSONResponse({"error": "Preset name required"}, status_code=400)
+    try:
+        _voice_cfg.save_preset(name)
+        return {"ok": True, "name": name}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/voice/status")
+async def api_voice_pipeline_status():
+    """Return voice pipeline health and component status."""
+    if not VOICE_PIPELINE_AVAILABLE:
+        return {"available": False, "error": "Voice pipeline module not loaded"}
+    status = {
+        "available": True,
+        "tts": {"engine": "piper", "ready": False},
+        "rvc": {"ready": False, "model_loaded": False},
+        "effects": {"ready": True},
+        "playback": {"ready": False},
+    }
+    try:
+        from voice.tts_engine import PiperTTS
+        status["tts"]["ready"] = PiperTTS is not None
+    except Exception:
+        pass
+    try:
+        from voice.voice_converter import VoiceConverter
+        vc = VoiceConverter()
+        status["rvc"]["model_loaded"] = vc.is_loaded
+    except Exception:
+        pass
+    try:
+        import sounddevice
+        status["playback"]["ready"] = True
+    except ImportError:
+        status["playback"]["ready"] = False
+    return status
+
+
+@app.post("/api/voice/test")
+async def api_voice_test():
+    """Speak a test phrase and return timing breakdown."""
+    if not VOICE_PIPELINE_AVAILABLE:
+        return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
+    import time
+    timings = {}
+    test_text = "All systems nominal. Voice pipeline test complete."
+    try:
+        from voice.tts_engine import PiperTTS
+        from voice.post_processor import PostProcessor
+        from voice.voice_config import DEFAULT_CONFIG
+        tts = PiperTTS(DEFAULT_CONFIG)
+        pp = PostProcessor(DEFAULT_CONFIG)
+        t0 = time.time()
+        audio = tts.synthesize(test_text)
+        timings["tts_ms"] = round((time.time() - t0) * 1000)
+        if audio is not None:
+            t0 = time.time()
+            processed = pp.process(audio)
+            timings["effects_ms"] = round((time.time() - t0) * 1000)
+            timings["audio_samples"] = len(processed)
+            timings["duration_s"] = round(len(processed) / 22050, 2)
+        else:
+            timings["tts_ms"] = 0
+            timings["note"] = "Piper TTS not installed — install piper-tts for local voice"
+        return {"ok": True, "text": test_text, "timings": timings}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "timings": timings}
 
 
 # ── STATS ───────────────────────────────────────────────────────────────
