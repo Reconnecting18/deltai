@@ -1001,47 +1001,52 @@ def try_parse_text_tool_call(content: str):
 # Fixes 3B over-triggering tools on greetings — model-agnostic, zero latency.
 
 _GREETING_MAP = {
-    # Greetings
-    "hey": "Operational.",
-    "hi": "Operational.",
-    "hello": "Operational.",
-    "yo": "Operational.",
-    "hey e3n": "Operational.",
-    "hi e3n": "Operational.",
-    "hello e3n": "Operational.",
-    "hey e3": "Operational.",
-    "hi e3": "Operational.",
+    # Greetings — warm but brief
+    "hey": "Hey. What's going on?",
+    "hi": "Hey. What's going on?",
+    "hello": "Hey, Ethan. What do you need?",
+    "yo": "Yo. What's up?",
+    "hey e3n": "Hey. I'm here.",
+    "hi e3n": "Hey. Ready when you are.",
+    "hello e3n": "Hey, Ethan. What are we working on?",
+    "hey e3": "Hey. I'm here.",
+    "hi e3": "Hey. What do you need?",
     # What's up
-    "sup": "Standing by.",
-    "whats up": "Standing by.",
-    "what's up": "Standing by.",
-    "wassup": "Standing by.",
+    "sup": "All green on my end. What do you need?",
+    "whats up": "All green on my end. What's going on?",
+    "what's up": "All green on my end. What do you need?",
+    "wassup": "All systems nominal. What's up?",
     # Morning / evening
-    "morning": "Online. Morning, Ethan.",
-    "good morning": "Online. Morning, Ethan.",
-    "morning e3n": "Online. Morning, Ethan.",
-    "morning e3": "Online. Morning, Ethan.",
-    "gm": "Online. Morning, Ethan.",
-    "evening": "Online. Evening, Ethan.",
-    "good evening": "Online. Evening, Ethan.",
+    "morning": "Morning, Ethan. Ready when you are.",
+    "good morning": "Morning. Systems are all green. What's the plan?",
+    "morning e3n": "Morning, Ethan. Ready when you are.",
+    "morning e3": "Morning. What are we working on?",
+    "gm": "Morning, Ethan. Let's get it.",
+    "evening": "Evening, Ethan. What do you need?",
+    "good evening": "Evening. Everything's running smooth. What's up?",
     # Night / goodbye
-    "night": "Powering down comms. Night, Ethan.",
-    "goodnight": "Powering down comms. Night, Ethan.",
-    "good night": "Powering down comms. Night, Ethan.",
-    "gn": "Powering down comms. Night, Ethan.",
-    "bye": "Copy. Out.",
-    "later": "Copy. Out.",
-    "peace": "Copy. Out.",
-    "see ya": "Copy. Out.",
-    "goodbye": "Copy. Out.",
+    "night": "Night, Ethan. I'll keep watch.",
+    "goodnight": "Night, Ethan. I'll keep watch.",
+    "good night": "Get some rest. I'll be here.",
+    "gn": "Night. I'll be here when you're back.",
+    "bye": "Copy. See you later.",
+    "later": "Later. I'll be here.",
+    "peace": "Take it easy, Ethan.",
+    "see ya": "See you. I'll hold down the fort.",
+    "goodbye": "Later, Ethan. I'll be here.",
     # Status checks
-    "you there?": "Online.",
-    "you there": "Online.",
-    "online?": "Online.",
-    "awake?": "Online.",
-    "you up?": "Online.",
-    "e3n?": "Online.",
-    "e3?": "Online.",
+    "you there?": "I'm here. What do you need?",
+    "you there": "Right here. What's up?",
+    "online?": "Online and ready. What do you need?",
+    "awake?": "Always. What's going on?",
+    "you up?": "Always on. What do you need?",
+    "e3n?": "I'm here. What's up?",
+    "e3?": "Right here.",
+    # Thanks
+    "thanks": "That's what I'm here for.",
+    "thank you": "Anytime, Ethan.",
+    "thanks e3n": "That's what I'm here for.",
+    "thx": "No problem.",
 }
 
 
@@ -2085,6 +2090,7 @@ class TTSRequest(BaseModel):
     text: str
     voice: Optional[str] = None
     rate: Optional[str] = None
+    pitch: Optional[str] = None
 
 
 @app.get("/voice/status")
@@ -2130,7 +2136,7 @@ async def voice_tts(req: TTSRequest):
     """Convert text to speech audio. Returns audio bytes."""
     if not VOICE_AVAILABLE:
         return JSONResponse({"error": "Voice module not available"}, status_code=503)
-    result = await synthesize_speech(req.text, voice=req.voice, rate=req.rate)
+    result = await synthesize_speech(req.text, voice=req.voice, rate=req.rate, pitch=req.pitch)
     if "error" in result:
         return JSONResponse({"error": result["error"]}, status_code=500)
     return Response(

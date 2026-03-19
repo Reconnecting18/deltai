@@ -9,7 +9,7 @@
 
 **Local AI system with VRAM-aware routing, RAG memory, and a training pipeline — built to serve as a race engineer brain for Le Mans Ultimate.**
 
-E3N is the intelligence layer: reasoning, memory, tool execution, and model routing. External services (like a future Telemetry API) connect via the `/ingest` endpoint to push context into its RAG memory. Named after E3N from COD: Infinite Warfare — dry wit, loyal, mission-focused — blended with BT-7274's precision.
+E3N is the intelligence layer: reasoning, memory, tool execution, and model routing. External services (like a future Telemetry API) connect via the `/ingest` endpoint to push context into its RAG memory. Named after E3N from COD: Infinite Warfare and BT-7274 from Titanfall 2 — warm, loyal, confident, with a distinct voice (en-GB-RyanNeural, slight British accent). Not a chatbot. A teammate.
 
 ---
 

@@ -31,8 +31,9 @@ logger = logging.getLogger("e3n.voice")
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")  # tiny, base, small, medium, large-v3
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "auto")  # auto, cpu, cuda
 WHISPER_COMPUTE = os.getenv("WHISPER_COMPUTE", "float16")  # float16, int8, float32
-TTS_VOICE = os.getenv("TTS_VOICE", "en-US-GuyNeural")  # Microsoft Edge TTS voice
-TTS_RATE = os.getenv("TTS_RATE", "+0%")  # Speech rate adjustment
+TTS_VOICE = os.getenv("TTS_VOICE", "en-GB-RyanNeural")  # E3N's voice — British, slightly deeper
+TTS_RATE = os.getenv("TTS_RATE", "+3%")  # Speech rate adjustment
+TTS_PITCH = os.getenv("TTS_PITCH", "-5Hz")  # Pitch adjustment (negative = deeper)
 VOICE_ENABLED = os.getenv("VOICE_ENABLED", "true").lower() in ("true", "1", "yes")
 
 # Vocabulary hint for Whisper — biases transcription toward expected racing/engineering terms
@@ -199,7 +200,7 @@ def _check_tts():
             return False
 
 
-async def synthesize_speech(text: str, voice: str = None, rate: str = None) -> dict:
+async def synthesize_speech(text: str, voice: str = None, rate: str = None, pitch: str = None) -> dict:
     """
     Convert text to speech audio bytes.
 
@@ -207,6 +208,7 @@ async def synthesize_speech(text: str, voice: str = None, rate: str = None) -> d
         text: Text to speak
         voice: Voice ID (default from config)
         rate: Speed adjustment (e.g., "+10%", "-20%")
+        pitch: Pitch adjustment (e.g., "-5Hz", "+10Hz")
 
     Returns:
         {"audio": bytes, "format": "mp3", "duration_estimate": float}
@@ -214,6 +216,7 @@ async def synthesize_speech(text: str, voice: str = None, rate: str = None) -> d
     """
     voice = voice or TTS_VOICE
     rate = rate or TTS_RATE
+    pitch = pitch or TTS_PITCH
 
     if not text or not text.strip():
         return {"error": "Empty text"}
@@ -226,7 +229,7 @@ async def synthesize_speech(text: str, voice: str = None, rate: str = None) -> d
     # Try edge-tts first
     try:
         import edge_tts
-        communicate = edge_tts.Communicate(clean, voice=voice, rate=rate)
+        communicate = edge_tts.Communicate(clean, voice=voice, rate=rate, pitch=pitch)
 
         audio_data = bytearray()
         async for chunk in communicate.stream():
