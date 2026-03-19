@@ -78,31 +78,11 @@ def run():
     print('\n--- 2. Safety Guards ---')
     import router
 
-    orig_session = router._session_active
-    orig_started = router._session_started_at
-
     test_ds2 = 'e3n-guard-test'
     training.delete_dataset(test_ds2)
     training.create_dataset(test_ds2)
     training.add_example(test_ds2, 'test',
         'Long response for quality filter passing in the training pipeline verification suite.', 'test')
-
-    # Session guard
-    router._session_active = True
-    router._session_started_at = time.time()
-    r = training.start_training(test_ds2, mode='lora')
-    check('LoRA blocked during session',
-          r['status'] == 'error' and 'session' in r['reason'].lower(), r.get('reason', ''))
-
-    r = training.start_training(test_ds2, mode='fewshot')
-    check('Fewshot allowed during session', r['status'] == 'ok')
-    for _ in range(30):
-        if not training.get_training_status()['running']:
-            break
-        time.sleep(1)
-
-    router._session_active = False
-    router._session_started_at = None
 
     # Sim guard
     orig_func = router.is_sim_running
@@ -126,8 +106,6 @@ def run():
     training._training_cancel_flag.clear()
     training._update_state(running=False, status='idle')
 
-    router._session_active = orig_session
-    router._session_started_at = orig_started
     training.delete_dataset(test_ds2)
 
     # === 3. ROUTER + VRAM STRESS ===
@@ -139,28 +117,6 @@ def run():
     except Exception as e:
         check('VRAM detection', False, str(e))
 
-    # Session GPU protection
-    router._session_active = True
-    router._session_started_at = time.time()
-    decision = asyncio.run(router.route('How are my tires?'))
-    gpu_safe = decision.backend == 'anthropic' or 'cpu' in str(decision.reason).lower()
-    check('Session GPU protection', gpu_safe, f'{decision.backend} / {decision.reason}')
-
-    # Telemetry classification
-    queries = [
-        ('fuel remaining', 'telemetry_lookup'),
-        ('tire temps', 'telemetry_lookup'),
-        ('why am I slow in sector 3', 'telemetry_coaching'),
-        ('should I pit now', 'telemetry_strategy'),
-        ('full race analysis', 'telemetry_debrief'),
-        ('what is Python', None),
-    ]
-    classify_pass = sum(1 for q, exp in queries if router.classify_telemetry_category(q) == exp)
-    check('Telemetry classification', classify_pass == len(queries), f'{classify_pass}/{len(queries)}')
-
-    router._session_active = False
-    router._session_started_at = None
-
     # Rapid stress
     start = time.time()
     for i in range(100):
@@ -169,7 +125,7 @@ def run():
     check('100 rapid routes', elapsed < 10000, f'{elapsed:.0f}ms, {elapsed/100:.1f}ms/query')
 
     d = asyncio.run(router.route('What is E3N?'))
-    check('Post-session normal routing', d.backend in ('ollama', 'anthropic'), f'{d.backend}/{d.model}')
+    check('Normal routing', d.backend in ('ollama', 'anthropic'), f'{d.backend}/{d.model}')
 
     # === 4. PERSISTENCE ===
     print('\n--- 4. Persistence ---')
@@ -177,14 +133,9 @@ def run():
     persistence.init_db()
     check('SQLite init', True)
 
-    persistence.save_history_pair('verify user', 'verify assistant', session_id='verify-session')
-    rows = persistence.load_history(max_turns=10, session_id='verify-session')
-    check('Session-aware history', len(rows) >= 1, f'{len(rows)} rows')
-
-    export_path = os.path.join(r'C:\e3n\data\training\sessions', 'verify-session.jsonl')
-    os.makedirs(os.path.dirname(export_path), exist_ok=True)
-    persistence.export_session_history('verify-session', export_path)
-    check('Session JSONL export', os.path.exists(export_path))
+    persistence.save_history_pair('verify user', 'verify assistant')
+    rows = persistence.load_history(max_turns=10)
+    check('History persistence', len(rows) >= 1, f'{len(rows)} rows')
 
     # === 5. RAG MEMORY ===
     print('\n--- 5. RAG Memory ---')
@@ -224,8 +175,8 @@ def run():
     print('\n--- 7. Anthropic Client ---')
     import anthropic_client
     check('anthropic_client imports', True)
-    has_tm = 'telemetry_mode' in anthropic_client.stream_chat.__code__.co_varnames
-    check('telemetry_mode parameter', has_tm)
+    has_split = 'split_mode' in anthropic_client.stream_chat.__code__.co_varnames
+    check('split_mode parameter', has_split)
 
     # === SUMMARY ===
     print('\n' + '=' * 60)

@@ -9,7 +9,7 @@
 
 **Local AI system with VRAM-aware routing, RAG memory, and a training pipeline — built to serve as a race engineer brain for Le Mans Ultimate.**
 
-E3N is the intelligence layer: reasoning, memory, tool execution, and model routing. External services (like a future Telemetry API) connect via the `/ingest` endpoint to push context into its RAG memory. Named after E3N from COD: Infinite Warfare and BT-7274 from Titanfall 2 — warm, loyal, confident, with a distinct voice (en-GB-RyanNeural, slight British accent). Not a chatbot. A teammate.
+E3N is the intelligence layer: reasoning, memory, tool execution, and model routing. External services (like a future Telemetry API) connect via the `/ingest` endpoint to push context into its RAG memory. Named after E3N from COD: Infinite Warfare and BT-7274 from Titanfall 2 — warm, loyal, confident, with a distinct voice (en-US-AndrewNeural with electronic resonance filter). Not a chatbot. A teammate.
 
 ---
 
@@ -35,8 +35,8 @@ E3N is the intelligence layer: reasoning, memory, tool execution, and model rout
 │  │ aware  │ │ + nomic  │ │ 4 telem  │ │ + A/B eval      │  │
 │  └───┬────┘ └──────────┘ └──────────┘ └─────────────────┘  │
 │      │      ┌──────────┐ ┌──────────┐ ┌─────────────────┐  │
-│      │      │ Persist  │ │ Voice    │ │ Session Mode    │  │
-│      │      │ SQLite   │ │ STT/TTS  │ │ GPU Protection  │  │
+│      │      │ Persist  │ │ Voice    │ │ Anthropic       │  │
+│      │      │ SQLite   │ │ STT/TTS  │ │ Cloud (dormant) │  │
 │      │      └──────────┘ └──────────┘ └─────────────────┘  │
 └──────┼──────────────────────────────────────────────────────┘
        │
@@ -129,15 +129,9 @@ E3N_SMALL_MODEL=e3n-qwen3b
 ANTHROPIC_API_KEY=
 CLOUD_BUDGET_DAILY=5.00
 
-# Session / Racing
-SESSION_GPU_PROTECT=true
-SESSION_FORCE_CLOUD=true
-SESSION_SOURCE_PATTERN=lmu
-SESSION_TIMEOUT_SEC=60
-
 # Voice
 VOICE_ENABLED=true
-TTS_VOICE=en-US-GuyNeural
+TTS_VOICE=en-US-AndrewNeural
 
 # Training
 HF_BASE_MODEL=Qwen/Qwen2.5-3B-Instruct
@@ -159,13 +153,6 @@ The router detects available VRAM in real-time and selects the best model:
 
 Sim process detection via psutil. On LMU launch → unload large model, preload 3B. On sim close → swap back to 14B within 30 seconds.
 
-### Session Mode & GPU Protection
-When actively racing, **zero GPU inference** — protects frame rate at 250+ km/h:
-- Cloud available → routes to Anthropic API
-- No cloud → CPU-only local (slower but zero GPU impact)
-- LoRA training blocked during sessions
-- Auto-activates from `/ingest` source pattern matching
-
 ### RAG Memory
 ChromaDB with nomic-embed-text embeddings. Multi-query expansion generates 2–3 search variants, results are deduplicated and reranked with source grouping and recency bias.
 
@@ -174,24 +161,14 @@ ChromaDB with nomic-embed-text embeddings. Multi-query expansion generates 2–3
 - **Live data**: Source and age filtering for real-time telemetry queries
 - **Batch ingest**: Single embedding call for up to 100 items
 
-### Telemetry Query Classification
-During active sessions, queries are classified into 4 categories with tailored prompt templates:
-
-| Category | Example | Behavior |
-|----------|---------|----------|
-| `telemetry_lookup` | "fuel remaining" | Short-circuit from RAG — no LLM |
-| `telemetry_coaching` | "why am I slow in S3" | Coach template (observation → impact → action) |
-| `telemetry_strategy` | "should I pit now" | Engineer template (recommendation + numbers) |
-| `telemetry_debrief` | "full race analysis" | Deep analysis, no time pressure |
-
 ### Training Pipeline
 Two improvement paths: **RAG knowledge enrichment** (preferred for 3B) and **QLoRA fine-tuning** (for larger datasets).
 
 - **Knowledge enrichment**: 8 reference documents (143 expert examples) covering anti-hallucination, engineering, race strategy, data interpretation, personality, MechE, reasoning, and race simulations. Ingested into ChromaDB, retrieved via RAG at query time
 - **QLoRA**: 4-bit training on Qwen2.5-3B (~6-7GB VRAM) via PEFT/TRL — full pipeline verified end-to-end (LoRA → merge → GGUF Q4_K_M → Ollama registration)
 - **A/B evaluation**: Compare two models on a dataset with latency + quality metrics
-- **Auto-capture**: Good exchanges automatically saved; racing exchanges routed to `e3n-racing` dataset with RAG context
-- **Safety**: Blocked during racing sessions or when sim is running; cancellable mid-training
+- **Auto-capture**: Good exchanges automatically saved to `e3n-auto` dataset
+- **Safety**: Blocked when sim is running; cancellable mid-training
 - **Finding**: RAG enrichment outperforms LoRA on 3B models with small datasets (143 examples) — model retains instruction-following behavior while gaining expert reference context
 
 ### Voice Module
@@ -213,10 +190,10 @@ C:\e3n\
 ├── app\                          Electron desktop app
 │   └── main.js                   Frameless window + IPC
 ├── project\                      FastAPI backend
-│   ├── main.py                   Chat, ingest, session, training, voice endpoints
-│   ├── router.py                 VRAM detection, sim detection, tier routing, session mode
+│   ├── main.py                   Chat, ingest, training, voice endpoints
+│   ├── router.py                 VRAM detection, sim detection, tier routing
 │   ├── memory.py                 ChromaDB RAG — embed, query, ingest, batch, TTL cleanup
-│   ├── persistence.py            SQLite — conversation history, budget, session export
+│   ├── persistence.py            SQLite — conversation history, budget tracking
 │   ├── anthropic_client.py       Cloud inference with tool use (dormant until API key)
 │   ├── training.py               QLoRA fine-tuning, dataset CRUD, A/B eval, auto-capture
 │   ├── voice.py                  STT (faster-whisper) + TTS (edge-tts)
@@ -227,7 +204,7 @@ C:\e3n\
 │   ├── static/
 │   │   └── index.html            Full dashboard UI (single file — CSS + HTML + JS)
 │   ├── tests/
-│   │   ├── verify_full.py        33 core tests
+│   │   ├── verify_full.py        28 core tests
 │   │   ├── verify_stress.py      30 stress simulation tests
 │   │   └── verify_resource_mgmt.py  29 resource management tests
 │   └── .env                      Configuration (not committed)
@@ -262,13 +239,6 @@ C:\e3n\
 |--------|----------|-------------|
 | POST | `/ingest` | Push context into RAG (source, context, TTL, tags) |
 | POST | `/ingest/batch` | Batch ingest up to 100 items |
-
-### Session
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/session/start` | Manually activate session mode |
-| POST | `/session/end` | Deactivate + export session history |
-| GET | `/session/status` | Current session state |
 
 ### Training
 | Method | Endpoint | Description |
@@ -313,8 +283,8 @@ C:\e3n\
 | 2 | **Complete** | VRAM-aware routing, Qwen migration, sim detection, /ingest, emergency backup |
 | 3 | **Complete** | Cloud tool-use, split workload, cost budget, conversation history, SQLite persistence |
 | 4 | **Complete** | Smarter RAG, training pipeline, text-as-tool hardening, error recovery, voice module |
-| 5 | **Complete** | Telemetry prep — session mode, GPU protection, query classification, racing prompts, WebSocket alerts, batch ingest, racing auto-capture |
-| 6 | **Complete** | Dashboard Tier 1 — training pipeline UI, session auto-detect badge, diagnostics panel, live voice chat, settings panel (audio devices, TTS config), resource self-manager, circuit breaker, AI self-heal |
+| 5 | **Complete** | Telemetry prep — WebSocket alerts, batch ingest, conditional telemetry tools, /ingest connector |
+| 6 | **Complete** | Dashboard Tier 1 — training pipeline UI, diagnostics panel, live voice chat (always-listening), settings panel, resource self-manager, circuit breaker, AI self-heal, voice filter v3 |
 | — | **Separate project** | Telemetry API for Le Mans Ultimate — connects to E3N via /ingest |
 
 ---
@@ -323,10 +293,10 @@ C:\e3n\
 
 Tactical operations center aesthetic with a muted grey-green palette. Features include:
 
-- **Header**: Subsystem health monitor (X/8 ONLINE) + cloud budget + session badge (auto-detected, timer, GPU protect warning)
+- **Header**: Subsystem health monitor (X/8 ONLINE) + cloud budget display
 - **3D particle sphere**: Network node map with speech waveform animation during voice chat
 - **Terminal**: Streaming chat with conversation history (CLR + turn counter)
-- **Live voice chat**: Always-listening Alexa/JARVIS style. Click VOICE to activate — Whisper pre-warms, just talk naturally, VAD auto-detects speech and silence. Split pipeline: STT (instant transcription) → streaming chat (response streams in real-time) → TTS (AudioContext playback with sphere animation). Whisper vocabulary boost (150+ racing/engineering terms) + hallucination filtering. LLM voice prefix for transcription error correction. Auto-cycles back to listening after each response
+- **Live voice chat**: Always-listening JARVIS/E3N style. Click VOICE to activate — Whisper pre-warms, just talk naturally, VAD auto-detects speech and silence. Split pipeline: STT (instant transcription) → streaming chat (response streams in real-time) → TTS (AudioContext.decodeAudioData with electronic resonance filter — vocal presence + 4.2kHz/6.8kHz shimmer + 12ms micro-chorus). Whisper hallucination filtering. Auto-cycles back to listening after each response
 - **Web search**: DuckDuckGo-powered web search tool — E3N can autonomously look up specs, current events, and topics not in its knowledge base. No API key required. Blocked during active racing sessions.
 - **Electronic voice filter**: Subtle AI texture applied via Web Audio API — bandpass emphasis, soft saturation, low-frequency electronic hum. Configurable intensity (0-100%) in Settings. Gives E3N his signature robotic undertone.
 - **Settings panel**: Audio device selection (mic input/speaker output), TTS voice + speed config, voice filter toggle + intensity slider, system status overview

@@ -96,7 +96,6 @@ async def stream_chat(
     tools: list = None,
     execute_tool_fn=None,
     split_mode: bool = False,
-    telemetry_mode: str = None,
     history: list = None,
 ):
     """
@@ -114,6 +113,7 @@ async def stream_chat(
         split_mode: If True, append split workload hint to system prompt
         history: Prior conversation messages to prepend (user/assistant pairs)
     """
+
     api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
     if not api_key:
         yield json.dumps({"t": "error", "c": "No Anthropic API key configured. Add ANTHROPIC_API_KEY to C:\\e3n\\project\\.env"}) + "\n"
@@ -145,9 +145,6 @@ async def stream_chat(
                 "results are in the context below. Focus on analysis and reasoning. "
                 "Do not suggest running commands or gathering data — it has been done."
             )
-
-        if telemetry_mode:
-            system_prompt += f"\n\n{telemetry_mode}"
 
         payload = {
             "model": model,

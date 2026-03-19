@@ -24,14 +24,10 @@ from router import (route, is_cloud_available, is_cloud_available_sync,
                     get_gpu_utilization, get_vram_free_mb, classify_complexity,
                     is_sim_running, get_budget_status, record_cloud_usage,
                     _pick_local_model, get_backup_model, check_model_health,
-                    check_model_exists, init_budget_from_db,
-                    is_session_active, activate_session, deactivate_session,
-                    activate_session_from_ingest, get_session_status,
-                    classify_telemetry_category)
+                    check_model_exists, init_budget_from_db)
 from anthropic_client import stream_chat as anthropic_stream
 from persistence import (init_db, load_history, save_history_pair,
-                         clear_history as db_clear_history, trim_history,
-                         export_session_history)
+                         clear_history as db_clear_history, trim_history)
 
 load_dotenv()
 psutil.cpu_percent(interval=0.1)
@@ -156,40 +152,12 @@ def _is_idle() -> bool:
     return True
 
 
-# ── TELEMETRY PROMPT TEMPLATES ───────────────────────────────────────
-
-_COACH_TEMPLATE = """You are in COACHING MODE. The operator is asking about driving performance.
-Structure your response as:
-1. OBSERVATION — what the data shows (specific numbers)
-2. IMPACT — how it affects lap time (quantify in tenths/hundredths)
-3. ACTION — one concrete change to try next lap
-Compare to the driver's own best, not theoretical limits. Be surgical — data over feelings."""
-
-_ENGINEER_TEMPLATE = """You are in RACE ENGINEER MODE. The operator needs a strategic decision.
-Structure your response as:
-1. RECOMMENDATION — lead with the call (pit/stay/save fuel/etc.)
-2. NUMBERS — lap to pit, compound choice, fuel target, time delta
-3. RISK — what could go wrong, and the fallback plan
-Never hedge a pit call. Give a clear recommendation with confidence. Include specific numbers."""
-
-
-def build_telemetry_prompt(query_category: str) -> str | None:
-    """Return the coaching or engineering prompt template for telemetry queries."""
-    if query_category == "telemetry_coaching":
-        return _COACH_TEMPLATE
-    elif query_category in ("telemetry_strategy", "telemetry_debrief"):
-        return _ENGINEER_TEMPLATE
-    return None
-
-
 # ── CONVERSATION HISTORY ─────────────────────────────────────────────
 HISTORY_MAX_TURNS = int(os.getenv("CONVERSATION_HISTORY_MAX", "10"))
 _conversation_history: list[dict] = []
-_current_session_id: str | None = None  # tracks active session for history tagging
 
 
-def _append_to_history(user_message: str, assistant_response: str,
-                       query_category: str = "general", rag_context: str = ""):
+def _append_to_history(user_message: str, assistant_response: str):
     """Store a clean user-assistant exchange. Skip if either is empty."""
     global _last_chat_end
     _last_chat_end = _time.time()
@@ -200,21 +168,16 @@ def _append_to_history(user_message: str, assistant_response: str,
     max_msgs = HISTORY_MAX_TURNS * 2
     if len(_conversation_history) > max_msgs:
         del _conversation_history[:-max_msgs]
-    # Persist to SQLite (with session tagging)
+    # Persist to SQLite
     try:
-        save_history_pair(user_message, assistant_response, session_id=_current_session_id)
+        save_history_pair(user_message, assistant_response)
         trim_history(HISTORY_MAX_TURNS)
     except Exception as e:
         logger.warning(f"Failed to persist history: {e}")
     # Auto-capture good exchanges for training data
     if TRAINING_AVAILABLE:
         try:
-            # Route racing exchanges to dedicated dataset
-            if query_category.startswith("telemetry_"):
-                auto_capture("e3n-racing", user_message, assistant_response,
-                             category=query_category, rag_context=rag_context)
-            else:
-                auto_capture("e3n-auto", user_message, assistant_response)
+            auto_capture("e3n-auto", user_message, assistant_response)
         except Exception:
             pass  # never break chat for training
 
@@ -523,7 +486,7 @@ async def _resource_manager_loop():
                     logger.debug(f"Watcher recovery check failed: {e}")
 
             # ── 5. PERIODIC TTL CLEANUP ──
-            if RAG_AVAILABLE and is_session_active():
+            if RAG_AVAILABLE:
                 try:
                     cleanup_expired()
                 except Exception:
@@ -581,11 +544,6 @@ async def _ai_self_heal_loop():
             # Skip if not idle
             if not _is_idle():
                 logger.debug("Self-heal: skipping (chat active)")
-                continue
-
-            # Skip during active racing sessions (GPU protection)
-            if is_session_active():
-                logger.debug("Self-heal: skipping (racing session active)")
                 continue
 
             # Skip if circuit breaker is open (Ollama down — can't run LLM)
@@ -1065,12 +1023,6 @@ def build_rag_context(user_message: str, source_filter: str = None,
                       max_age_sec: float = None) -> str:
     if not RAG_AVAILABLE:
         return ""
-    # Cleanup expired entries during active sessions
-    if is_session_active():
-        try:
-            cleanup_expired()
-        except Exception:
-            pass
     try:
         matches = query_knowledge(user_message, n_results=3, threshold=0.75,
                                   source_filter=source_filter, max_age_sec=max_age_sec)
@@ -1138,36 +1090,8 @@ async def chat(req: ChatRequest):
         logger.info(f"Greeting short-circuit: '{req.message}' → '{greeting_response}'")
         return StreamingResponse(stream_greeting(), media_type="application/x-ndjson")
 
-    # ── SESSION EVENT ──────────────────────────────────────────
-    query_cat = decision.query_category
-
-    # ── TELEMETRY LOOKUP SHORT-CIRCUIT ─────────────────────────
-    # Simple data queries during active session — answer from RAG, no model needed
-    if query_cat == "telemetry_lookup" and RAG_AVAILABLE:
-        lookup_context = build_rag_context(req.message, source_filter=None, max_age_sec=120)
-        if lookup_context:
-            async def stream_lookup():
-                yield json.dumps({"t": "route", **decision.to_dict()}) + "\n"
-                chunk_count = lookup_context.count("[Source:")
-                yield json.dumps({"t": "rag", "n": chunk_count}) + "\n"
-                # Extract clean data from RAG context (strip metadata headers)
-                clean = lookup_context.replace("[KNOWLEDGE CONTEXT — from your ingested documents]", "").replace("[END CONTEXT]", "")
-                clean = re.sub(r'\[Source:.*?\|.*?\]\n?', '', clean).strip()
-                yield json.dumps({"t": "text", "c": clean}) + "\n"
-                _append_to_history(req.message, clean, query_category=query_cat, rag_context=lookup_context)
-                yield json.dumps({"t": "done", "turns": len(_conversation_history) // 2}) + "\n"
-            logger.info(f"Telemetry lookup short-circuit: '{req.message}'")
-            return StreamingResponse(stream_lookup(), media_type="application/x-ndjson")
-
     # ── RAG CONTEXT ─────────────────────────────────────────
-    # During active sessions, prefer recent telemetry data
-    if is_session_active() and query_cat.startswith("telemetry_"):
-        rag_context = build_rag_context(req.message, max_age_sec=300)
-    else:
-        rag_context = build_rag_context(req.message)
-
-    # ── TELEMETRY PROMPT INJECTION ──────────────────────────
-    telemetry_prompt = build_telemetry_prompt(query_cat)
+    rag_context = build_rag_context(req.message)
 
     # ── SPLIT WORKLOAD PATH ─────────────────────────────────
     # Phase 1: Local 3B model gathers data via tools (free, fast)
@@ -1198,7 +1122,7 @@ async def chat(req: ChatRequest):
                 async for line in anthropic_stream(
                     message=req.message, model=decision.model,
                     rag_context=rag_context, tools=TOOLS, execute_tool_fn=execute_tool,
-                    history=_get_history(), telemetry_mode=telemetry_prompt,
+                    history=_get_history(),
                 ):
                     if line.strip().startswith('{"t":"_usage"'):
                         try:
@@ -1212,7 +1136,7 @@ async def chat(req: ChatRequest):
                         if ev.get("t") == "text":
                             full_response += ev.get("c", "")
                         elif ev.get("t") == "done":
-                            _append_to_history(req.message, full_response, query_category=query_cat, rag_context=rag_context)
+                            _append_to_history(req.message, full_response)
                             yield json.dumps({"t": "done", "turns": len(_conversation_history) // 2}) + "\n"
                             continue
                     except (json.JSONDecodeError, ValueError):
@@ -1285,8 +1209,7 @@ async def chat(req: ChatRequest):
                 async for line in anthropic_stream(
                     message=req.message, model=decision.model,
                     rag_context=rag_context, tools=TOOLS, execute_tool_fn=execute_tool,
-                    history=_get_history(), telemetry_mode=telemetry_prompt,
-                ):
+                    history=_get_history(),                 ):
                     if line.strip().startswith('{"t":"_usage"'):
                         try:
                             usage = json.loads(line.strip())
@@ -1299,7 +1222,7 @@ async def chat(req: ChatRequest):
                         if ev.get("t") == "text":
                             full_response += ev.get("c", "")
                         elif ev.get("t") == "done":
-                            _append_to_history(req.message, full_response, query_category=query_cat, rag_context=rag_context)
+                            _append_to_history(req.message, full_response)
                             yield json.dumps({"t": "done", "turns": len(_conversation_history) // 2}) + "\n"
                             continue
                     except (json.JSONDecodeError, ValueError):
@@ -1326,8 +1249,7 @@ async def chat(req: ChatRequest):
             async for line in anthropic_stream(
                 message=req.message, model=decision.model,
                 rag_context=combined_context, tools=None,
-                split_mode=True, telemetry_mode=telemetry_prompt,
-                history=_get_history(),
+                split_mode=True,                 history=_get_history(),
             ):
                 if line.strip().startswith('{"t":"_usage"'):
                     try:
@@ -1341,7 +1263,7 @@ async def chat(req: ChatRequest):
                     if ev.get("t") == "text":
                         full_response += ev.get("c", "")
                     elif ev.get("t") == "done":
-                        _append_to_history(req.message, full_response, query_category=query_cat, rag_context=rag_context)
+                        _append_to_history(req.message, full_response)
                         yield json.dumps({"t": "done", "turns": len(_conversation_history) // 2}) + "\n"
                         continue
                 except (json.JSONDecodeError, ValueError):
@@ -1372,8 +1294,7 @@ async def chat(req: ChatRequest):
                 tools=TOOLS,
                 execute_tool_fn=execute_tool,
                 history=_get_history(),
-                telemetry_mode=telemetry_prompt,
-            ):
+                            ):
                 # Intercept _usage events for cost tracking
                 if line.strip().startswith('{"t":"_usage"'):
                     try:
@@ -1392,7 +1313,7 @@ async def chat(req: ChatRequest):
                     if ev.get("t") == "text":
                         full_response += ev.get("c", "")
                     elif ev.get("t") == "done":
-                        _append_to_history(req.message, full_response, query_category=query_cat, rag_context=rag_context)
+                        _append_to_history(req.message, full_response)
                         yield json.dumps({"t": "done", "turns": len(_conversation_history) // 2}) + "\n"
                         continue
                 except (json.JSONDecodeError, ValueError):
@@ -1402,19 +1323,14 @@ async def chat(req: ChatRequest):
         return StreamingResponse(stream_cloud(), media_type="application/x-ndjson")
 
     # ── OLLAMA PATH (with tool calling) ─────────────────────
-    # Inject telemetry prompt as system message for local models
-    telemetry_prefix = ""
-    if telemetry_prompt:
-        telemetry_prefix = f"[SYSTEM NOTE]\n{telemetry_prompt}\n[END NOTE]\n\n"
-
     voice_prefix = ""
     if req.voice_input:
         voice_prefix = "[Voice input — may contain transcription errors. Interpret the intended meaning.]\n"
 
     if rag_context:
-        user_content = f"{telemetry_prefix}{voice_prefix}{rag_context}\n{req.message}"
+        user_content = f"{voice_prefix}{rag_context}\n{req.message}"
     else:
-        user_content = f"{telemetry_prefix}{voice_prefix}{req.message}" if (telemetry_prefix or voice_prefix) else req.message
+        user_content = f"{voice_prefix}{req.message}" if voice_prefix else req.message
 
     messages = _get_history() + [{"role": "user", "content": user_content}]
 
@@ -1482,7 +1398,7 @@ async def chat(req: ChatRequest):
                         chunk_size = 4
                         for i in range(0, len(content), chunk_size):
                             yield json.dumps({"t": "text", "c": content[i:i+chunk_size]}) + "\n"
-                    _append_to_history(req.message, content, query_category=query_cat, rag_context=rag_context)
+                    _append_to_history(req.message, content)
                     yield json.dumps({"t": "done", "turns": len(_conversation_history) // 2}) + "\n"
                     return
 
@@ -1529,7 +1445,7 @@ async def chat(req: ChatRequest):
                 content = data.get("message", {}).get("content", "Max tool rounds reached.")
                 for i in range(0, len(content), 4):
                     yield json.dumps({"t": "text", "c": content[i:i+4]}) + "\n"
-                _append_to_history(req.message, content, query_category=query_cat, rag_context=rag_context)
+                _append_to_history(req.message, content)
             else:
                 yield json.dumps({"t": "error", "c": str(err)}) + "\n"
             yield json.dumps({"t": "done", "turns": len(_conversation_history) // 2}) + "\n"
@@ -1668,13 +1584,6 @@ async def ingest_endpoint(req: IngestRequest):
     if not req.context or not req.context.strip():
         return {"status": "error", "reason": "context is required"}
     try:
-        # Auto-activate session from telemetry source
-        global _current_session_id
-        was_active = is_session_active()
-        activate_session_from_ingest(req.source.strip())
-        # Auto-set session_id when ingest triggers session activation
-        if not was_active and is_session_active() and not _current_session_id:
-            _current_session_id = f"auto_{int(_time.time())}"
         result = await asyncio.to_thread(
             ingest_context,
             source=req.source.strip(),
@@ -1708,11 +1617,6 @@ async def ingest_batch_endpoint(req: IngestBatchRequest):
     if not RAG_AVAILABLE:
         return {"error": "RAG not available"}
     try:
-        # Auto-activate session from any telemetry sources in batch
-        for item in req.items[:5]:  # check first 5 for pattern
-            src = item.get("source", "")
-            if src:
-                activate_session_from_ingest(src)
         result = await asyncio.to_thread(ingest_context_batch, req.items)
         # Forward any alerts
         for item in req.items:
@@ -1741,45 +1645,6 @@ def ingest_cleanup():
         return cleanup_expired()
     except Exception as e:
         return {"status": "error", "reason": str(e)}
-
-
-# ── SESSION ENDPOINTS ────────────────────────────────────────────────
-
-@app.post("/session/start")
-def session_start():
-    """Manually activate racing session mode (GPU protection)."""
-    global _current_session_id
-    _current_session_id = f"session_{int(_time.time())}"
-    activate_session(manual=True)
-    return {"ok": True, "session_id": _current_session_id, **get_session_status()}
-
-
-@app.post("/session/end")
-def session_end():
-    """Deactivate racing session mode and export session history."""
-    global _current_session_id
-    result = {"ok": True}
-    # Export session history for training
-    if _current_session_id:
-        try:
-            export_path = os.path.join(r"C:\e3n\data\training\sessions", f"{_current_session_id}.jsonl")
-            os.makedirs(os.path.dirname(export_path), exist_ok=True)
-            export_result = export_session_history(_current_session_id, export_path)
-            result["export"] = export_result
-        except Exception as e:
-            result["export_error"] = str(e)
-    _current_session_id = None
-    deactivate_session()
-    result.update(get_session_status())
-    return result
-
-
-@app.get("/session/status")
-def session_status():
-    """Get current session state."""
-    status = get_session_status()
-    status["session_id"] = _current_session_id
-    return status
 
 
 # ── WEBSOCKET ALERTS ─────────────────────────────────────────────────
@@ -1843,7 +1708,6 @@ def self_heal_status():
         "interval_sec": _SELF_HEAL_INTERVAL,
         "model": _SELF_HEAL_MODEL,
         "idle": _is_idle(),
-        "session_active": is_session_active(),
         "circuit_breaker": _circuit_breaker["state"],
         "recent_actions": heal_actions[-10:],
     }

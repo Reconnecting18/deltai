@@ -633,11 +633,7 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str):
         _update_state(progress=2, status="checking preconditions", mode="lora")
 
         try:
-            from router import is_session_active, is_sim_running
-            if is_session_active():
-                _update_state(running=False, status="failed",
-                              error="Cannot train during active racing session", progress=0)
-                return
+            from router import is_sim_running
             if is_sim_running():
                 _update_state(running=False, status="failed",
                               error="Cannot train while sim is running (VRAM needed)", progress=0)
@@ -904,12 +900,10 @@ def start_training(
         if not ok:
             return {"status": "error", "reason": f"LoRA deps unavailable: {reason}"}
 
-    # Session/sim check for LoRA mode
+    # Sim check for LoRA mode (VRAM protection)
     if actual_mode == "lora":
         try:
-            from router import is_session_active, is_sim_running
-            if is_session_active():
-                return {"status": "error", "reason": "Cannot train during active racing session"}
+            from router import is_sim_running
             if is_sim_running():
                 return {"status": "error", "reason": "Cannot train while sim is running"}
         except ImportError:

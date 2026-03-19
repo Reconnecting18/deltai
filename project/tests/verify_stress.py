@@ -242,22 +242,17 @@ def stress_backup_chain():
     assert backup3 is None, f"{backup2} should be the end of the chain (got {backup3})"
 stress_backup_chain()
 
-# Stress 5: Router under session mode with GPU protection
-@test("Stress 5: Session mode forces CPU-only when no cloud available")
-def stress_session_no_cloud():
+# Stress 5: Router force_local always picks ollama
+@test("Stress 5: Force local always routes to ollama")
+def stress_force_local():
     import router
-    # Activate session
-    router.activate_session(manual=True)
-    try:
-        with patch.object(router, 'get_vram_free_mb', return_value=2000), \
-             patch.object(router, 'is_sim_running', return_value=True), \
-             patch.object(router, 'is_gpu_loaded', return_value=True):
-            decision = asyncio.run(router.route("what are my tire temps", force_local=True))
-            assert decision.cpu_only or decision.backend == "ollama", \
-                "Session mode should use local fallback when forced local"
-    finally:
-        router.deactivate_session()
-stress_session_no_cloud()
+    with patch.object(router, 'get_vram_free_mb', return_value=2000), \
+         patch.object(router, 'is_sim_running', return_value=True), \
+         patch.object(router, 'is_gpu_loaded', return_value=True):
+        decision = asyncio.run(router.route("what are my tire temps", force_local=True))
+        assert decision.backend == "ollama", \
+            f"Force local should always route to ollama, got {decision.backend}"
+stress_force_local()
 
 # Stress 6: Tier classification under load
 @test("Stress 6: Complexity classifier handles edge cases")
@@ -276,24 +271,18 @@ def stress_tier_classification():
     assert router.classify_complexity(long_msg) >= 2
 stress_tier_classification()
 
-# Stress 7: Telemetry classification during session
-@test("Stress 7: Telemetry query classification accuracy")
-def stress_telemetry_classify():
+# Stress 7: Routing always returns query_category=general (telemetry modes removed)
+@test("Stress 7: Route always returns general query category")
+def stress_general_category():
     import router
-    # Lookup
-    assert router.classify_telemetry_category("what are my tire temps") == "telemetry_lookup"
-    assert router.classify_telemetry_category("fuel remaining") == "telemetry_lookup"
-    # Coaching
-    assert router.classify_telemetry_category("why am i losing time in sector 2") == "telemetry_coaching"
-    assert router.classify_telemetry_category("how can I improve my braking point") == "telemetry_coaching"
-    # Strategy
-    assert router.classify_telemetry_category("should i pit now") == "telemetry_strategy"
-    assert router.classify_telemetry_category("what tire compound should I use next stint") == "telemetry_strategy"
-    # Debrief
-    assert router.classify_telemetry_category("give me a full race analysis") == "telemetry_debrief"
-    # Non-telemetry
-    assert router.classify_telemetry_category("what is the weather today") is None
-stress_telemetry_classify()
+    # Even telemetry-sounding queries should route as general now
+    decision = asyncio.run(router.route("what are my tire temps"))
+    assert decision.query_category == "general", f"Expected general, got {decision.query_category}"
+    decision = asyncio.run(router.route("should i pit now"))
+    assert decision.query_category == "general", f"Expected general, got {decision.query_category}"
+    decision = asyncio.run(router.route("write me a python script"))
+    assert decision.query_category == "general", f"Expected general, got {decision.query_category}"
+stress_general_category()
 
 # Stress 8: Greeting short-circuit under all patterns
 @test("Stress 8: Greeting matcher covers all patterns without false positives")
@@ -387,36 +376,23 @@ def stress_history():
         main.HISTORY_MAX_TURNS = old_max
 stress_history()
 
-# Stress 12: Session mode lifecycle
-@test("Stress 12: Session activate/deactivate/timeout lifecycle")
-def stress_session_lifecycle():
+# Stress 12: Router sim detection affects model selection
+@test("Stress 12: Sim running picks smaller model to save VRAM")
+def stress_sim_model_selection():
     import router
-    # Start fresh
-    router.deactivate_session()
-    assert not router.is_session_active()
-
-    # Manual activation
-    router.activate_session(manual=True)
-    assert router.is_session_active()
-
-    # Deactivation
-    router.deactivate_session()
-    assert not router.is_session_active()
-
-    # Auto-activation from ingest
-    router.activate_session_from_ingest("lmu-telemetry")
-    assert router.is_session_active()
-
-    # Non-matching source shouldn't activate
-    router.deactivate_session()
-    router.activate_session_from_ingest("weather-api")
-    assert not router.is_session_active()
-
-    # Timeout test
-    router.activate_session(manual=True)
-    router._session_last_ingest = time.time() - 9999  # Way past timeout
-    assert not router.is_session_active(), "Session should auto-deactivate after timeout"
-stress_session_lifecycle()
+    # When sim is running, router should prefer smaller model
+    with patch.object(router, 'is_sim_running', return_value=True), \
+         patch.object(router, 'get_vram_free_mb', return_value=5000):
+        model, cpu_only, backup = router._pick_local_model()
+        assert '3b' in model.lower() or model == os.getenv('E3N_SIM_MODEL', os.getenv('E3N_MODEL', 'e3n-qwen3b')), \
+            f"Sim running should pick small model, got {model}"
+    # When sim is NOT running and plenty of VRAM, pick strong model
+    with patch.object(router, 'is_sim_running', return_value=False), \
+         patch.object(router, 'get_vram_free_mb', return_value=10000):
+        model, cpu_only, backup = router._pick_local_model()
+        assert '14b' in model.lower() or model == os.getenv('E3N_STRONG_MODEL', 'e3n-qwen14b'), \
+            f"No sim + plenty VRAM should pick strong model, got {model}"
+stress_sim_model_selection()
 
 # Stress 13: Tool safety guards
 @test("Stress 13: Tool executor blocks dangerous commands")

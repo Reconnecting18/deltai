@@ -697,37 +697,12 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
     gpu_loaded = is_gpu_loaded()
     split = is_split_workload(message)
 
-    # Classify telemetry category ONLY when session active AND telemetry API is configured.
-    # Sim detection alone is not enough — without telemetry data, racing prompts are misleading.
     query_cat = "general"
-    _telemetry_url = os.getenv("TELEMETRY_API_URL", "").strip()
-    if is_session_active() and _telemetry_url:
-        cat = classify_telemetry_category(message)
-        if cat:
-            query_cat = cat
 
     cloud_ready = (cloud_enabled and has_api_key()
                    and await is_cloud_available() and _check_budget())
 
     vram_free = get_vram_free_mb()
-
-    # ── Session active — GPU protection ──
-    if is_session_active() and _SESSION_GPU_PROTECT:
-        if cloud_ready and _SESSION_FORCE_CLOUD:
-            model = opus_model if tier == 3 else sonnet_model
-            return RouteDecision("anthropic", model, tier,
-                                 "session active — GPU protected, cloud routing",
-                                 split=False, sim_running=sim_active,
-                                 gpu_loaded=gpu_loaded, backup_model=backup,
-                                 query_category=query_cat)
-        else:
-            # No cloud — CPU-only local as safe fallback
-            default_model = os.getenv("E3N_MODEL", "e3n-qwen3b").strip()
-            return RouteDecision("ollama", default_model, tier,
-                                 "session active — GPU protected, CPU-only fallback",
-                                 sim_running=sim_active, gpu_loaded=gpu_loaded,
-                                 cpu_only=True, backup_model=get_backup_model(default_model),
-                                 query_category=query_cat)
 
     # ── Force cloud ──
     if force_cloud:
