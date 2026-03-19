@@ -124,11 +124,12 @@ def is_gpu_loaded() -> bool:
 # ── SIM DETECTION ────────────────────────────────────────────────────────
 
 _SIM_PROCESS_NAMES = [
-    "lemansultimate",      # Le Mans Ultimate
-    "lemans ultimate",
-    "lmu",
+    "lemansultimate",      # Le Mans Ultimate (main executable)
+    "le mans ultimate",
     "rfactor2",            # rFactor 2 (same engine)
 ]
+# NOTE: Removed bare "lmu" — too broad, false-matches on other processes.
+# LMU's actual process name is "Le Mans Ultimate.exe" → normalized to "lemansultimate"
 
 _last_sim_check = 0
 _last_sim_result = False
@@ -696,9 +697,11 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
     gpu_loaded = is_gpu_loaded()
     split = is_split_workload(message)
 
-    # Classify telemetry category when session active or sim running
+    # Classify telemetry category ONLY when session active AND telemetry API is configured.
+    # Sim detection alone is not enough — without telemetry data, racing prompts are misleading.
     query_cat = "general"
-    if is_session_active() or sim_active:
+    _telemetry_url = os.getenv("TELEMETRY_API_URL", "").strip()
+    if is_session_active() and _telemetry_url:
         cat = classify_telemetry_category(message)
         if cat:
             query_cat = cat

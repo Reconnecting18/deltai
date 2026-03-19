@@ -315,7 +315,7 @@ $synth.Dispose()
 
 
 def _clean_for_tts(text: str) -> str:
-    """Clean text for TTS — remove code blocks, markdown, URLs."""
+    """Clean text for TTS — remove code/markdown, convert to natural spoken form."""
     import re  # noqa: local import avoids top-level dep when voice disabled
 
     # Remove code blocks
@@ -332,11 +332,32 @@ def _clean_for_tts(text: str) -> str:
     text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
     # Remove file paths (Windows-style)
     text = re.sub(r'[A-Z]:\\[\w\\]+\.\w+', 'file path', text)
+    # Convert bullet points / dashes to natural speech pauses
+    text = re.sub(r'^[\s]*[-•*]\s+', '', text, flags=re.MULTILINE)
+    # Remove numbered list markers
+    text = re.sub(r'^[\s]*\d+[\.\)]\s+', '', text, flags=re.MULTILINE)
+    # Remove pipe tables
+    text = re.sub(r'\|[^\n]+\|', '', text)
+    # Remove horizontal rules
+    text = re.sub(r'^---+$', '', text, flags=re.MULTILINE)
+    # Convert multiple newlines to period (natural pause)
+    text = re.sub(r'\n{2,}', '. ', text)
+    # Convert single newlines to space
+    text = re.sub(r'\n', ' ', text)
+    # Remove emoji
+    text = re.sub(r'[\U0001F600-\U0001F9FF\U0001FA00-\U0001FAFF\U00002702-\U000027B0]', '', text)
     # Collapse whitespace
     text = re.sub(r'\s+', ' ', text).strip()
+    # Remove trailing "code block omitted" if it's the last thing
+    text = re.sub(r'\s*code block omitted\s*\.?\s*$', '', text).strip()
     # Truncate very long text (TTS shouldn't read novels)
-    if len(text) > 2000:
-        text = text[:2000] + "... Message truncated for speech."
+    if len(text) > 1500:
+        # Cut at sentence boundary
+        cut = text[:1500].rfind('. ')
+        if cut > 500:
+            text = text[:cut + 1]
+        else:
+            text = text[:1500] + "."
 
     return text
 

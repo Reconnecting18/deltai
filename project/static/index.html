@@ -634,8 +634,8 @@ canvas.spark{width:100%;height:28px;display:block}
           </label>
         </div>
         <div class="srow" style="flex-direction:column;align-items:flex-start;gap:4px;margin-top:4px">
-          <span class="sk">Filter Intensity — <span id="cfg-filter-pct">20%</span></span>
-          <input type="range" id="cfg-voice-filter-intensity" min="0" max="100" value="20" style="width:100%;accent-color:var(--accent)" oninput="document.getElementById('cfg-filter-pct').textContent=this.value+'%';cfgSaveSetting('voiceFilterIntensity',this.value/100)">
+          <span class="sk">Filter Intensity — <span id="cfg-filter-pct">35%</span></span>
+          <input type="range" id="cfg-voice-filter-intensity" min="0" max="100" value="35" style="width:100%;accent-color:var(--accent)" oninput="document.getElementById('cfg-filter-pct').textContent=this.value+'%';cfgSaveSetting('voiceFilterIntensity',this.value/100)">
         </div>
       </div>
     </div>
@@ -1820,45 +1820,59 @@ async function _vPlayTTS(text){
       const buf=await ctx.decodeAudioData(raw.slice(0))
       const src=ctx.createBufferSource()
       src.buffer=buf
-      // ── E3N VOICE FILTER — subtle AI resonance (inspired by E3N/BT-7274) ──
-      // Goal: natural voice with faint metallic/electronic undertone, NOT a radio effect
+      // ── E3N VOICE FILTER — AI voice character (E3N/BT-7274/JARVIS inspired) ──
+      // Approach: voice stays natural. Three subtle layers create "AI speaking through
+      // high-end electronics" feel without sounding like a radio or cheap effect.
       const filterOn=_cfgSettings.voiceFilter!==false // default ON
-      const intensity=(_cfgSettings.voiceFilterIntensity!=null)?_cfgSettings.voiceFilterIntensity:0.20
+      const intensity=(_cfgSettings.voiceFilterIntensity!=null)?_cfgSettings.voiceFilterIntensity:0.35
       if(filterOn&&intensity>0){
-        // ─ Layer 1: Subtle metallic resonance (presence peak) ─
-        // Narrow boost around 3.2kHz gives a slight "through a helmet comm" presence
+        const I=intensity/0.2 // normalize: 1.0 at 20% intensity
+        // ─ Layer 1: Vocal presence shaping ─
+        // Gentle low-cut removes muddiness (tightens the voice like E3N's clear diction)
+        const hiPass=ctx.createBiquadFilter()
+        hiPass.type='highpass';hiPass.frequency.value=80+20*I;hiPass.Q.value=0.7
+        // Slight presence lift at 2.5kHz — clarity without harshness
         const presence=ctx.createBiquadFilter()
-        presence.type='peaking';presence.frequency.value=3200
-        presence.Q.value=2.0;presence.gain.value=2.5*intensity/0.2 // +2.5dB at 20%
-        // Secondary resonance peak — adds slight metallic character
-        const metallic=ctx.createBiquadFilter()
-        metallic.type='peaking';metallic.frequency.value=5500
-        metallic.Q.value=3.0;metallic.gain.value=1.5*intensity/0.2 // +1.5dB at 20%
-        // ─ Layer 2: Very gentle high-shelf rolloff (removes airiness) ─
-        const hiRoll=ctx.createBiquadFilter()
-        hiRoll.type='highshelf';hiRoll.frequency.value=8000
-        hiRoll.gain.value=-1.5*intensity/0.2 // -1.5dB at 20%
-        // ─ Layer 3: Extremely subtle harmonic saturation ─
-        // Much gentler than before — just barely adds electronic edge
-        const shaper=ctx.createWaveShaper()
-        const nSamples=44100,curve=new Float32Array(nSamples)
-        const amt=2+intensity*4 // very gentle: 2-2.8 range at typical intensities
-        for(let i=0;i<nSamples;i++){const x=(i*2)/nSamples-1;curve[i]=Math.tanh(amt*x)/Math.tanh(amt)}
-        shaper.curve=curve;shaper.oversample='2x'
-        // ─ Dry/wet mix — mostly clean voice ─
-        const dryGain=1.0-intensity*0.3 // at 20%: 94% dry
-        const wetGain=intensity*0.35     // at 20%: 7% wet (very subtle)
-        const dry=ctx.createGain();dry.gain.value=dryGain
-        const wet=ctx.createGain();wet.gain.value=wetGain
+        presence.type='peaking';presence.frequency.value=2500
+        presence.Q.value=1.2;presence.gain.value=1.8*I // +1.8dB at 20%
+        // ─ Layer 2: Electronic resonance (the "AI" character) ─
+        // Two narrow resonant peaks create a subtle harmonic shimmer
+        // Like the faint tonal quality in BT-7274's voice processing
+        const res1=ctx.createBiquadFilter()
+        res1.type='peaking';res1.frequency.value=4200
+        res1.Q.value=6.0;res1.gain.value=2.0*I // narrow peak — barely audible shimmer
+        const res2=ctx.createBiquadFilter()
+        res2.type='peaking';res2.frequency.value=6800
+        res2.Q.value=5.0;res2.gain.value=1.2*I // second harmonic — adds "electronic air"
+        // Gentle top-end rolloff — removes digital harshness, keeps warmth
+        const hiShelf=ctx.createBiquadFilter()
+        hiShelf.type='highshelf';hiShelf.frequency.value=9000
+        hiShelf.gain.value=-2.0*I
+        // ─ Layer 3: Micro-chorus (very subtle doubling = "processed" feel) ─
+        // Creates a barely-perceptible sense of the voice being synthesized/processed
+        // This is what gives JARVIS and BT their "not quite human" quality
+        const delayNode=ctx.createDelay(0.05)
+        delayNode.delayTime.value=0.012 // 12ms — below conscious perception
+        const chorusGain=ctx.createGain()
+        chorusGain.gain.value=0.08*I // very faint — just enough to feel "electronic"
+        // Modulate the delay slightly for subtle movement
+        const lfo=ctx.createOscillator()
+        const lfoGain=ctx.createGain()
+        lfo.type='sine';lfo.frequency.value=0.5 // very slow modulation
+        lfoGain.gain.value=0.002*I // tiny modulation depth
+        lfo.connect(lfoGain);lfoGain.connect(delayNode.delayTime)
+        lfo.start(0)
+        // ─ Signal chain: single path, no dry/wet split needed ─
+        // src → hiPass → presence → res1 → res2 → hiShelf → merger → destination
+        // + parallel micro-chorus path for subtle electronic doubling
         const merger=ctx.createGain();merger.gain.value=1.0
-        // Dry path: src → presence → metallic → hiRoll → dry → merger (clean + resonance)
-        src.connect(presence);presence.connect(metallic);metallic.connect(hiRoll)
-        hiRoll.connect(dry);dry.connect(merger)
-        // Wet path: src → shaper → wet → merger (faint harmonic edge)
-        src.connect(shaper);shaper.connect(wet);wet.connect(merger)
+        src.connect(hiPass);hiPass.connect(presence);presence.connect(res1)
+        res1.connect(res2);res2.connect(hiShelf);hiShelf.connect(merger)
+        // Micro-chorus: tap off after EQ, delay, mix back in quietly
+        hiShelf.connect(delayNode);delayNode.connect(chorusGain);chorusGain.connect(merger)
         merger.connect(ctx.destination)
-        src.onended=_vResume
-        console.log('[VOICE] E3N filter ON: intensity='+intensity.toFixed(2)+', dry='+dryGain.toFixed(2)+', wet='+wetGain.toFixed(2))
+        src.onended=()=>{lfo.stop();_vResume()}
+        console.log('[VOICE] E3N filter v3: intensity='+I.toFixed(2)+', res=4.2k/6.8k, chorus=12ms@'+(0.08*I).toFixed(3))
       }else{
         src.connect(ctx.destination)
         src.onended=_vResume

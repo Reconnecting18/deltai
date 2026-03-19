@@ -1055,7 +1055,7 @@ def _check_greeting(message: str) -> str | None:
     Check if the message is a simple greeting/farewell.
     Returns a canned E3N response or None if not a greeting.
     """
-    text = message.strip().lower().rstrip("!.,")
+    text = message.strip().lower().rstrip("!.,?")
     return _GREETING_MAP.get(text)
 
 
