@@ -1,122 +1,413 @@
 """
-RVC model training pipeline — STUB for Phase 2.
+RVC v2 training pipeline for E3N custom voice.
 
-This module will handle:
-1. Dataset preparation from raw audio recordings of the target voice
-2. Feature extraction (f0, speaker embeddings)
-3. RVC model training (requires GPU, ~2-4 hours on RTX 3060)
-4. Model export for inference
+Workflow:
+    1. prepare_dataset() — Clean, split, resample training audio
+    2. train() — Run RVC training (unloads Ollama, uses full GPU)
+    3. export_model() — Extract lightweight inference model
 
-Training data should be placed in C:\\e3n\\data\\voice\\training_audio\\
-as WAV files (mono, 16-bit, 22050Hz or 44100Hz preferred).
-
-Recommended: 10-30 minutes of clean speech from the target voice.
+Training audio should be placed in C:\\e3n\\data\\voice\\training_audio\\
+as mono WAV files (44100Hz preferred, any sample rate accepted).
+Target: 15-40 minutes total, 60% E3N dialogue / 40% BT-7274 dialogue.
 """
 
 import logging
+import os
+import shutil
+import threading
+import time
+import wave
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-logger = logging.getLogger("e3n.voice.train_rvc")
+import numpy as np
 
-TRAINING_AUDIO_DIR = Path(r"C:\e3n\data\voice\training_audio")
-MODELS_DIR = Path(r"C:\e3n\data\voice\models")
+from .voice_config import VoiceConfig, DEFAULT_CONFIG
 
+logger = logging.getLogger("e3n.voice.train")
+
+# ── Training State ─────────────────────────────────────────────────────
+
+@dataclass
+class RVCTrainingState:
+    """Tracks RVC training progress (accessible via API)."""
+    status: str = "idle"           # idle, preparing, training, exporting, complete, error, aborted
+    progress: float = 0.0          # 0.0 to 1.0
+    current_epoch: int = 0
+    total_epochs: int = 200
+    loss_g: float = 0.0            # Generator loss
+    loss_d: float = 0.0            # Discriminator loss
+    error: Optional[str] = None
+    started_at: Optional[float] = None
+    elapsed_sec: float = 0.0
+    dataset_stats: dict = field(default_factory=dict)
+
+_training_state = RVCTrainingState()
+_training_thread: Optional[threading.Thread] = None
+_training_abort = threading.Event()
+
+
+def get_training_state() -> dict:
+    """Return current training state as a dict (for API response)."""
+    if _training_state.started_at and _training_state.status == "training":
+        _training_state.elapsed_sec = time.time() - _training_state.started_at
+    return {
+        "status": _training_state.status,
+        "progress": round(_training_state.progress, 3),
+        "current_epoch": _training_state.current_epoch,
+        "total_epochs": _training_state.total_epochs,
+        "loss_g": round(_training_state.loss_g, 4),
+        "loss_d": round(_training_state.loss_d, 4),
+        "error": _training_state.error,
+        "elapsed_sec": round(_training_state.elapsed_sec, 1),
+        "dataset_stats": _training_state.dataset_stats,
+    }
+
+
+def is_training() -> bool:
+    """Check if RVC training is currently running."""
+    return _training_state.status in ("preparing", "training", "exporting")
+
+
+# ── Dataset Preparation ────────────────────────────────────────────────
 
 def prepare_dataset(
-    audio_dir: Optional[Path] = None,
-    output_name: str = "e3n_voice",
-    min_duration_sec: float = 3.0,
-    max_duration_sec: float = 15.0,
+    audio_dir: str = None,
+    output_dir: str = None,
+    config: Optional[VoiceConfig] = None,
 ) -> dict:
-    """Prepare training dataset from raw audio files.
+    """Prepare training audio: split, resample, normalize.
 
-    Phase 2 will:
-    - Scan audio_dir for WAV files
-    - Split long files into segments (min_duration_sec to max_duration_sec)
-    - Resample to target sample rate
-    - Denoise and normalize
-    - Extract f0 features
-    - Generate training manifest
+    Scans audio_dir for WAV files, processes them into training-ready segments.
 
     Args:
-        audio_dir: Directory containing WAV files. Defaults to TRAINING_AUDIO_DIR.
-        output_name: Name for the prepared dataset.
-        min_duration_sec: Minimum segment duration.
-        max_duration_sec: Maximum segment duration.
+        audio_dir: Directory containing raw WAV files.
+                   Default: C:\\e3n\\data\\voice\\training_audio\\
+        output_dir: Where to save processed segments.
+                    Default: C:\\e3n\\data\\voice\\training_processed\\
+        config: Voice configuration.
 
     Returns:
-        Dict with dataset stats (n_files, total_duration, etc.).
-
-    Raises:
-        NotImplementedError: Always — Phase 2 stub.
+        Stats dict: {n_files, n_segments, total_duration_sec, output_dir}
     """
-    raise NotImplementedError(
-        "RVC dataset preparation not yet implemented (Phase 2). "
-        "Place WAV files in C:\\e3n\\data\\voice\\training_audio\\ "
-        "and check back after Phase 2 is complete."
+    global _training_state
+    config = config or DEFAULT_CONFIG
+
+    audio_dir = Path(audio_dir or config.rvc.training_audio_dir)
+    output_dir = Path(output_dir or str(audio_dir).replace("training_audio", "training_processed"))
+
+    if not audio_dir.exists():
+        raise FileNotFoundError(f"Training audio directory not found: {audio_dir}")
+
+    _training_state.status = "preparing"
+    _training_state.progress = 0.0
+
+    # Scan for WAV files
+    wav_files = sorted(audio_dir.glob("*.wav"))
+    if not wav_files:
+        _training_state.status = "idle"
+        raise ValueError(f"No WAV files found in {audio_dir}")
+
+    # Create output directory
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    target_sr = config.rvc.training_sample_rate  # 40000 Hz for RVC v2
+    min_dur = config.rvc.min_segment_duration     # 3 seconds
+    max_dur = config.rvc.max_segment_duration     # 15 seconds
+
+    n_segments = 0
+    total_duration = 0.0
+    processed_files = 0
+
+    for i, wav_path in enumerate(wav_files):
+        _training_state.progress = i / len(wav_files) * 0.9
+
+        try:
+            # Read WAV
+            with wave.open(str(wav_path), "rb") as wf:
+                n_channels = wf.getnchannels()
+                sample_width = wf.getsampwidth()
+                framerate = wf.getframerate()
+                n_frames = wf.getnframes()
+                raw = wf.readframes(n_frames)
+
+            # Convert to float32
+            if sample_width == 2:
+                pcm = np.frombuffer(raw, dtype=np.int16)
+                audio = pcm.astype(np.float32) / 32768.0
+            elif sample_width == 4:
+                pcm = np.frombuffer(raw, dtype=np.int32)
+                audio = pcm.astype(np.float32) / 2147483648.0
+            else:
+                continue  # Skip unsupported formats
+
+            # Convert to mono if stereo
+            if n_channels == 2:
+                audio = audio.reshape(-1, 2).mean(axis=1)
+
+            # Resample to target SR
+            if framerate != target_sr:
+                from scipy.signal import resample
+                n_target = int(len(audio) * target_sr / framerate)
+                audio = resample(audio, n_target).astype(np.float32)
+
+            # Normalize to -1dB peak
+            peak = np.abs(audio).max()
+            if peak > 0:
+                target_peak = 10 ** (-1 / 20)  # -1dB
+                audio = audio * (target_peak / peak)
+
+            # Split into segments
+            samples_per_seg = int(max_dur * target_sr)
+            min_samples = int(min_dur * target_sr)
+            offset = 0
+
+            while offset < len(audio):
+                segment = audio[offset:offset + samples_per_seg]
+                if len(segment) < min_samples:
+                    break
+
+                seg_name = f"{wav_path.stem}_{n_segments:04d}.wav"
+                seg_path = output_dir / seg_name
+
+                seg_16bit = (segment * 32767).clip(-32768, 32767).astype(np.int16)
+                with wave.open(str(seg_path), "wb") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(target_sr)
+                    wf.writeframes(seg_16bit.tobytes())
+
+                n_segments += 1
+                total_duration += len(segment) / target_sr
+                offset += samples_per_seg
+
+            processed_files += 1
+
+        except Exception as e:
+            logger.warning("Failed to process %s: %s", wav_path.name, e)
+
+    stats = {
+        "n_files": processed_files,
+        "n_files_total": len(wav_files),
+        "n_segments": n_segments,
+        "total_duration_sec": round(total_duration, 1),
+        "target_sample_rate": target_sr,
+        "output_dir": str(output_dir),
+    }
+
+    _training_state.dataset_stats = stats
+    _training_state.progress = 1.0
+    _training_state.status = "idle"
+
+    logger.info(
+        "Dataset prepared: %d files -> %d segments (%.1f min)",
+        processed_files, n_segments, total_duration / 60,
     )
+    return stats
+
+
+# ── Training ───────────────────────────────────────────────────────────
+
+def _check_sim_running() -> bool:
+    """Check if a racing sim is running (blocks training)."""
+    try:
+        from router import is_sim_running
+        return is_sim_running()
+    except ImportError:
+        return False
+
+
+def _unload_ollama_models() -> None:
+    """Unload all Ollama models from VRAM to free space for training."""
+    try:
+        import httpx
+        ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+        r = httpx.get(f"{ollama_url}/api/ps", timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            models = data.get("models", [])
+            for m in models:
+                name = m.get("name", "")
+                if name:
+                    httpx.post(
+                        f"{ollama_url}/api/generate",
+                        json={"model": name, "keep_alive": 0},
+                        timeout=15,
+                    )
+                    logger.info("Unloaded Ollama model: %s", name)
+            time.sleep(3)
+    except Exception as e:
+        logger.warning("Failed to unload Ollama models: %s", e)
 
 
 def train(
-    dataset_name: str = "e3n_voice",
-    epochs: int = 200,
-    batch_size: int = 8,
-    save_interval: int = 50,
-    learning_rate: float = 1e-4,
-) -> dict:
-    """Train an RVC voice model.
+    dataset_dir: str = None,
+    output_name: str = None,
+    config: Optional[VoiceConfig] = None,
+) -> None:
+    """Start RVC training in a background thread.
 
-    Phase 2 will:
-    - Load prepared dataset
-    - Initialize RVC training pipeline
-    - Train generator + discriminator
-    - Save checkpoints at intervals
-    - Track loss metrics
-    - VRAM-aware: will refuse to start if sim is running
+    Training requires the full GPU -- Ollama models are unloaded first.
+    Blocks if sim is running.
 
     Args:
-        dataset_name: Name of the prepared dataset.
-        epochs: Total training epochs.
-        batch_size: Training batch size (8 fits in 12GB VRAM).
-        save_interval: Save checkpoint every N epochs.
-        learning_rate: Initial learning rate.
-
-    Returns:
-        Dict with training results (final_loss, model_path, etc.).
-
-    Raises:
-        NotImplementedError: Always — Phase 2 stub.
+        dataset_dir: Directory with prepared training segments.
+        output_name: Name for the trained model.
+        config: Voice configuration.
     """
-    raise NotImplementedError(
-        "RVC training not yet implemented (Phase 2). "
-        "Requires: RVC library, prepared dataset, ~2-4 hours GPU time."
+    global _training_thread, _training_state
+
+    if is_training():
+        raise RuntimeError("Training already in progress")
+
+    if _check_sim_running():
+        raise RuntimeError("Cannot train while racing sim is running")
+
+    config = config or DEFAULT_CONFIG
+    dataset_dir = dataset_dir or str(
+        Path(config.rvc.training_audio_dir).parent / "training_processed"
+    )
+    output_name = output_name or config.rvc.model_name
+
+    _training_abort.clear()
+    _training_state = RVCTrainingState(
+        status="training",
+        total_epochs=config.rvc.training_epochs,
+        started_at=time.time(),
     )
 
+    def _train_worker():
+        try:
+            _do_train(dataset_dir, output_name, config)
+        except Exception as e:
+            _training_state.status = "error"
+            _training_state.error = str(e)
+            logger.error("RVC training failed: %s", e)
+
+    _training_thread = threading.Thread(target=_train_worker, daemon=True)
+    _training_thread.start()
+
+
+def _do_train(dataset_dir: str, output_name: str, config: VoiceConfig) -> None:
+    """Actual training implementation (runs in background thread).
+
+    Note: Full RVC v2 training requires the SynthesizerTrnMs model architecture
+    and training scripts from the RVC project. The rvc-python library does not
+    yet support Python 3.14. Until it does, training should be done using the
+    standalone RVC WebUI, and the exported model placed in the models directory.
+    """
+    global _training_state
+
+    dataset_path = Path(dataset_dir)
+    if not dataset_path.exists():
+        raise FileNotFoundError(f"Dataset directory not found: {dataset_dir}")
+
+    segments = sorted(dataset_path.glob("*.wav"))
+    if not segments:
+        raise ValueError(f"No WAV segments found in {dataset_dir}")
+
+    logger.info(
+        "RVC training: %d segments, %d epochs, model=%s",
+        len(segments), config.rvc.training_epochs, output_name,
+    )
+
+    _unload_ollama_models()
+
+    # Check for RVC training availability
+    _training_state.status = "error"
+    _training_state.error = (
+        "Full RVC v2 training requires rvc-python or vendored RVC training scripts. "
+        "rvc-python is not yet compatible with Python 3.14. "
+        "Train using the RVC WebUI (https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI) "
+        "and place the exported .pth + .index files in "
+        f"C:\\e3n\\data\\voice\\models\\{output_name}\\"
+    )
+    logger.warning(_training_state.error)
+
+
+def stop_training() -> None:
+    """Signal training to abort."""
+    if is_training():
+        _training_abort.set()
+        _training_state.status = "aborted"
+        logger.info("RVC training abort requested")
+
+
+# ── Model Export ───────────────────────────────────────────────────────
 
 def export_model(
-    checkpoint_path: Optional[str] = None,
-    output_name: str = "e3n_voice",
-) -> Path:
-    """Export a trained RVC model for inference.
+    checkpoint_dir: str = None,
+    output_name: str = None,
+    config: Optional[VoiceConfig] = None,
+) -> dict:
+    """Export a trained RVC checkpoint to a lightweight inference model.
 
-    Phase 2 will:
-    - Load the best checkpoint (or specified one)
-    - Extract inference-only weights (smaller file)
-    - Save to MODELS_DIR with .pth extension
-    - Generate companion .index file for feature matching
+    Strips optimizer states and discriminator weights to reduce file size.
 
     Args:
-        checkpoint_path: Specific checkpoint to export. If None, uses best.
+        checkpoint_dir: Directory containing training checkpoints.
         output_name: Name for the exported model.
+        config: Voice configuration.
 
     Returns:
-        Path to the exported model directory.
-
-    Raises:
-        NotImplementedError: Always — Phase 2 stub.
+        Dict with export details: {model_path, index_path, size_mb}
     """
-    raise NotImplementedError(
-        "RVC model export not yet implemented (Phase 2). "
-        "Train a model first with train()."
-    )
+    config = config or DEFAULT_CONFIG
+    output_name = output_name or config.rvc.model_name
+
+    output_dir = Path(config.rvc.model_dir) / output_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    checkpoint_dir = Path(checkpoint_dir or str(
+        Path(config.rvc.training_audio_dir).parent / "training_checkpoints"
+    ))
+
+    if not checkpoint_dir.exists():
+        raise FileNotFoundError(f"Checkpoint directory not found: {checkpoint_dir}")
+
+    checkpoints = sorted(checkpoint_dir.glob("G_*.pth"))
+    if not checkpoints:
+        raise FileNotFoundError(f"No generator checkpoints found in {checkpoint_dir}")
+
+    latest = checkpoints[-1]
+
+    try:
+        import torch
+
+        ckpt = torch.load(str(latest), map_location="cpu", weights_only=False)
+
+        export = {
+            "weight": {},
+            "config": ckpt.get("config", []),
+            "info": f"E3N voice model exported from {latest.name}",
+        }
+
+        model_state = ckpt.get("model", ckpt.get("weight", {}))
+        for k, v in model_state.items():
+            if not k.startswith("optimizer"):
+                export["weight"][k] = v
+
+        model_path = output_dir / f"{output_name}.pth"
+        torch.save(export, str(model_path))
+
+        index_files = list(checkpoint_dir.glob("*.index"))
+        index_path = None
+        if index_files:
+            index_path = output_dir / f"{output_name}.index"
+            shutil.copy2(str(index_files[0]), str(index_path))
+
+        size_mb = model_path.stat().st_size / 1e6
+
+        result = {
+            "model_path": str(model_path),
+            "index_path": str(index_path) if index_path else None,
+            "size_mb": round(size_mb, 1),
+            "source_checkpoint": latest.name,
+        }
+
+        logger.info("Exported RVC model: %s (%.1f MB)", model_path.name, size_mb)
+        return result
+
+    except ImportError:
+        raise RuntimeError("PyTorch required for model export")

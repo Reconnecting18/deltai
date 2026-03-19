@@ -28,14 +28,24 @@ class TTSSettings:
 
 @dataclass
 class RVCSettings:
-    """RVC voice conversion settings (Phase 2)."""
+    """RVC voice conversion settings."""
     enabled: bool = False
     model_dir: str = str(VOICE_DATA_DIR / "models")
     model_name: str = "e3n_voice"
     index_path: Optional[str] = None
-    f0_method: str = "rmvpe"
-    f0_up_key: int = 0
-    protect: float = 0.33
+    f0_method: str = "dio"          # dio (fast), harvest (quality), rmvpe (best, needs model)
+    f0_up_key: int = 0              # Pitch shift in semitones (0 = no shift)
+    protect: float = 0.33           # Protect voiceless consonants (0-0.5)
+    device: str = "auto"            # auto, cuda, cpu
+    # Training parameters
+    training_audio_dir: str = str(VOICE_DATA_DIR / "training_audio")
+    training_sample_rate: int = 40000   # RVC v2 standard
+    training_epochs: int = 200
+    training_batch_size: int = 8
+    training_save_interval: int = 50
+    training_lr: float = 1e-4
+    min_segment_duration: float = 3.0   # seconds
+    max_segment_duration: float = 15.0  # seconds
 
 
 @dataclass

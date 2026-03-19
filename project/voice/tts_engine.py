@@ -103,35 +103,16 @@ class PiperTTS:
             return None
 
         try:
-            import io
-            import wave
+            # Piper v1.4+ returns an iterable of AudioChunk objects
+            # Each chunk contains audio_float_array (float32 [-1, 1]) and metadata
+            chunks = list(self._model.synthesize(text))
 
-            # Piper synthesizes to a WAV stream
-            wav_buffer = io.BytesIO()
-            with wave.open(wav_buffer, "wb") as wav_file:
-                self._model.synthesize(
-                    text,
-                    wav_file,
-                    speaker_id=self._config.tts.speaker_id,
-                )
+            if not chunks:
+                logger.warning("Piper produced no audio chunks for: '%.40s...'", text)
+                return None
 
-            # Read raw PCM from the WAV buffer
-            wav_buffer.seek(0)
-            with wave.open(wav_buffer, "rb") as wav_file:
-                n_frames = wav_file.getnframes()
-                raw_bytes = wav_file.readframes(n_frames)
-                sample_width = wav_file.getsampwidth()
-
-            # Convert to float32 normalized [-1.0, 1.0]
-            if sample_width == 2:
-                pcm = np.frombuffer(raw_bytes, dtype=np.int16)
-                audio = pcm.astype(np.float32) / 32768.0
-            elif sample_width == 4:
-                pcm = np.frombuffer(raw_bytes, dtype=np.int32)
-                audio = pcm.astype(np.float32) / 2147483648.0
-            else:
-                pcm = np.frombuffer(raw_bytes, dtype=np.uint8)
-                audio = (pcm.astype(np.float32) - 128.0) / 128.0
+            # Concatenate all sentence chunks into one continuous array
+            audio = np.concatenate([c.audio_float_array for c in chunks])
 
             logger.debug(
                 "Synthesized %d samples (%.2fs) for text: '%.40s...'",

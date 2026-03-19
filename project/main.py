@@ -2216,6 +2216,70 @@ async def api_voice_test():
         return {"ok": False, "error": str(e), "timings": timings}
 
 
+# ── VOICE TRAINING ENDPOINTS ────────────────────────────────────────────
+
+@app.post("/api/voice/train/prepare")
+async def api_voice_train_prepare():
+    """Prepare training dataset from raw audio files."""
+    if not VOICE_PIPELINE_AVAILABLE:
+        return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
+    try:
+        from voice.train_rvc import prepare_dataset
+        stats = await asyncio.to_thread(prepare_dataset)
+        return {"ok": True, **stats}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/voice/train/start")
+async def api_voice_train_start(req: dict = None):
+    """Start RVC model training in background."""
+    if not VOICE_PIPELINE_AVAILABLE:
+        return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
+    try:
+        from voice.train_rvc import train
+        output_name = (req or {}).get("model_name", None)
+        train(output_name=output_name)
+        return {"ok": True, "status": "training started"}
+    except RuntimeError as e:
+        return JSONResponse({"error": str(e)}, status_code=409)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/voice/train/status")
+async def api_voice_train_status():
+    """Get RVC training progress."""
+    if not VOICE_PIPELINE_AVAILABLE:
+        return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
+    from voice.train_rvc import get_training_state
+    return get_training_state()
+
+
+@app.post("/api/voice/train/stop")
+async def api_voice_train_stop():
+    """Abort RVC training."""
+    if not VOICE_PIPELINE_AVAILABLE:
+        return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
+    from voice.train_rvc import stop_training
+    stop_training()
+    return {"ok": True, "status": "abort requested"}
+
+
+@app.post("/api/voice/train/export")
+async def api_voice_train_export(req: dict = None):
+    """Export trained model for inference."""
+    if not VOICE_PIPELINE_AVAILABLE:
+        return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
+    try:
+        from voice.train_rvc import export_model
+        output_name = (req or {}).get("model_name", None)
+        result = await asyncio.to_thread(export_model, output_name=output_name)
+        return {"ok": True, **result}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 # ── STATS ───────────────────────────────────────────────────────────────
 
 @app.get("/stats")
