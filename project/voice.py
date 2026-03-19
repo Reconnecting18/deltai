@@ -31,9 +31,9 @@ logger = logging.getLogger("e3n.voice")
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")  # tiny, base, small, medium, large-v3
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "auto")  # auto, cpu, cuda
 WHISPER_COMPUTE = os.getenv("WHISPER_COMPUTE", "float16")  # float16, int8, float32
-TTS_VOICE = os.getenv("TTS_VOICE", "en-GB-RyanNeural")  # E3N's voice — British, slightly deeper
-TTS_RATE = os.getenv("TTS_RATE", "+3%")  # Speech rate adjustment
-TTS_PITCH = os.getenv("TTS_PITCH", "-5Hz")  # Pitch adjustment (negative = deeper)
+TTS_VOICE = os.getenv("TTS_VOICE", "en-US-AndrewNeural")  # E3N's voice — warm American, slightly deeper
+TTS_RATE = os.getenv("TTS_RATE", "+0%")  # Speech rate adjustment
+TTS_PITCH = os.getenv("TTS_PITCH", "-8Hz")  # Pitch adjustment (negative = deeper)
 VOICE_ENABLED = os.getenv("VOICE_ENABLED", "true").lower() in ("true", "1", "yes")
 
 # Vocabulary hint for Whisper — biases transcription toward expected racing/engineering terms

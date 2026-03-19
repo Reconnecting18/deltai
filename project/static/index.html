@@ -608,12 +608,13 @@ canvas.spark{width:100%;height:28px;display:block}
         <div class="srow" style="flex-direction:column;align-items:flex-start;gap:4px">
           <span class="sk">TTS Voice</span>
           <select id="cfg-tts-voice" class="tr-select" style="width:100%" onchange="cfgSaveSetting('ttsVoice',this.value)">
-            <option value="en-US-GuyNeural">en-US-GuyNeural (default)</option>
+            <option value="en-US-AndrewNeural" selected>en-US-AndrewNeural (E3N default)</option>
+            <option value="en-US-BrianNeural">en-US-BrianNeural</option>
+            <option value="en-US-GuyNeural">en-US-GuyNeural</option>
+            <option value="en-US-RogerNeural">en-US-RogerNeural</option>
             <option value="en-US-ChristopherNeural">en-US-ChristopherNeural</option>
             <option value="en-US-EricNeural">en-US-EricNeural</option>
-            <option value="en-US-AriaNeural">en-US-AriaNeural</option>
-            <option value="en-GB-RyanNeural">en-GB-RyanNeural</option>
-            <option value="en-AU-WilliamNeural">en-AU-WilliamNeural</option>
+            <option value="en-GB-RyanNeural">en-GB-RyanNeural (British)</option>
           </select>
         </div>
         <div class="srow" style="flex-direction:column;align-items:flex-start;gap:4px;margin-top:8px">
@@ -624,6 +625,17 @@ canvas.spark{width:100%;height:28px;display:block}
             <option value="+15%">Fast (+15%)</option>
             <option value="+30%">Very Fast (+30%)</option>
           </select>
+        </div>
+        <div class="srow" style="flex-direction:row;align-items:center;gap:8px;margin-top:8px">
+          <span class="sk" style="min-width:90px">Voice Filter</span>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="cfg-voice-filter" checked onchange="cfgSaveSetting('voiceFilter',this.checked)" style="accent-color:var(--accent)">
+            <span class="sv" style="font-size:11px">Electronic AI effect</span>
+          </label>
+        </div>
+        <div class="srow" style="flex-direction:column;align-items:flex-start;gap:4px;margin-top:4px">
+          <span class="sk">Filter Intensity — <span id="cfg-filter-pct">20%</span></span>
+          <input type="range" id="cfg-voice-filter-intensity" min="0" max="100" value="20" style="width:100%;accent-color:var(--accent)" oninput="document.getElementById('cfg-filter-pct').textContent=this.value+'%';cfgSaveSetting('voiceFilterIntensity',this.value/100)">
         </div>
       </div>
     </div>
@@ -1589,6 +1601,15 @@ async function cfgLoadSettings(){
   const ttsRate=document.getElementById('cfg-tts-rate')
   if(_cfgSettings.ttsVoice)ttsVoice.value=_cfgSettings.ttsVoice
   if(_cfgSettings.ttsRate)ttsRate.value=_cfgSettings.ttsRate
+  // Load voice filter settings
+  const vfCheck=document.getElementById('cfg-voice-filter')
+  const vfSlider=document.getElementById('cfg-voice-filter-intensity')
+  const vfPct=document.getElementById('cfg-filter-pct')
+  if(_cfgSettings.voiceFilter===false)vfCheck.checked=false
+  if(_cfgSettings.voiceFilterIntensity!=null){
+    vfSlider.value=Math.round(_cfgSettings.voiceFilterIntensity*100)
+    vfPct.textContent=vfSlider.value+'%'
+  }
   // Load system info
   try{
     const h=await(await fetch(API+'/self-heal/status')).json()
@@ -1792,14 +1813,57 @@ async function _vPlayTTS(text){
     if(!raw.byteLength){_vResume();return}
     if(typeof aiCore!=='undefined')aiCore.simSpeech=true
 
-    // Method 1: AudioContext.decodeAudioData (best for Electron)
+    // Method 1: AudioContext.decodeAudioData (best for Electron) + E3N voice filter
     let played=false
     try{
       const ctx=await _vEnsurePlayCtx()
       const buf=await ctx.decodeAudioData(raw.slice(0))
       const src=ctx.createBufferSource()
-      src.buffer=buf;src.connect(ctx.destination)
-      src.onended=_vResume
+      src.buffer=buf
+      // ── E3N VOICE FILTER — subtle electronic AI texture ──
+      const filterOn=_cfgSettings.voiceFilter!==false // default ON
+      const intensity=(_cfgSettings.voiceFilterIntensity!=null)?_cfgSettings.voiceFilterIntensity:0.20
+      if(filterOn&&intensity>0){
+        const dryGain=1.0-intensity*0.8 // at 20% intensity: 84% dry
+        const wetGain=intensity*0.9      // at 20% intensity: 18% wet
+        // Dry path — clean voice
+        const dry=ctx.createGain();dry.gain.value=dryGain
+        // Wet path — processed voice with electronic character
+        const wet=ctx.createGain();wet.gain.value=wetGain
+        // Bandpass — "through a comm system" feel (emphasize mid-presence)
+        const bp=ctx.createBiquadFilter()
+        bp.type='bandpass';bp.frequency.value=2200;bp.Q.value=0.5
+        // High shelf cut — reduce airy highs for more mechanical sound
+        const hiCut=ctx.createBiquadFilter()
+        hiCut.type='highshelf';hiCut.frequency.value=6000;hiCut.gain.value=-4
+        // Soft harmonic saturation — adds subtle electronic harmonics
+        const shaper=ctx.createWaveShaper()
+        const nSamples=44100,curve=new Float32Array(nSamples)
+        const amt=6+intensity*20 // 6-10 range at typical intensities
+        for(let i=0;i<nSamples;i++){const x=(i*2)/nSamples-1;curve[i]=Math.tanh(amt*x)/Math.tanh(amt)}
+        shaper.curve=curve;shaper.oversample='2x'
+        // Subtle low-frequency oscillator — electronic hum undertone
+        const osc=ctx.createOscillator()
+        const oscGain=ctx.createGain()
+        osc.type='sine';osc.frequency.value=62 // low electronic hum
+        oscGain.gain.value=0.012*intensity/0.2 // scale with intensity
+        osc.connect(oscGain)
+        // Merger node
+        const merger=ctx.createGain();merger.gain.value=1.0
+        // Wire: src → dry → merger → destination
+        src.connect(dry);dry.connect(merger)
+        // Wire: src → bp → hiCut → shaper → wet → merger
+        src.connect(bp);bp.connect(hiCut);hiCut.connect(shaper);shaper.connect(wet);wet.connect(merger)
+        // Add electronic hum
+        oscGain.connect(merger)
+        merger.connect(ctx.destination)
+        osc.start(0)
+        src.onended=()=>{osc.stop();_vResume()}
+        console.log('[VOICE] E3N filter ON: intensity='+intensity.toFixed(2)+', dry='+dryGain.toFixed(2)+', wet='+wetGain.toFixed(2))
+      }else{
+        src.connect(ctx.destination)
+        src.onended=_vResume
+      }
       src.start(0);played=true
       console.log('[VOICE] Method 1 OK: AudioContext, '+buf.duration.toFixed(1)+'s')
     }catch(e1){console.warn('[VOICE] Method 1 fail:',e1.message)}

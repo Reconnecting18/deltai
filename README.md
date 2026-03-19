@@ -328,7 +328,8 @@ Tactical operations center aesthetic with a muted grey-green palette. Features i
 - **Terminal**: Streaming chat with conversation history (CLR + turn counter)
 - **Live voice chat**: Always-listening Alexa/JARVIS style. Click VOICE to activate — Whisper pre-warms, just talk naturally, VAD auto-detects speech and silence. Split pipeline: STT (instant transcription) → streaming chat (response streams in real-time) → TTS (AudioContext playback with sphere animation). Whisper vocabulary boost (150+ racing/engineering terms) + hallucination filtering. LLM voice prefix for transcription error correction. Auto-cycles back to listening after each response
 - **Web search**: DuckDuckGo-powered web search tool — E3N can autonomously look up specs, current events, and topics not in its knowledge base. No API key required. Blocked during active racing sessions.
-- **Settings panel**: Audio device selection (mic input/speaker output), TTS voice + speed config, system status overview
+- **Electronic voice filter**: Subtle AI texture applied via Web Audio API — bandpass emphasis, soft saturation, low-frequency electronic hum. Configurable intensity (0-100%) in Settings. Gives E3N his signature robotic undertone.
+- **Settings panel**: Audio device selection (mic input/speaker output), TTS voice + speed config, voice filter toggle + intensity slider, system status overview
 - **Training pipeline**: Start/stop training, mode selector (auto/lora/fewshot), live progress bar + loss, LoRA status chip
 - **Diagnostics panel**: Circuit breaker state, VRAM monitor, self-heal status, resource action log, health event timeline
 - **Live widgets**: GPU/CPU/RAM stats with 60s sparklines
