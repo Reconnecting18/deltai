@@ -310,12 +310,12 @@ Tactical operations center aesthetic with a muted grey-green palette. Features i
 
 ## Verification
 
-Run the full test suites (92 tests across all subsystems):
+Run the full test suites (87 tests across all subsystems):
 
 ```powershell
 cd C:\e3n\project
 .\venv\Scripts\activate
-python tests/verify_full.py          # 33 tests — core systems
+python tests/verify_full.py          # 28 tests — core systems
 python tests/verify_stress.py        # 30 tests — stress simulations
 python tests/verify_resource_mgmt.py # 29 tests — resource management
 ```

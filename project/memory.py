@@ -563,6 +563,9 @@ def ingest_context(source: str, context: str, ttl: int = 0,
     if not context or not context.strip():
         return {"status": "error", "reason": "empty context"}
 
+    # Sanitize source for safe use in ChromaDB IDs
+    source = re.sub(r'[^a-zA-Z0-9_\-.]', '_', source)
+
     collection = get_collection()
     now = _time.time()
     tags = tags or []
@@ -631,7 +634,7 @@ def ingest_context_batch(items: list[dict]) -> dict:
     items_processed = 0
 
     for item_idx, item in enumerate(items):
-        source = item.get("source", "").strip()
+        source = re.sub(r'[^a-zA-Z0-9_\-.]', '_', item.get("source", "").strip())
         context = item.get("context", "").strip()
         ttl = item.get("ttl", 0)
         tags = item.get("tags", [])

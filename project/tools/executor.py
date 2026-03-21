@@ -46,7 +46,9 @@ def _is_path_safe_write(path: str) -> bool:
     return True
 
 def _is_command_safe(cmd: str) -> bool:
-    lower = cmd.lower().strip()
+    import re as _re
+    # Normalize all whitespace (tabs, newlines, multiple spaces) to single space
+    lower = _re.sub(r'\s+', ' ', cmd.lower().strip())
     for blocked in BLOCKED_COMMANDS:
         if blocked in lower:
             return False

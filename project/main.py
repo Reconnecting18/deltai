@@ -16,6 +16,7 @@ import base64
 import psutil
 import platform
 import logging
+import threading
 from dotenv import load_dotenv
 
 from tools.definitions import TOOLS
@@ -24,7 +25,8 @@ from router import (route, is_cloud_available, is_cloud_available_sync,
                     get_gpu_utilization, get_vram_free_mb, classify_complexity,
                     is_sim_running, get_budget_status, record_cloud_usage,
                     _pick_local_model, get_backup_model, check_model_health,
-                    check_model_exists, init_budget_from_db)
+                    check_model_exists, init_budget_from_db,
+                    activate_session_from_ingest)
 from anthropic_client import stream_chat as anthropic_stream
 from persistence import (init_db, load_history, save_history_pair,
                          clear_history as db_clear_history, trim_history)
@@ -38,7 +40,8 @@ try:
     import pynvml
     pynvml.nvmlInit()
     GPU_AVAILABLE = True
-except Exception:
+except Exception as e:
+    logger.warning(f"GPU initialization failed (pynvml): {e}")
     GPU_AVAILABLE = False
 
 # ── RAG IMPORTS ─────────────────────────────────────────────────────────
@@ -96,7 +99,7 @@ async def _broadcast_alert(alert: dict):
     """Send an alert to all connected WebSocket clients."""
     dead = []
     msg = json.dumps(alert)
-    for ws in _alert_clients:
+    for ws in list(_alert_clients):  # snapshot copy to avoid mutation during iteration
         try:
             await ws.send_text(msg)
         except Exception:
@@ -126,7 +129,7 @@ async def _emit_health_event(event_type: str, data: dict):
     """Async: record + broadcast to WebSocket health clients."""
     event = _record_health_event(event_type, data)
     dead = []
-    for ws in _health_clients:
+    for ws in list(_health_clients):  # snapshot copy to avoid mutation during iteration
         try:
             await ws.send_json(event)
         except Exception:
@@ -155,6 +158,7 @@ def _is_idle() -> bool:
 # ── CONVERSATION HISTORY ─────────────────────────────────────────────
 HISTORY_MAX_TURNS = int(os.getenv("CONVERSATION_HISTORY_MAX", "10"))
 _conversation_history: list[dict] = []
+_history_lock = threading.Lock()
 
 
 def _append_to_history(user_message: str, assistant_response: str):
@@ -163,12 +167,13 @@ def _append_to_history(user_message: str, assistant_response: str):
     _last_chat_end = _time.time()
     if not user_message.strip() or not assistant_response.strip():
         return
-    _conversation_history.append({"role": "user", "content": user_message})
-    _conversation_history.append({"role": "assistant", "content": assistant_response})
-    max_msgs = HISTORY_MAX_TURNS * 2
-    if len(_conversation_history) > max_msgs:
-        del _conversation_history[:-max_msgs]
-    # Persist to SQLite
+    with _history_lock:
+        _conversation_history.append({"role": "user", "content": user_message})
+        _conversation_history.append({"role": "assistant", "content": assistant_response})
+        max_msgs = HISTORY_MAX_TURNS * 2
+        if len(_conversation_history) > max_msgs:
+            del _conversation_history[:-max_msgs]
+    # Persist to SQLite (outside lock to avoid blocking)
     try:
         save_history_pair(user_message, assistant_response)
         trim_history(HISTORY_MAX_TURNS)
@@ -184,7 +189,8 @@ def _append_to_history(user_message: str, assistant_response: str):
 
 def _get_history() -> list[dict]:
     """Return a copy of conversation history for injection into message arrays."""
-    return list(_conversation_history)
+    with _history_lock:
+        return list(_conversation_history)
 
 
 async def _try_ollama_inference(client: httpx.AsyncClient, model: str,
@@ -308,6 +314,7 @@ _resource_state = {
     "sim_stop_detected_at": 0.0, # when sim stop was first detected
     "pending_14b_preload": False, # waiting to preload 14B after sim stop
 }
+_resource_lock = threading.Lock()
 _RESOURCE_CHECK_INTERVAL = 30    # seconds between resource checks
 _VRAM_CRITICAL_MB = 1500        # below this, aggressively free VRAM
 _VRAM_WARN_MB = 3000            # below this, start monitoring closely
@@ -319,9 +326,10 @@ _RESOURCE_ACTION_COOLDOWN = 60  # seconds between automatic VRAM actions
 def _log_resource_action(action: str):
     """Record an automatic resource management action."""
     entry = {"action": action, "ts": _time.time()}
-    _resource_state["actions_taken"].append(entry)
-    if len(_resource_state["actions_taken"]) > 50:
-        _resource_state["actions_taken"] = _resource_state["actions_taken"][-50:]
+    with _resource_lock:
+        _resource_state["actions_taken"].append(entry)
+        if len(_resource_state["actions_taken"]) > 50:
+            _resource_state["actions_taken"] = _resource_state["actions_taken"][-50:]
     logger.info(f"Resource manager: {action}")
 
 
@@ -552,7 +560,7 @@ async def _ai_self_heal_loop():
                 continue
 
             # ── Step 1: Run diagnostics ──
-            diag_output = execute_tool("self_diagnostics", {})
+            diag_output = await asyncio.to_thread(execute_tool, "self_diagnostics", {})
 
             # Short-circuit: if no issues, skip LLM call entirely
             if "No issues detected" in diag_output:
@@ -608,12 +616,12 @@ async def _ai_self_heal_loop():
                 })
 
                 # ── Step 4: Execute repair ──
-                result = execute_tool("repair_subsystem", {"repair": repair_name})
+                result = await asyncio.to_thread(execute_tool, "repair_subsystem", {"repair": repair_name})
                 _log_resource_action(f"Self-heal result: {result[:100]}")
 
                 # ── Step 5: Verify fix ──
                 await asyncio.sleep(5)
-                verify_output = execute_tool("self_diagnostics", {})
+                verify_output = await asyncio.to_thread(execute_tool, "self_diagnostics", {})
                 success = "No issues detected" in verify_output
                 _log_resource_action(f"Self-heal verify: {'passed' if success else 'issues persist'}")
                 await _emit_health_event("repair_attempted", {
@@ -643,46 +651,54 @@ _circuit_breaker = {
 }
 _CB_FAILURE_THRESHOLD = 3
 _CB_MAX_BACKOFF = 60
+_cb_lock = threading.Lock()
 
 
 def _cb_check() -> bool:
     """Returns True if calls should proceed, False if circuit is open."""
-    if _circuit_breaker["state"] == "closed":
-        return True
-    if _circuit_breaker["state"] == "open":
-        elapsed = _time.time() - _circuit_breaker["last_failure"]
-        if elapsed >= _circuit_breaker["backoff_sec"]:
-            _circuit_breaker["state"] = "half-open"
+    with _cb_lock:
+        if _circuit_breaker["state"] == "closed":
             return True
-        return False
-    return True  # half-open: allow one test call
+        if _circuit_breaker["state"] == "open":
+            elapsed = _time.time() - _circuit_breaker["last_failure"]
+            if elapsed >= _circuit_breaker["backoff_sec"]:
+                _circuit_breaker["state"] = "half-open"
+                return True
+            return False
+        return True  # half-open: allow one test call
 
 
 def _cb_success():
     """Record a successful Ollama call."""
-    prev_state = _circuit_breaker["state"]
-    _circuit_breaker["state"] = "closed"
-    _circuit_breaker["failures"] = 0
-    _circuit_breaker["backoff_sec"] = 5
+    with _cb_lock:
+        prev_state = _circuit_breaker["state"]
+        _circuit_breaker["state"] = "closed"
+        _circuit_breaker["failures"] = 0
+        _circuit_breaker["backoff_sec"] = 5
     if prev_state != "closed":
         _record_health_event("circuit_breaker_changed", {"state": "closed", "prev": prev_state})
 
 
 def _cb_failure():
     """Record a failed Ollama call."""
-    _circuit_breaker["failures"] += 1
-    _circuit_breaker["last_failure"] = _time.time()
-    if _circuit_breaker["failures"] >= _CB_FAILURE_THRESHOLD:
-        prev_state = _circuit_breaker["state"]
-        _circuit_breaker["state"] = "open"
-        _circuit_breaker["backoff_sec"] = min(
-            _circuit_breaker["backoff_sec"] * 2, _CB_MAX_BACKOFF
-        )
-        if prev_state != "open":
-            _record_health_event("circuit_breaker_changed", {
-                "state": "open", "failures": _circuit_breaker["failures"],
-                "backoff_sec": _circuit_breaker["backoff_sec"],
-            })
+    with _cb_lock:
+        _circuit_breaker["failures"] += 1
+        _circuit_breaker["last_failure"] = _time.time()
+        should_emit = False
+        if _circuit_breaker["failures"] >= _CB_FAILURE_THRESHOLD:
+            prev_state = _circuit_breaker["state"]
+            _circuit_breaker["state"] = "open"
+            _circuit_breaker["backoff_sec"] = min(
+                _circuit_breaker["backoff_sec"] * 2, _CB_MAX_BACKOFF
+            )
+            if prev_state != "open":
+                should_emit = True
+                emit_data = {
+                    "state": "open", "failures": _circuit_breaker["failures"],
+                    "backoff_sec": _circuit_breaker["backoff_sec"],
+                }
+    if should_emit:
+        _record_health_event("circuit_breaker_changed", emit_data)
 
 
 # ── LIFESPAN ───────────────────────────────────────────────────────────
@@ -761,7 +777,7 @@ app = FastAPI(title="E3N", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:8000", "http://127.0.0.1:8000", "http://localhost:3000"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -1554,8 +1570,9 @@ def memory_delete_file(filepath: str):
     if not RAG_AVAILABLE:
         return {"error": "RAG not available"}
     try:
-        full_path = os.path.normpath(os.path.join(KNOWLEDGE_PATH, filepath))
-        if not full_path.startswith(os.path.normpath(KNOWLEDGE_PATH)):
+        base_canonical = os.path.realpath(os.path.normpath(KNOWLEDGE_PATH))
+        full_path = os.path.realpath(os.path.normpath(os.path.join(KNOWLEDGE_PATH, filepath)))
+        if not full_path.startswith(base_canonical + os.sep) and full_path != base_canonical:
             return {"status": "error", "reason": "Invalid path — outside knowledge directory"}
         result = remove_file(full_path)
         return result
@@ -1586,6 +1603,9 @@ async def ingest_endpoint(req: IngestRequest):
     if not req.context or not req.context.strip():
         return {"status": "error", "reason": "context is required"}
     try:
+        # Auto-activate session if source matches pattern (GPU protection)
+        activate_session_from_ingest(req.source.strip())
+
         result = await asyncio.to_thread(
             ingest_context,
             source=req.source.strip(),
@@ -1993,7 +2013,7 @@ async def voice_stt(request: Request):
         return {"error": "No audio data received"}
     if len(body) > 25 * 1024 * 1024:  # 25MB limit
         return {"error": "Audio file too large (max 25MB)"}
-    result = transcribe_audio(body)
+    result = await asyncio.to_thread(transcribe_audio, body)
     return result
 
 
@@ -2029,7 +2049,7 @@ async def voice_chat(request: Request, voice: str = None, rate: str = None):
         return {"error": "No audio data"}
 
     # Step 1: Transcribe
-    stt_result = transcribe_audio(body)
+    stt_result = await asyncio.to_thread(transcribe_audio, body)
     if "error" in stt_result or not stt_result.get("text"):
         return {"error": stt_result.get("error", "No speech detected"), "stt": stt_result}
 
@@ -2107,8 +2127,8 @@ async def api_voice_config_get():
     """Return current voice pipeline configuration."""
     if not VOICE_PIPELINE_AVAILABLE:
         return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
-    import dataclasses
-    return dataclasses.asdict(_voice_cfg)
+    import dataclasses as _dc
+    return _dc.asdict(_voice_cfg)
 
 
 @app.put("/api/voice/config")

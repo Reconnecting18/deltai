@@ -79,7 +79,7 @@ E3N does NOT directly process telemetry, UDP packets, or game data. Instead:
 | `project/tools/definitions.py` | 7 core + 4 diagnostic + 4 conditional telemetry tool JSON schemas |
 | `project/static/index.html` | Full dashboard UI (single file) — header health monitor, budget display, terminal with history CLR, WebSocket alert toasts |
 | `project/.env` | Config (models, VRAM thresholds, backup, budget, history, paths, cloud settings, voice, session mode, telemetry) |
-| `project/tests/verify_full.py` | 33-test verification suite — training, safety guards, router stress, persistence, RAG, CUDA, anthropic client |
+| `project/tests/verify_full.py` | 28-test verification suite — training, safety guards, router stress, persistence, RAG, CUDA, anthropic client |
 | `project/tests/verify_stress.py` | 30-test stress suite — review fix verification (10), high-stress simulations (20): low VRAM, backup cascade, concurrent routing, tool safety |
 | `project/tests/verify_resource_mgmt.py` | 29-test resource management suite — circuit breaker (5), resource manager (3), diagnostic tools (11), stress simulations (10) |
 | `app/main.js` | Electron main process |
@@ -514,7 +514,7 @@ SELF_HEAL_INTERVAL_SEC=300
 - Health event bus: DONE (typed events, sync/async emitters, WebSocket /ws/health, REST /health/events, CB wiring)
 - Proactive model lifecycle: DONE (auto-unload 14B on sim start, auto-preload on sim stop after 30s cooldown)
 - AI self-heal loop: DONE (5min interval, LLM-driven diagnostics, repair execution, verification, idle/session/CB guards)
-- Stress tests: PASSED (33/33 verification + 30/30 stress + 29/29 resource mgmt + 25/25 self-mgmt = 117/117 total)
+- Stress tests: PASSED (28/28 verification + 30/30 stress + 29/29 resource mgmt = 87/87 total)
 - Future (separate projects): Telemetry API for LMU
 
 ## Build Phases
@@ -537,5 +537,5 @@ SELF_HEAL_INTERVAL_SEC=300
 6. ~~Conversation history is ephemeral~~ — FIXED: now persisted to SQLite
 7. ~~Cloud budget resets on restart~~ — FIXED: now persisted to SQLite
 8. Voice STT loads Whisper model on first use — ~2-5 second cold start on first transcription
-9. ~~LoRA training requires external deps~~ — INSTALLED: PyTorch 2.10.0+cu126, transformers 5.3, peft 0.18, trl 0.29, bitsandbytes 0.49, accelerate 1.13, datasets 4.8. llama.cpp cloned and built at `C:\e3n\tools\llama.cpp`. Full pipeline verified (33/33 tests). Only Qwen2.5-3B is trainable on 12GB VRAM.
+9. ~~LoRA training requires external deps~~ — INSTALLED: PyTorch 2.10.0+cu126, transformers 5.3, peft 0.18, trl 0.29, bitsandbytes 0.49, accelerate 1.13, datasets 4.8. llama.cpp cloned and built at `C:\e3n\tools\llama.cpp`. Full pipeline verified (28/28 tests). Only Qwen2.5-3B is trainable on 12GB VRAM.
 10. Session mode without API key falls back to CPU-only local inference — functional but slow. Cloud is strongly recommended for racing sessions.

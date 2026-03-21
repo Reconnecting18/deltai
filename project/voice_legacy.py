@@ -21,6 +21,7 @@ import struct
 import asyncio
 import logging
 import tempfile
+import threading
 import subprocess
 from pathlib import Path
 
@@ -62,49 +63,54 @@ WHISPER_VOCAB_PROMPT = (
 
 _whisper_model = None
 _stt_available = False
+_whisper_lock = threading.Lock()
 
 
 def _init_whisper():
-    """Lazy-load the Whisper model on first use."""
+    """Lazy-load the Whisper model on first use (thread-safe)."""
     global _whisper_model, _stt_available
     if _whisper_model is not None:
         return _whisper_model
+    with _whisper_lock:
+        # Double-check after acquiring lock
+        if _whisper_model is not None:
+            return _whisper_model
 
-    try:
-        from faster_whisper import WhisperModel
+        try:
+            from faster_whisper import WhisperModel
 
-        device = WHISPER_DEVICE
-        if device == "auto":
-            try:
-                import pynvml
-                pynvml.nvmlInit()
-                handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-                mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
-                free_mb = (mem.total - mem.used) / 1e6
-                # Only use GPU if enough free VRAM (base model ~150MB, small ~500MB)
-                model_vram = {"tiny": 75, "base": 150, "small": 500, "medium": 1500, "large-v3": 3000}
-                needed = model_vram.get(WHISPER_MODEL, 150)
-                device = "cuda" if free_mb > needed + 500 else "cpu"  # 500MB buffer
-            except Exception:
-                device = "cpu"
+            device = WHISPER_DEVICE
+            if device == "auto":
+                try:
+                    import pynvml
+                    pynvml.nvmlInit()
+                    handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+                    mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                    free_mb = (mem.total - mem.used) / 1e6
+                    # Only use GPU if enough free VRAM (base model ~150MB, small ~500MB)
+                    model_vram = {"tiny": 75, "base": 150, "small": 500, "medium": 1500, "large-v3": 3000}
+                    needed = model_vram.get(WHISPER_MODEL, 150)
+                    device = "cuda" if free_mb > needed + 500 else "cpu"  # 500MB buffer
+                except Exception:
+                    device = "cpu"
 
-        compute_type = WHISPER_COMPUTE
-        if device == "cpu" and compute_type == "float16":
-            compute_type = "float32"  # float16 not supported on CPU for some backends
+            compute_type = WHISPER_COMPUTE
+            if device == "cpu" and compute_type == "float16":
+                compute_type = "float32"  # float16 not supported on CPU for some backends
 
-        logger.info(f"Loading Whisper model '{WHISPER_MODEL}' on {device} ({compute_type})")
-        _whisper_model = WhisperModel(
-            WHISPER_MODEL,
-            device=device,
-            compute_type=compute_type,
-        )
-        _stt_available = True
-        logger.info(f"Whisper model loaded: {WHISPER_MODEL} ({device})")
-        return _whisper_model
-    except Exception as e:
-        logger.error(f"Failed to load Whisper: {e}")
-        _stt_available = False
-        return None
+            logger.info(f"Loading Whisper model '{WHISPER_MODEL}' on {device} ({compute_type})")
+            _whisper_model = WhisperModel(
+                WHISPER_MODEL,
+                device=device,
+                compute_type=compute_type,
+            )
+            _stt_available = True
+            logger.info(f"Whisper model loaded: {WHISPER_MODEL} ({device})")
+            return _whisper_model
+        except Exception as e:
+            logger.error(f"Failed to load Whisper: {e}")
+            _stt_available = False
+            return None
 
 
 def transcribe_audio(audio_bytes: bytes, language: str = "en") -> dict:

@@ -18,6 +18,9 @@ function startBackend() {
     '--port', String(PORT),
     '--log-level', 'warning'
   ], { cwd: E3N_PROJECT, windowsHide: true })
+  backendProcess.on('error', (err) => {
+    console.error('Failed to start backend:', err.message)
+  })
 }
 
 function waitForBackend(retries = 30) {
@@ -26,8 +29,11 @@ function waitForBackend(retries = 30) {
     const check = () => {
       attempts++
       const req = http.get(URL, () => resolve())
-      req.on('error', () => {
-        if (attempts >= retries) return reject()
+      req.on('error', (err) => {
+        if (attempts >= retries) {
+          console.error(`Backend failed to start after ${attempts} attempts:`, err.message)
+          return reject(err)
+        }
         setTimeout(check, 500)
       })
       req.setTimeout(400, () => { req.destroy(); setTimeout(check, 500) })
@@ -91,6 +97,11 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
-  if (backendProcess) backendProcess.kill()
+  if (backendProcess && !backendProcess.killed) {
+    backendProcess.kill('SIGTERM')
+    setTimeout(() => {
+      if (backendProcess && !backendProcess.killed) backendProcess.kill('SIGKILL')
+    }, 3000)
+  }
   app.quit()
 })

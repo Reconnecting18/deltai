@@ -47,7 +47,7 @@ class KnowledgeHandler(FileSystemEventHandler):
         self._debounce[path] = now
 
         # Prune stale debounce entries to prevent unbounded growth
-        if len(self._debounce) > 500:
+        if len(self._debounce) > 100:
             cutoff = now - self._debounce_delay
             self._debounce = {k: v for k, v in self._debounce.items() if v > cutoff}
 

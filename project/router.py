@@ -475,8 +475,8 @@ def _check_budget() -> bool:
         try:
             from persistence import save_budget
             save_budget(today, 0.0)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to persist budget reset for {today}: {e}")
 
     budget = _env_float("CLOUD_BUDGET_DAILY", 5.0)
     return _daily_cloud_spend < budget
@@ -698,6 +698,10 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
     split = is_split_workload(message)
 
     query_cat = "general"
+    if is_session_active() or is_sim_running():
+        detected_cat = classify_telemetry_category(message)
+        if detected_cat:
+            query_cat = detected_cat
 
     cloud_ready = (cloud_enabled and has_api_key()
                    and await is_cloud_available() and _check_budget())
