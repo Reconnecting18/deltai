@@ -55,7 +55,7 @@ LLAMA_CPP_PATH = os.getenv("LLAMA_CPP_PATH", r"C:\e3n\tools\llama.cpp")
 
 def _dataset_path(name: str) -> str:
     """Get full path for a dataset file. Sanitizes name."""
-    safe = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
+    safe = "".join(c for c in name if c.isalnum() or c in "-_").strip()
     if not safe:
         raise ValueError("Invalid dataset name")
     return os.path.join(DATASETS_PATH, f"{safe}.jsonl")
@@ -755,13 +755,13 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str):
                 if _training_cancel_flag.is_set():
                     control.should_training_stop = True
                     return
-                # Abort if sim starts mid-training
+                # Abort if sim or racing session starts mid-training
                 try:
-                    from router import is_sim_running
-                    if is_sim_running():
-                        logger.warning("Sim launched during training — aborting to protect VRAM")
+                    from router import is_sim_running, is_session_active
+                    if is_sim_running() or is_session_active():
+                        logger.warning("Sim/session active during training — aborting to protect VRAM")
                         control.should_training_stop = True
-                        _update_state(status="aborted — sim launched")
+                        _update_state(status="aborted — sim/session active")
                 except ImportError:
                     pass
 

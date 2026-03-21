@@ -289,6 +289,18 @@ C:\e3n\
 
 ---
 
+## Security
+
+- **CORS**: Restricted to localhost origins only (not wildcard)
+- **XSS**: All dynamic values in innerHTML escaped via `esc()` helper
+- **Path safety**: `read_file` and `write_file` tools block access to protected system paths
+- **PowerShell**: Command blocklist with whitespace normalization to prevent bypass
+- **Concurrency**: Conversation history protected by threading lock
+- **WebSocket**: Exponential backoff reconnect with max retry cap
+- **Cloud**: RAG context truncated to 50KB before sending to Anthropic API; tool execution retried once on failure
+
+---
+
 ## Dashboard
 
 Tactical operations center aesthetic with a muted grey-green palette. Features include:

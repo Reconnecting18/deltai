@@ -784,10 +784,13 @@ function bar(id,pct,warm){
   e.style.background=pct>85?'rgba(184,58,58,0.7)':pct>65?'rgba(200,137,58,0.6)':'rgba(0,125,110,0.8)'
 }
 function set(id,v){const e=document.getElementById(id);if(e)e.textContent=v}
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+const _API=location.origin||'http://localhost:8000'
+const _WS=(location.protocol==='https:'?'wss:':'ws:')+'//'+location.host
 
 async function poll(){
   try{
-    const d=await(await fetch('http://localhost:8000/stats')).json()
+    const d=await(await fetch(_API+'/stats')).json()
     const g=d.gpu||{},c=d.cpu||{},r=d.ram||{},dk=d.disk||{}
     if(!g.error){
       health.gpu=g.gpu_percent||0;health.temp=g.temp_c||0
@@ -822,7 +825,7 @@ async function poll(){
     var wc=document.getElementById('m-watcher-chip');if(wc){if(d.watcher_active){wc.className='chip chip-ok';wc.textContent='Watcher Active'}else if(d.rag_available){wc.className='chip chip-warn';wc.textContent='Watcher Stopped'}else{wc.className='chip chip-warn';wc.textContent='RAG Unavailable'}}
     if(d.models&&d.models.length){
       document.getElementById('model-list').innerHTML=d.models.map(m=>
-        `<div class="mrow"><div class="mdot ${m.includes('e3n')?'on':''}"></div>${m}</div>`).join('')
+        `<div class="mrow"><div class="mdot ${m.includes('e3n')?'on':''}"></div>${esc(m)}</div>`).join('')
     }
     const s=Math.max(health.gpu,health.temp*.8)/100
     const se=document.getElementById('entity-status'),mk=document.getElementById('tb-mark')
@@ -873,7 +876,7 @@ const BADGE_CONFIG={
 }
 async function pollHealth(){
   try{
-    const r=await fetch('http://localhost:8000/api/health')
+    const r=await fetch(_API+'/api/health')
     if(r.ok)sysHealth=await r.json()
   }catch(e){
     Object.keys(sysHealth).forEach(k=>sysHealth[k]='down')
@@ -905,7 +908,7 @@ function renderHealth(){
     if(!config)return
     const badge=document.createElement('div')
     badge.className=`sys-alert sys-alert--${config.cls}`
-    badge.innerHTML=`<div class="sys-alert-dot"></div><span>${config.text}</span>`
+    badge.innerHTML=`<div class="sys-alert-dot"></div><span>${esc(config.text)}</span>`
     container.appendChild(badge)
   })
   if(divider)divider.style.display=container.children.length?'':'none'
@@ -913,19 +916,21 @@ function renderHealth(){
 pollHealth();setInterval(pollHealth,10000)
 
 // ── WEBSOCKET ALERTS ──
-let _alertWs=null
+let _alertWs=null,_wsRetries=0
 function connectAlertWs(){
+  if(_wsRetries>=10)return
   try{
-    _alertWs=new WebSocket('ws://localhost:8000/ws/alerts')
+    _alertWs=new WebSocket(_WS+'/ws/alerts')
+    _alertWs.onopen=function(){_wsRetries=0}
     _alertWs.onmessage=function(ev){
       try{
         const alert=JSON.parse(ev.data)
         showToast(alert)
       }catch(e){}
     }
-    _alertWs.onclose=function(){setTimeout(connectAlertWs,5000)}
+    _alertWs.onclose=function(){setTimeout(connectAlertWs,Math.min(5000*Math.pow(2,_wsRetries++),60000))}
     _alertWs.onerror=function(){_alertWs.close()}
-  }catch(e){setTimeout(connectAlertWs,5000)}
+  }catch(e){setTimeout(connectAlertWs,Math.min(5000*Math.pow(2,_wsRetries++),60000))}
 }
 function showToast(alert){
   const container=document.getElementById('toast-container')
@@ -934,7 +939,7 @@ function showToast(alert){
   const prio=alert.priority||'normal'
   toast.className=`toast toast--${prio}`
   const icon=prio==='critical'?'⚠':'●'
-  toast.innerHTML=`<span class="toast-icon">${icon}</span><span class="toast-text">${alert.context||''}</span><span class="toast-src">${alert.source||''}</span>`
+  toast.innerHTML=`<span class="toast-icon">${icon}</span><span class="toast-text">${esc(alert.context||'')}</span><span class="toast-src">${esc(alert.source||'')}</span>`
   container.appendChild(toast)
   setTimeout(()=>{toast.classList.add('toast--fade');setTimeout(()=>toast.remove(),500)},10000)
 }
@@ -964,7 +969,7 @@ async function runCmd(){
   aiCore.simSpeech=true
   const node=addLine('E3N&gt;','','e3n','e3n-msg')
   try{
-    const res=await fetch('http://localhost:8000/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:txt})})
+    const res=await fetch(_API+'/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:txt})})
     const rd=res.body.getReader(),dec=new TextDecoder()
     let buf='',full=''
     while(true){
@@ -1008,7 +1013,7 @@ async function runCmd(){
 // ── CONVERSATION HISTORY ──────────────────────────────────────────
 async function clearHistory(){
   try{
-    await fetch('http://localhost:8000/chat/history',{method:'DELETE'})
+    await fetch(_API+'/chat/history',{method:'DELETE'})
     tLog.innerHTML='<div class="te e3n-msg"><span class="tp e3n">E3N&gt;</span><span class="tt dim">History cleared. Terminal ready.</span></div><hr class="tdiv">'
     updateHistoryCounter(0)
   }catch(e){console.warn('Clear history failed:',e)}
@@ -1242,9 +1247,9 @@ async function loadMemoryFiles(){
     if(!d.files||d.files.length===0){list.innerHTML='<div class="kb-empty">No files ingested. Drop files into C:\\e3n\\data\\knowledge\\ to add memories</div>';return}
     list.innerHTML=d.files.map(f=>
       '<div class="kb-row">'+
-        '<span class="kb-src">'+f.source+'</span>'+
+        '<span class="kb-src">'+esc(f.source)+'</span>'+
         '<span class="kb-chunks">'+f.chunks+' chunks</span>'+
-        '<button class="kb-rm" onclick="kbRemoveFile(\''+f.source.replace(/'/g,"\\'")+'\')">Remove</button>'+
+        '<button class="kb-rm" onclick="kbRemoveFile(\''+esc(f.source).replace(/'/g,"\\'")+'\')">Remove</button>'+
       '</div>'
     ).join('')
   }catch(e){list.innerHTML='<div class="kb-empty">Error loading files</div>'}
@@ -1319,7 +1324,6 @@ async function trLoadDataset(){
     ).join('')+'<div class="tr-count">'+ex.length+' examples</div>'
   }catch(e){list.innerHTML='<div class="kb-empty">Error loading dataset</div>'}
 }
-function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 async function trNewDataset(){
   const name=prompt('Dataset name (alphanumeric, dashes, underscores):')
   if(!name)return

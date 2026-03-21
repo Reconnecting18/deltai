@@ -121,6 +121,8 @@ async def stream_chat(
         return
 
     # Build messages — prepend history, then current user message
+    if rag_context and len(rag_context) > 50000:
+        rag_context = rag_context[:50000] + "\n[...truncated]"
     user_content = f"{rag_context}\n{message}" if rag_context else message
     messages = list(history) if history else []
     messages.append({"role": "user", "content": user_content})
@@ -291,7 +293,12 @@ async def stream_chat(
             try:
                 result = execute_tool_fn(name, args)
             except Exception as e:
-                result = f"ERROR: Tool execution failed: {e}"
+                # Retry once on failure
+                try:
+                    result = execute_tool_fn(name, args)
+                    yield json.dumps({"t": "retry", "n": name, "c": str(e)}) + "\n"
+                except Exception as e2:
+                    result = f"ERROR: Tool execution failed: {e2}"
 
             summary = result[:300].replace("\n", " ").replace("\r", "")
             if len(result) > 300:

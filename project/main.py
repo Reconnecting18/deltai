@@ -96,7 +96,7 @@ async def _broadcast_alert(alert: dict):
     """Send an alert to all connected WebSocket clients."""
     dead = []
     msg = json.dumps(alert)
-    for ws in _alert_clients:
+    for ws in list(_alert_clients):
         try:
             await ws.send_text(msg)
         except Exception:
@@ -126,7 +126,7 @@ async def _emit_health_event(event_type: str, data: dict):
     """Async: record + broadcast to WebSocket health clients."""
     event = _record_health_event(event_type, data)
     dead = []
-    for ws in _health_clients:
+    for ws in list(_health_clients):
         try:
             await ws.send_json(event)
         except Exception:
@@ -155,6 +155,7 @@ def _is_idle() -> bool:
 # ── CONVERSATION HISTORY ─────────────────────────────────────────────
 HISTORY_MAX_TURNS = int(os.getenv("CONVERSATION_HISTORY_MAX", "10"))
 _conversation_history: list[dict] = []
+_history_lock = __import__("threading").Lock()
 
 
 def _append_to_history(user_message: str, assistant_response: str):
@@ -163,11 +164,12 @@ def _append_to_history(user_message: str, assistant_response: str):
     _last_chat_end = _time.time()
     if not user_message.strip() or not assistant_response.strip():
         return
-    _conversation_history.append({"role": "user", "content": user_message})
-    _conversation_history.append({"role": "assistant", "content": assistant_response})
-    max_msgs = HISTORY_MAX_TURNS * 2
-    if len(_conversation_history) > max_msgs:
-        del _conversation_history[:-max_msgs]
+    with _history_lock:
+        _conversation_history.append({"role": "user", "content": user_message})
+        _conversation_history.append({"role": "assistant", "content": assistant_response})
+        max_msgs = HISTORY_MAX_TURNS * 2
+        if len(_conversation_history) > max_msgs:
+            del _conversation_history[:-max_msgs]
     # Persist to SQLite
     try:
         save_history_pair(user_message, assistant_response)
@@ -184,7 +186,8 @@ def _append_to_history(user_message: str, assistant_response: str):
 
 def _get_history() -> list[dict]:
     """Return a copy of conversation history for injection into message arrays."""
-    return list(_conversation_history)
+    with _history_lock:
+        return list(_conversation_history)
 
 
 async def _try_ollama_inference(client: httpx.AsyncClient, model: str,
@@ -761,7 +764,7 @@ app = FastAPI(title="E3N", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:8000", "http://127.0.0.1:8000", "http://localhost:3000"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -807,7 +810,10 @@ def _safe_json_loads(text: str):
     try:
         return json.loads(sq)
     except json.JSONDecodeError:
-        return json.loads(_fix_windows_paths(sq))
+        try:
+            return json.loads(_fix_windows_paths(sq))
+        except json.JSONDecodeError:
+            return None
 
 def _extract_balanced_braces(text: str, start: int) -> str:
     """Extract a balanced {...} substring starting at text[start] which must be '{'."""
@@ -1460,7 +1466,8 @@ async def chat(req: ChatRequest):
 @app.delete("/chat/history")
 def clear_chat_history():
     """Clear conversation history."""
-    _conversation_history.clear()
+    with _history_lock:
+        _conversation_history.clear()
     try:
         db_clear_history()
     except Exception as e:
@@ -2282,8 +2289,8 @@ async def api_voice_train_export(req: dict = None):
 
 # ── STATS ───────────────────────────────────────────────────────────────
 
-@app.get("/stats")
-def stats():
+def _collect_stats_sync():
+    """Collect system stats (blocking calls) — run via asyncio.to_thread."""
     result = {}
     result["cpu"] = {
         "name": platform.processor() or "Intel i7-12700K",
@@ -2372,6 +2379,11 @@ def stats():
     result["backup"] = {"enabled": backup_enabled, "healthy": all_healthy}
     result["budget"] = get_budget_status()
     return result
+
+
+@app.get("/stats")
+async def stats():
+    return await asyncio.to_thread(_collect_stats_sync)
 
 
 # ── MODELFILE ───────────────────────────────────────────────────────────

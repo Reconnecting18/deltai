@@ -4,6 +4,7 @@ Each tool function returns a string result that gets fed back to the model.
 """
 
 import os
+import re
 import subprocess
 import json
 import psutil
@@ -38,6 +39,23 @@ BLOCKED_COMMANDS = [
     "-executionpolicy bypass", "-ep bypass", "-exec bypass",
 ]
 
+PROTECTED_READ_PATHS = [
+    "C:\\Windows\\System32\\config",
+    "C:\\Windows\\System32\\drivers\\etc",
+    "C:\\Users\\Default",
+]
+
+def _is_path_safe_read(path: str) -> bool:
+    normalized = os.path.normpath(path).lower()
+    for protected in PROTECTED_READ_PATHS:
+        if normalized.startswith(protected.lower()):
+            return False
+    # Block .env files outside of project directory
+    basename = os.path.basename(normalized)
+    if basename == ".env" and not normalized.startswith(os.path.normpath("C:\\e3n").lower()):
+        return False
+    return True
+
 def _is_path_safe_write(path: str) -> bool:
     normalized = os.path.normpath(path).lower()
     for protected in PROTECTED_PATHS:
@@ -46,7 +64,7 @@ def _is_path_safe_write(path: str) -> bool:
     return True
 
 def _is_command_safe(cmd: str) -> bool:
-    lower = cmd.lower().strip()
+    lower = re.sub(r'\s+', ' ', cmd.lower().strip())
     for blocked in BLOCKED_COMMANDS:
         if blocked in lower:
             return False
@@ -79,6 +97,8 @@ def read_file(path: str, max_lines=200) -> str:
     try:
         max_lines = _coerce_int(max_lines, 200)
         path = os.path.normpath(path)
+        if not _is_path_safe_read(path):
+            return f"ERROR: Access denied — protected system path: {path}"
         if not os.path.exists(path):
             return f"ERROR: File not found: {path}"
         if not os.path.isfile(path):

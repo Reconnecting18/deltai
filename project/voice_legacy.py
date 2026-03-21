@@ -169,8 +169,8 @@ def transcribe_audio(audio_bytes: bytes, language: str = "en") -> dict:
     finally:
         try:
             os.unlink(tmp_path)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Temp file cleanup failed: {e}")
 
 
 # ── TTS (Text-to-Speech) via edge-tts ──────────────────────────────────
@@ -310,8 +310,8 @@ $synth.Dispose()
         for p in (tmp_path, text_path):
             try:
                 os.unlink(p)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Temp file cleanup failed: {e}")
 
 
 def _clean_for_tts(text: str) -> str:

@@ -18,6 +18,12 @@ function startBackend() {
     '--port', String(PORT),
     '--log-level', 'warning'
   ], { cwd: E3N_PROJECT, windowsHide: true })
+  backendProcess.on('error', (err) => {
+    console.error('Failed to start backend:', err.message)
+  })
+  backendProcess.on('exit', (code) => {
+    if (code !== 0 && code !== null) console.error(`Backend exited with code ${code}`)
+  })
 }
 
 function waitForBackend(retries = 30) {
