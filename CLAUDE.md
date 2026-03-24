@@ -19,17 +19,20 @@ E3N is ONLY the AI intelligence layer — reasoning, memory, tool execution, and
 - **Knowledge:** Drop files in `C:\e3n\data\knowledge\` — watchdog auto-ingests
 - **Ingest connector:** `POST /ingest` — external services push structured context into ChromaDB with source tags and TTL (async pipeline with queue-based batching)
 - **Router:** `C:\e3n\project\router.py` — VRAM-aware GPU detection, sim process detection, tier classification (A/AB/B/C), dynamic GPU layer offloading (`_calc_num_gpu`), dynamic quantization tier selection, model cascade, emergency backup chain, cloud budget enforcement, split workload detection, session mode, telemetry query classification, adapter domain classification, Mixture-of-LoRA adapter routing
-- **Tools:** 7 core tools + 3 computation delegation + 4 diagnostic/self-management tools + 1 adapter management + 4 conditional telemetry tools in `C:\e3n\project\tools\` (core: read_file, write_file, list_directory, run_powershell, get_system_info, search_knowledge, memory_stats; computation: calculate, summarize_data, lookup_reference; diagnostic: self_diagnostics, manage_ollama_models, repair_subsystem, resource_status; adapter: manage_adapters; telemetry: get_session_status, get_lap_summary, get_tire_status, get_strategy_recommendation — only loaded when TELEMETRY_API_URL is set)
+- **Tools:** 7 core tools + 3 computation delegation + 4 diagnostic/self-management tools + 1 adapter management + 4 conditional telemetry tools in `C:\e3n\project\tools\` (core: read_file, write_file, list_directory, run_powershell, get_system_info, search_knowledge, memory_stats; computation: calculate, summarize_data, lookup_reference; diagnostic: self_diagnostics, manage_ollama_models, repair_subsystem, resource_status; adapter: manage_adapters; telemetry: get_session_status, get_lap_summary, get_tire_status, get_strategy_recommendation — only loaded when TELEMETRY_API_URL is set). Tool relevance filtering (`filter_tools()`) pre-filters 19 tools to 5-8 per query based on domain.
+- **Quality scoring:** `C:\e3n\project\quality.py` — heuristic 6-signal scorer (0.0-1.0), drives smart capture, routing feedback, and knowledge gap detection
+- **Reasoning traces:** SQLite `reasoning_traces` table persists ReAct Think/Act/Observe chains, retrieved via embedding similarity as `[PRIOR REASONING]` context
 - **Resource self-manager:** Background loop (30s interval) — auto VRAM lifecycle, predictive VRAM management (decline rate + thermal monitoring), OS process priority management, Ollama health monitoring + auto-restart, watcher recovery, TTL cleanup, warm-to-cold memory compaction
 - **Circuit breaker:** Protects Ollama inference path — 3-failure threshold, exponential backoff (5s→60s max), half-open recovery testing
 - **Anthropic client:** `C:\e3n\project\anthropic_client.py` — cloud inference with tool use, split workload mode, telemetry mode prompt injection, conversation history support (dormant — no API key set)
-- **Conversation history:** In-memory rolling 10-turn window + SQLite persistence across all chat paths, session-aware tagging
+- **Conversation history:** In-memory rolling 10-turn window + SQLite persistence across all chat paths, session-aware tagging, conversation-aware smart history with tiered compression
 - **Split workload:** Local 3B gathers data via tools → cloud reasons over enriched context
 - **Cloud cost budget:** Daily spend tracking ($5 default), router gates cloud when exhausted, persisted to SQLite
 - **Voice module:** `C:\e3n\project\voice\` (package) — STT (faster-whisper) + TTS (Piper/edge-tts), RVC voice conversion, playback, post-processing
-- **Training pipeline:** `C:\e3n\project\training.py` — dataset management, QLoRA fine-tuning (Qwen2.5-3B), adapter surgery (4 domain slots with TIES merge, selective layer freezing, adapter registry + versioning), knowledge distillation, few-shot fallback, GGUF export + Ollama registration, A/B eval, auto-capture of good exchanges
+- **Training pipeline:** `C:\e3n\project\training.py` — dataset management, QLoRA fine-tuning (Qwen2.5-3B), adapter surgery (4 domain slots with TIES merge, selective layer freezing, adapter registry + versioning), knowledge distillation, iterative distillation (weakness identification + targeted improvement), few-shot fallback, GGUF export + Ollama registration, A/B eval, smart auto-capture (quality-tiered with dedup + negative examples)
 - **Hierarchical memory:** Hot (in-memory, <5min) → Warm (ChromaDB persistent, 5min-24hr) → Cold (SQLite + zlib, >24hr) at `C:\e3n\data\cold_memory.db`
-- **ReAct reasoning:** Structured Think-Act-Observe loop for complex local queries (max 3 iterations)
+- **ReAct reasoning:** Structured Think-Act-Observe loop for complex local queries (max 3 iterations), confidence-aware (HIGH/MEDIUM/LOW), reasoning trace memory for learning from past chains
+- **Knowledge gap detection:** SQLite `knowledge_gaps` table logs failed queries from low quality scores, ReAct max iterations, RAG zero results
 - **Venv:** `C:\e3n\project\venv\`
 
 ## Key Architecture Decision: E3N is a Pure AI Brain
@@ -71,22 +74,31 @@ E3N does NOT directly process telemetry, UDP packets, or game data. Instead:
 - Dynamic quantization and GPU layer offloading
 - Mixture-of-LoRA adapter routing
 - Streaming async ingest pipeline
+- Response quality scoring and routing feedback
+- Reasoning trace memory (learn from past Think/Act/Observe chains)
+- Tool relevance filtering (domain-aware prompt token savings)
+- Confidence-aware reasoning (clarification protocol)
+- Smart auto-capture with quality tiering and negative examples
+- Iterative distillation (weakness detection + targeted improvement)
+- Knowledge gap detection and tracking
+- Conversation-aware smart history (tiered compression)
 
 ## Key Files
 | File | Purpose |
 |------|---------|
-| `project/main.py` (~2500 lines) | FastAPI app — chat (3 paths: local, cloud, split), ReAct reasoning loop, conversation history, stats, health, budget, memory, ingest (async pipeline), batch ingest, session mode, WebSocket alerts, backup, training, voice endpoints, resource self-manager loop (predictive VRAM, process priority, thermal, cold compaction), circuit breaker, resource status endpoint, cold memory + ingest pipeline endpoints |
-| `project/router.py` | Smart routing: consolidated VRAM detection (_get_vram_info), sim detection, tier classification (A/AB/B/C), dynamic GPU layer offloading (_calc_num_gpu), dynamic quantization tier selection, split workload detection, cloud budget enforcement + persistence, emergency backup chain, session mode (GPU protection), telemetry query classification, Mixture-of-LoRA adapter routing (resolve_adapter_model) |
+| `project/main.py` (~2500 lines) | FastAPI app — chat (3 paths: local, cloud, split), ReAct reasoning loop (confidence-aware, trace memory), conversation-aware smart history, conversation history, stats, health, budget, memory, ingest (async pipeline), batch ingest, session mode, WebSocket alerts, backup, training, voice endpoints, resource self-manager loop (predictive VRAM, process priority, thermal, cold compaction), circuit breaker, resource status endpoint, cold memory + ingest pipeline endpoints, knowledge gap endpoints |
+| `project/router.py` | Smart routing: consolidated VRAM detection (_get_vram_info), sim detection, tier classification (A/AB/B/C), dynamic GPU layer offloading (_calc_num_gpu), dynamic quantization tier selection, split workload detection, cloud budget enforcement + persistence, emergency backup chain, session mode (GPU protection), telemetry query classification, Mixture-of-LoRA adapter routing (resolve_adapter_model), adaptive routing feedback (quality-driven tier adjustments), multi-domain classification |
+| `project/quality.py` | Response quality scoring: 6-signal heuristic scorer (length_appropriateness, tool_success_rate, specificity, no_error_indicators, structural_match, no_repeat), SQLite persistence, drives smart capture + routing feedback + gap detection |
 | `project/memory.py` | ChromaDB RAG: chunking, embedding, multi-query expansion, source-grouped reranking, recency bias, ingest with TTL, batch ingest, source/age filtering, semantic deduplication, iterative RAG (two-round retrieval), hierarchical memory (hot/warm/cold tiers with SQLite cold storage + zlib compression) |
 | `project/watcher.py` | Watchdog file watcher for knowledge dir |
 | `project/anthropic_client.py` | Anthropic API streaming with tool use, split_mode, telemetry_mode prompt injection, conversation history support (dormant — no API key) |
-| `project/persistence.py` | SQLite backing store for conversation history (session-aware), cloud budget, session history export (WAL mode, short-lived connections) |
-| `project/training.py` (~2400 lines) | Training pipeline: dataset CRUD, export (alpaca/sharegpt/chatml), QLoRA fine-tuning + GGUF export + Ollama registration, adapter surgery (registry, domain training, selective layer freezing, TIES merge, eval/promotion/rollback), knowledge distillation, few-shot fallback, A/B eval, auto-capture |
+| `project/persistence.py` | SQLite backing store for conversation history (session-aware), cloud budget, session history export, reasoning traces, quality scores, routing feedback, knowledge gaps (WAL mode, short-lived connections) |
+| `project/training.py` (~2400 lines) | Training pipeline: dataset CRUD, export (alpaca/sharegpt/chatml), QLoRA fine-tuning + GGUF export + Ollama registration, adapter surgery (registry, domain training, selective layer freezing, TIES merge, eval/promotion/rollback), knowledge distillation, iterative distillation (weakness identification + targeted improvement), few-shot fallback, A/B eval, smart auto-capture (quality-tiered, dedup, negative examples) |
 | `project/voice/` (~1780 lines) | Voice package: STT (faster-whisper), TTS (Piper/edge-tts), RVC voice conversion, playback, post-processing, voice config |
 | `project/tools/executor.py` (~1270 lines) | Tool execution with type coercion, safety checks, tool retry on error, computation delegation (calculate, summarize_data, lookup_reference), self-diagnostics (7 subsystem deep checks), manage_ollama_models (status/unload/preload with sim guard), repair_subsystem (4 allowlisted repairs), resource_status, manage_adapters, conditional telemetry tools |
-| `project/tools/definitions.py` (~420 lines) | 7 core + 3 computation + 4 diagnostic + 1 adapter + 4 conditional telemetry tool JSON schemas |
+| `project/tools/definitions.py` (~420 lines) | 7 core + 3 computation + 4 diagnostic + 1 adapter + 4 conditional telemetry tool JSON schemas, `filter_tools()` domain-aware tool relevance filtering |
 | `project/static/index.html` | Full dashboard UI (single file) — header health monitor, budget display, terminal with history CLR, WebSocket alert toasts |
-| `project/.env` | Config (models, VRAM thresholds, backup, budget, history, paths, cloud settings, voice, session mode, telemetry, ReAct, RAR, dedup, quant tiers, MoLoRA, cold memory, ingest pipeline) |
+| `project/.env` | Config (models, VRAM thresholds, backup, budget, history, paths, cloud settings, voice, session mode, telemetry, ReAct, RAR, dedup, quant tiers, MoLoRA, cold memory, ingest pipeline, reasoning traces, quality scoring, smart capture, smart history, knowledge gaps) |
 | `project/tests/verify_full.py` | 46-test verification suite — training, safety guards, router stress, persistence, RAG, CUDA, computation delegation, anthropic client |
 | `project/tests/verify_stress.py` | 30-test stress suite — review fix verification (10), high-stress simulations (20): low VRAM, backup cascade, concurrent routing, tool safety |
 | `project/tests/verify_resource_mgmt.py` | 29-test resource management suite — circuit breaker (5), resource manager (3), diagnostic tools (11), stress simulations (10) |
@@ -118,6 +130,7 @@ JSON lines from `/chat`:
 - `{"t":"result","n":"tool_name","s":"summary"}` — tool result
 - `{"t":"retry","n":"tool_name","c":"..."}` — tool retry (error recovery)
 - `{"t":"react","iteration":N,"phase":"think|act|observe","c":"..."}` — ReAct reasoning loop event
+- `{"t":"clarify","c":"..."}` — confidence-aware clarification request (LOW confidence in ReAct)
 - `{"t":"text","c":"chunk"}` — response text
 - `{"t":"emergency","c":"..."}` — backup model activated (rare)
 - `{"t":"done","turns":N}` — stream complete (turns = conversation history count)

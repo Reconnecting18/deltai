@@ -313,10 +313,69 @@ SPLIT_PATTERNS = [
 ]
 
 
-def classify_complexity(message: str) -> int:
+# ── ADAPTIVE ROUTING FEEDBACK ────────────────────────────────────────────
+# Learns from quality scores which tier/model works for which domain.
+# Soft adjustment: ±1 tier based on recent routing outcomes.
+
+_routing_adjustment_cache: dict = {}  # {domain: (adjustment, cached_at)}
+_ROUTING_CACHE_TTL = 600  # 10 minutes
+
+
+def get_routing_adjustment(domain: str) -> int:
+    """
+    Get a routing tier adjustment based on recent quality feedback.
+    Returns -1 (downgrade — model handles it), 0 (no change), +1 (upgrade needed).
+    Cached for 10 minutes to avoid SQLite on every chat.
+    """
+    if not domain:
+        return 0
+
+    now = time.time()
+    cached = _routing_adjustment_cache.get(domain)
+    if cached and (now - cached[1]) < _ROUTING_CACHE_TTL:
+        return cached[0]
+
+    try:
+        from persistence import get_routing_stats
+        stats = get_routing_stats(domain, limit=100)
+        if len(stats) < 10:
+            _routing_adjustment_cache[domain] = (0, now)
+            return 0  # not enough data
+
+        # Analyze quality at each tier
+        tier_scores = {}
+        for s in stats:
+            t = s["tier"]
+            if t not in tier_scores:
+                tier_scores[t] = []
+            tier_scores[t].append(s["score"])
+
+        adjustment = 0
+        # If Tier 1 consistently bad → suggest upgrade
+        if 1 in tier_scores and len(tier_scores[1]) >= 5:
+            avg_t1 = sum(tier_scores[1]) / len(tier_scores[1])
+            if avg_t1 < 0.5:
+                adjustment = 1
+
+        # If Tier 2 consistently great with local model → suggest downgrade
+        if 2 in tier_scores and len(tier_scores[2]) >= 5:
+            avg_t2 = sum(tier_scores[2]) / len(tier_scores[2])
+            local_t2 = [s for s in stats if s["tier"] == 2 and "qwen" in (s["model"] or "").lower()]
+            if local_t2 and avg_t2 > 0.8:
+                adjustment = -1
+
+        _routing_adjustment_cache[domain] = (adjustment, now)
+        return adjustment
+    except Exception:
+        _routing_adjustment_cache[domain] = (0, now)
+        return 0
+
+
+def classify_complexity(message: str, domain: str = None) -> int:
     """
     Classify message complexity.
     Returns 1 (local), 2 (sonnet), or 3 (opus).
+    Accepts optional domain for adaptive adjustment from feedback.
     """
     text = message.lower().strip()
 
@@ -332,7 +391,10 @@ def classify_complexity(message: str) -> int:
     # Check Tier 2
     for pattern in TIER2_PATTERNS:
         if re.search(pattern, text, re.IGNORECASE):
-            return 2
+            base_tier = 2
+            # Apply adaptive adjustment from feedback
+            adjustment = get_routing_adjustment(domain) if domain else 0
+            return max(1, min(3, base_tier + adjustment))
 
     # Long complex messages
     if len(text) > 300 and ("?" in text or "how" in text or "why" in text):
@@ -457,7 +519,17 @@ ADAPTER_DOMAIN_PATTERNS = {
 def classify_adapter_domain(message: str) -> str | None:
     """
     Classify a query into an adapter domain for augmentation slot routing.
-    Returns domain string or None for general queries.
+    Returns primary domain string or None for general queries.
+    """
+    domains = classify_adapter_domains(message)
+    return domains[0] if domains else None
+
+
+def classify_adapter_domains(message: str) -> list[str]:
+    """
+    Classify a query into ALL matching adapter domains, sorted by relevance.
+    Supports cross-domain queries (e.g., racing + engineering).
+    Returns list of domain strings (highest score first), or empty list.
     """
     text = message.lower().strip()
     scores = {}
@@ -469,9 +541,9 @@ def classify_adapter_domain(message: str) -> str | None:
         if score > 0:
             scores[domain] = score
     if not scores:
-        return None
-    # Return domain with highest pattern match count
-    return max(scores, key=scores.get)
+        return []
+    # Return all matching domains sorted by score (highest first)
+    return sorted(scores, key=scores.get, reverse=True)
 
 
 # ── MIXTURE-OF-LORA ROUTING ──────────────────────────────────────────────
@@ -891,7 +963,10 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
     sonnet_model = os.getenv("ANTHROPIC_SONNET_MODEL", "claude-sonnet-4-20250514")
     opus_model = os.getenv("ANTHROPIC_OPUS_MODEL", "claude-opus-4-20250514")
 
-    tier = classify_complexity(message)
+    # Pre-classify adapter domain for routing feedback
+    adapter_domain = classify_adapter_domain(message)
+
+    tier = classify_complexity(message, domain=adapter_domain)
     local_model, cpu_only, backup, num_gpu, num_ctx = _pick_local_model()
     sim_active = is_sim_running()
     gpu_loaded = is_gpu_loaded()
@@ -904,10 +979,7 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
         if tel_cat:
             query_cat = tel_cat
 
-    # Classify adapter domain (augmentation slot routing)
-    adapter_domain = classify_adapter_domain(message)
-
-    # Mixture-of-LoRA: resolve domain-specific adapter model
+    # Mixture-of-LoRA: resolve domain-specific adapter model (adapter_domain classified above)
     resolved_model, active_adapter = resolve_adapter_model(local_model, adapter_domain)
     if active_adapter:
         local_model = resolved_model

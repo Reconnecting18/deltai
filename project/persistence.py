@@ -49,6 +49,57 @@ def init_db():
                 spent REAL NOT NULL DEFAULT 0.0
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS reasoning_traces (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                query_text TEXT,
+                domain TEXT,
+                steps_json TEXT,
+                final_summary TEXT,
+                tool_sequence TEXT,
+                success INTEGER,
+                confidence TEXT,
+                embedding BLOB,
+                created_at REAL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS quality_scores (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                query_text TEXT,
+                response_text_preview TEXT,
+                score REAL,
+                signals_json TEXT,
+                tier INTEGER,
+                domain TEXT,
+                created_at REAL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS routing_feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                query_hash TEXT,
+                classified_tier INTEGER,
+                actual_model TEXT,
+                domain TEXT,
+                quality_score REAL,
+                latency_ms REAL,
+                tool_calls_count INTEGER,
+                created_at REAL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS knowledge_gaps (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                query_text TEXT,
+                domain TEXT,
+                quality_score REAL,
+                gap_type TEXT,
+                resolved INTEGER DEFAULT 0,
+                resolved_at REAL,
+                created_at REAL
+            )
+        """)
         conn.commit()
     logger.info(f"Persistence DB initialized: {_db_path}")
 
@@ -153,5 +204,194 @@ def save_budget(date: str, spent: float):
             "INSERT INTO budget_daily (date, spent) VALUES (?, ?) "
             "ON CONFLICT(date) DO UPDATE SET spent = excluded.spent",
             (date, spent),
+        )
+        conn.commit()
+
+
+# ── REASONING TRACES ─────────────────────────────────────────────────
+
+
+def save_reasoning_trace(query_text: str, domain: str, steps_json: str,
+                         final_summary: str, tool_sequence: str,
+                         success: bool, confidence: str = "unknown",
+                         embedding: bytes = None):
+    """Save a ReAct reasoning trace for future reference."""
+    now = time.time()
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO reasoning_traces (query_text, domain, steps_json, final_summary, "
+            "tool_sequence, success, confidence, embedding, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (query_text, domain or "general", steps_json, final_summary[:500],
+             tool_sequence, int(success), confidence, embedding, now),
+        )
+        conn.commit()
+
+
+def find_similar_traces(embedding: bytes, n: int = 3) -> list[dict]:
+    """
+    Find reasoning traces with similar embeddings.
+    Returns list of {"query_text", "domain", "final_summary", "tool_sequence", "confidence", "steps_json"}.
+    Uses brute-force cosine similarity on stored embeddings.
+    """
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT query_text, domain, final_summary, tool_sequence, confidence, steps_json, embedding "
+            "FROM reasoning_traces WHERE success = 1 AND embedding IS NOT NULL "
+            "ORDER BY created_at DESC LIMIT 200"
+        ).fetchall()
+
+    if not rows or not embedding:
+        return []
+
+    # Deserialize query embedding
+    query_emb = _deserialize_embedding(embedding)
+    if not query_emb:
+        return []
+
+    # Score each trace by cosine similarity
+    scored = []
+    for query_text, domain, summary, tools, conf, steps, emb_bytes in rows:
+        trace_emb = _deserialize_embedding(emb_bytes)
+        if not trace_emb or len(trace_emb) != len(query_emb):
+            continue
+        sim = _cosine_similarity(query_emb, trace_emb)
+        if sim > 0.7:  # similarity threshold
+            scored.append((sim, {
+                "query_text": query_text,
+                "domain": domain,
+                "final_summary": summary,
+                "tool_sequence": tools,
+                "confidence": conf,
+            }))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [item for _, item in scored[:n]]
+
+
+def prune_old_traces(max_age_days: int = 30, max_count: int = 500):
+    """Remove old reasoning traces beyond retention limits."""
+    cutoff = time.time() - (max_age_days * 86400)
+    with _connect() as conn:
+        conn.execute("DELETE FROM reasoning_traces WHERE created_at < ?", (cutoff,))
+        # Also cap total count
+        count = conn.execute("SELECT COUNT(*) FROM reasoning_traces").fetchone()[0]
+        if count > max_count:
+            conn.execute(
+                "DELETE FROM reasoning_traces WHERE id NOT IN "
+                "(SELECT id FROM reasoning_traces ORDER BY created_at DESC LIMIT ?)",
+                (max_count,),
+            )
+        conn.commit()
+
+
+def _serialize_embedding(emb: list[float]) -> bytes:
+    """Pack a float list into bytes for SQLite BLOB storage."""
+    import struct
+    return struct.pack(f'{len(emb)}f', *emb)
+
+
+def _deserialize_embedding(data: bytes) -> list[float]:
+    """Unpack bytes back to float list."""
+    import struct
+    if not data:
+        return []
+    try:
+        n = len(data) // 4  # 4 bytes per float
+        return list(struct.unpack(f'{n}f', data))
+    except Exception:
+        return []
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Compute cosine similarity between two vectors."""
+    import math
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(x * x for x in b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+# ── QUALITY SCORES ───────────────────────────────────────────────────
+
+
+def save_quality_score(query_text: str, response_preview: str, score: float,
+                       signals_json: str, tier: int = 1, domain: str = "general"):
+    """Persist a response quality score."""
+    now = time.time()
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO quality_scores (query_text, response_text_preview, score, "
+            "signals_json, tier, domain, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (query_text, response_preview[:200], score, signals_json, tier, domain, now),
+        )
+        conn.commit()
+
+
+# ── ROUTING FEEDBACK ─────────────────────────────────────────────────
+
+
+def save_routing_feedback(query_hash: str, classified_tier: int, actual_model: str,
+                          domain: str, quality_score: float, latency_ms: float,
+                          tool_calls_count: int):
+    """Record a routing outcome for adaptive feedback."""
+    now = time.time()
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO routing_feedback (query_hash, classified_tier, actual_model, "
+            "domain, quality_score, latency_ms, tool_calls_count, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (query_hash, classified_tier, actual_model, domain, quality_score,
+             latency_ms, tool_calls_count, now),
+        )
+        conn.commit()
+
+
+def get_routing_stats(domain: str, limit: int = 100) -> list[dict]:
+    """Get recent routing outcomes for a domain."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT classified_tier, actual_model, quality_score, latency_ms "
+            "FROM routing_feedback WHERE domain = ? ORDER BY created_at DESC LIMIT ?",
+            (domain, limit),
+        ).fetchall()
+    return [{"tier": r[0], "model": r[1], "score": r[2], "latency": r[3]} for r in rows]
+
+
+# ── KNOWLEDGE GAPS ───────────────────────────────────────────────────
+
+
+def save_knowledge_gap(query_text: str, domain: str, quality_score: float, gap_type: str):
+    """Log a knowledge gap when E3N fails to answer well."""
+    now = time.time()
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO knowledge_gaps (query_text, domain, quality_score, gap_type, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (query_text, domain or "general", quality_score, gap_type, now),
+        )
+        conn.commit()
+
+
+def get_unresolved_gaps(limit: int = 50) -> list[dict]:
+    """Get unresolved knowledge gaps."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, query_text, domain, quality_score, gap_type, created_at "
+            "FROM knowledge_gaps WHERE resolved = 0 ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [{"id": r[0], "query_text": r[1], "domain": r[2], "score": r[3],
+             "gap_type": r[4], "created_at": r[5]} for r in rows]
+
+
+def resolve_knowledge_gap(gap_id: int):
+    """Mark a knowledge gap as resolved."""
+    now = time.time()
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE knowledge_gaps SET resolved = 1, resolved_at = ? WHERE id = ?",
+            (now, gap_id),
         )
         conn.commit()

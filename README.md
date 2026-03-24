@@ -148,6 +148,15 @@ VRAM_TIER_AB_MIN_MB=5000        # Partial GPU offload threshold
 WARM_TO_COLD_AGE_SEC=86400      # Age before demoting to cold storage (24h)
 INGEST_QUEUE_MAX=500            # Async ingest pipeline queue size
 INGEST_FLUSH_INTERVAL=2.0       # Seconds between batch flushes
+
+# Phase 9 — Progressive Intelligence
+REASONING_TRACE_ENABLED=true    # Persist ReAct reasoning chains for reuse
+REASONING_TRACE_MAX=500         # Max stored traces
+QUALITY_CAPTURE_THRESHOLD=0.6   # Min quality score for auto-capture
+REACT_ALLOW_CLARIFY=true        # Allow ReAct to ask clarifying questions
+SMART_CAPTURE_ENABLED=true      # Quality-tiered capture with dedup
+SMART_HISTORY_ENABLED=true      # Intelligent context window compression
+KNOWLEDGE_GAP_DETECTION=true    # Log unanswered queries as knowledge gaps
 ```
 
 ---
@@ -173,14 +182,31 @@ The router detects available VRAM in real-time and selects the optimal model, qu
 
 ### ReAct Structured Reasoning
 
-For complex queries (Tier 2/3 complexity), E3N enters a structured **Think → Act → Observe** reasoning loop:
+For complex queries (Tier 2/3 complexity), E3N enters a structured **Think → Act → Observe → Confidence** reasoning loop:
 
 1. **THINK**: Identify what information is needed
 2. **ACT**: Call tools, query RAG, run calculations
 3. **OBSERVE**: Analyze results, check for gaps
-4. **FINAL**: Synthesize complete answer
+4. **CONFIDENCE**: Rate HIGH / MEDIUM / LOW — drives next action
+5. **FINAL**: Synthesize complete answer
 
 Up to 3 iterations per query. Dramatically improves multi-step problem solving on local models without any model changes — pure prompt engineering.
+
+**Reasoning trace memory**: Past ReAct chains are persisted in SQLite and retrieved by embedding similarity. When E3N encounters a problem similar to one it solved before, it injects the prior reasoning as context — avoiding redundant work.
+
+**Confidence protocol**: HIGH confidence → immediate answer. MEDIUM → answer with caveat about what's missing. LOW → asks the user a clarifying question (`CLARIFY:` event) before proceeding.
+
+### Progressive Intelligence
+
+E3N gets smarter over time through feedback loops:
+
+- **Quality scoring**: Every response scored 0.0–1.0 on 6 signals (specificity, tool success, structural match, etc.)
+- **Adaptive routing**: Router learns from quality scores which model/tier works best per domain — soft ±1 tier adjustment
+- **Smart auto-capture**: Quality-tiered training data collection with dedup and negative examples for DPO
+- **Tool filtering**: 19 tools pre-filtered to 5–8 relevant tools per query based on domain — saves ~1000 prompt tokens
+- **Knowledge gap detection**: Failed queries logged as gaps, surfaced at `/knowledge/gaps` for review
+- **Iterative distillation**: Identify weak domains → generate targeted teacher data → retrain → evaluate → promote
+- **Smart history**: Context window compression (full/compressed/summary) based on token budget
 
 ### RAG Memory
 
@@ -261,9 +287,10 @@ C:\e3n\
 │   └── main.js                   Frameless window + IPC
 ├── project\                      FastAPI backend
 │   ├── main.py                   Chat, ingest pipeline, ReAct loop, resource manager
-│   ├── router.py                 VRAM detection, dynamic quant, partial offload, MoLoRA
+│   ├── router.py                 VRAM detection, dynamic quant, partial offload, adaptive routing
 │   ├── memory.py                 Hierarchical RAG — hot/warm/cold, iterative retrieval, dedup
-│   ├── persistence.py            SQLite — conversation history, budget tracking
+│   ├── quality.py                Response quality scoring engine (6-signal heuristic)
+│   ├── persistence.py            SQLite — history, budget, traces, quality, routing, gaps
 │   ├── anthropic_client.py       Cloud inference with tool use (dormant until API key)
 │   ├── training.py               QLoRA, adapter surgery, TIES merge, dataset CRUD, A/B eval
 │   ├── voice/                    STT (faster-whisper) + TTS (edge-tts) package
@@ -316,6 +343,8 @@ C:\e3n\
 |--------|----------|-------------|
 | POST | `/memory/compact` | Trigger warm→cold tier compaction |
 | GET | `/memory/cold/stats` | Cold tier storage statistics |
+| GET | `/knowledge/gaps` | Unresolved knowledge gaps |
+| POST | `/knowledge/gaps/{id}/resolve` | Mark gap as resolved |
 
 ### Training
 | Method | Endpoint | Description |
@@ -328,6 +357,8 @@ C:\e3n\
 | POST | `/training/stop` | Cancel training |
 | GET | `/training/status` | Progress, loss, step count |
 | POST | `/training/eval/ab` | A/B model comparison |
+| GET | `/training/weaknesses` | Identify weak domains from quality feedback |
+| POST | `/training/improve/{domain}` | Trigger iterative improvement cycle |
 
 ### Adapters
 | Method | Endpoint | Description |
@@ -373,6 +404,7 @@ C:\e3n\
 | 6 | **Complete** | Dashboard UI — training pipeline, diagnostics, live voice chat, settings, self-heal |
 | 7 | **Complete** | Adapter surgery — modular domain LoRA, TIES merge, computation tools, distillation |
 | 8 | **Complete** | Advanced intelligence — ReAct reasoning, iterative RAG, dynamic quant/offload, hierarchical memory, async ingest, MoLoRA, predictive VRAM, process priority |
+| 9 | **Complete** | Progressive intelligence — reasoning trace memory, quality scoring, tool filtering, confidence protocol, adaptive routing, smart capture, iterative distillation, cross-domain transfer, smart history, knowledge gaps |
 | — | **Separate** | Telemetry API for Le Mans Ultimate — connects to E3N via /ingest |
 
 ---

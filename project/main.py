@@ -18,7 +18,7 @@ import platform
 import logging
 from dotenv import load_dotenv
 
-from tools.definitions import TOOLS
+from tools.definitions import TOOLS, filter_tools
 from tools.executor import execute_tool
 from router import (route, is_cloud_available, is_cloud_available_sync,
                     get_gpu_utilization, get_vram_free_mb, classify_complexity,
@@ -27,7 +27,12 @@ from router import (route, is_cloud_available, is_cloud_available_sync,
                     check_model_exists, init_budget_from_db)
 from anthropic_client import stream_chat as anthropic_stream
 from persistence import (init_db, load_history, save_history_pair,
-                         clear_history as db_clear_history, trim_history)
+                         clear_history as db_clear_history, trim_history,
+                         save_reasoning_trace, find_similar_traces, prune_old_traces,
+                         _serialize_embedding,
+                         save_quality_score, save_routing_feedback,
+                         save_knowledge_gap, get_unresolved_gaps, resolve_knowledge_gap,
+                         get_routing_stats)
 
 load_dotenv()
 psutil.cpu_percent(interval=0.1)
@@ -158,8 +163,12 @@ HISTORY_MAX_TURNS = int(os.getenv("CONVERSATION_HISTORY_MAX", "10"))
 _conversation_history: list[dict] = []
 
 
-def _append_to_history(user_message: str, assistant_response: str):
-    """Store a clean user-assistant exchange. Skip if either is empty."""
+def _append_to_history(user_message: str, assistant_response: str,
+                       chat_metadata: dict = None):
+    """
+    Store a clean user-assistant exchange. Skip if either is empty.
+    Optional chat_metadata: {tier, domain, tool_calls, tool_results, react_used, model, latency_ms}
+    """
     global _last_chat_end
     _last_chat_end = _time.time()
     if not user_message.strip() or not assistant_response.strip():
@@ -175,17 +184,160 @@ def _append_to_history(user_message: str, assistant_response: str):
         trim_history(HISTORY_MAX_TURNS)
     except Exception as e:
         logger.warning(f"Failed to persist history: {e}")
-    # Auto-capture good exchanges for training data
+
+    # ── Quality scoring + smart capture ──
+    metadata = chat_metadata or {}
+    quality_result = None
+    try:
+        from quality import score_response
+        quality_result = score_response(user_message, assistant_response, metadata)
+        # Persist quality score
+        save_quality_score(
+            query_text=user_message,
+            response_preview=assistant_response[:200],
+            score=quality_result["score"],
+            signals_json=json.dumps(quality_result["signals"]),
+            tier=metadata.get("tier", 1),
+            domain=metadata.get("domain", "general"),
+        )
+    except Exception as e:
+        logger.debug(f"Quality scoring failed: {e}")
+
+    # ── Routing feedback ──
+    if metadata.get("model") and quality_result:
+        try:
+            import hashlib
+            qhash = hashlib.md5(user_message.strip().lower().encode()).hexdigest()
+            save_routing_feedback(
+                query_hash=qhash,
+                classified_tier=metadata.get("tier", 1),
+                actual_model=metadata.get("model", ""),
+                domain=metadata.get("domain", "general"),
+                quality_score=quality_result["score"],
+                latency_ms=metadata.get("latency_ms", 0),
+                tool_calls_count=len(metadata.get("tool_calls", [])),
+            )
+        except Exception as e:
+            logger.debug(f"Routing feedback save failed: {e}")
+
+    # ── Knowledge gap detection ──
+    if quality_result and quality_result["score"] < 0.3:
+        try:
+            save_knowledge_gap(
+                query_text=user_message,
+                domain=metadata.get("domain", "general"),
+                quality_score=quality_result["score"],
+                gap_type="low_quality",
+            )
+        except Exception:
+            pass
+
+    # ── Smart auto-capture (replaces basic auto_capture) ──
     if TRAINING_AVAILABLE:
         try:
-            auto_capture("e3n-auto", user_message, assistant_response)
+            from training import smart_auto_capture
+            smart_auto_capture(
+                "e3n-auto", user_message, assistant_response,
+                quality_score=quality_result["score"] if quality_result else 0.5,
+                metadata=metadata,
+            )
         except Exception:
-            pass  # never break chat for training
+            # Fall back to basic auto_capture
+            try:
+                auto_capture("e3n-auto", user_message, assistant_response)
+            except Exception:
+                pass
 
 
 def _get_history() -> list[dict]:
     """Return a copy of conversation history for injection into message arrays."""
     return list(_conversation_history)
+
+
+# ── SMART HISTORY COMPRESSION ────────────────────────────────────────────
+_SMART_HISTORY_ENABLED = os.getenv("SMART_HISTORY_ENABLED", "true").lower() in ("true", "1", "yes")
+
+
+def _compress_turn(content: str) -> str:
+    """
+    Compress a conversation turn to key information.
+    Extracts sentences with numbers, proper nouns, or conclusions.
+    """
+    import re as _re
+    sentences = _re.split(r'[.!?]\s+', content)
+    key_sentences = []
+    for s in sentences:
+        s = s.strip()
+        if not s or len(s) < 10:
+            continue
+        # Keep sentences with numbers, units, or technical terms
+        has_numbers = bool(_re.search(r'\d+\.?\d*\s*(?:MB|GB|ms|s|°C|%|rpm|kg|N|Pa)', s))
+        has_code = '`' in s or '```' in s
+        has_conclusion = any(w in s.lower() for w in [
+            "result", "therefore", "conclusion", "answer", "solution",
+            "should", "recommend", "optimal", "best",
+        ])
+        if has_numbers or has_code or has_conclusion:
+            key_sentences.append(s)
+
+    if key_sentences:
+        return ". ".join(key_sentences[:3]) + "."
+    # Fallback: first 100 chars
+    return content[:100] + "..." if len(content) > 100 else content
+
+
+def _summarize_turn(content: str) -> str:
+    """One-line summary of a conversation turn."""
+    # Extract the first meaningful sentence
+    content = content.strip()
+    first_sentence = content.split('.')[0].split('?')[0].split('!')[0]
+    if len(first_sentence) > 80:
+        first_sentence = first_sentence[:77] + "..."
+    return first_sentence
+
+
+def _get_smart_history(max_tokens: int = None) -> list[dict]:
+    """
+    Return conversation history with intelligent compression.
+    - Last 3 turns: full content
+    - Turns 4-7: compressed to key facts
+    - Turns 8-10: one-line summaries
+    """
+    if not _SMART_HISTORY_ENABLED:
+        return list(_conversation_history)
+
+    history = list(_conversation_history)
+    if len(history) <= 6:  # 3 turns = 6 messages
+        return history
+
+    result = []
+    n_msgs = len(history)
+    n_turns = n_msgs // 2
+
+    for i in range(0, n_msgs, 2):
+        turn_idx = i // 2  # 0-based turn index
+        turns_from_end = n_turns - turn_idx
+
+        user_msg = history[i]
+        assistant_msg = history[i + 1] if i + 1 < n_msgs else None
+
+        if turns_from_end <= 3:
+            # Recent: keep full
+            result.append(user_msg)
+            if assistant_msg:
+                result.append(assistant_msg)
+        elif turns_from_end <= 7:
+            # Middle: compress
+            result.append({"role": "user", "content": _compress_turn(user_msg["content"])})
+            if assistant_msg:
+                result.append({"role": "assistant", "content": _compress_turn(assistant_msg["content"])})
+        else:
+            # Old: summarize
+            result.append({"role": "user", "content": _summarize_turn(user_msg["content"])})
+            if assistant_msg:
+                result.append({"role": "assistant", "content": _summarize_turn(assistant_msg["content"])})
+
+    return result
 
 
 async def _try_ollama_inference(client: httpx.AsyncClient, model: str,
@@ -287,11 +439,14 @@ async def _inference_with_emergency_fallback(
 _REACT_MAX_ITERATIONS = int(os.getenv("REACT_MAX_ITERATIONS", "3"))
 _REACT_ENABLED = os.getenv("REACT_ENABLED", "true").lower() in ("true", "1", "yes")
 
+_REACT_ALLOW_CLARIFY = os.getenv("REACT_ALLOW_CLARIFY", "true").lower() in ("true", "1", "yes")
+
 _REACT_SYSTEM_PROMPT = """You are in structured reasoning mode. For each step:
 
 THINK: State what you need to figure out or what information you're missing.
 ACT: Call a tool to gather information, calculate, or look something up. If no tool is needed, write ACT: none.
 OBSERVE: Analyze the result you got back.
+CONFIDENCE: Rate your confidence: HIGH (>80%), MEDIUM (50-80%), LOW (<50%).
 
 After sufficient information is gathered (max {max_iter} iterations), provide your final answer.
 
@@ -299,8 +454,14 @@ Format your response EXACTLY as:
 THINK: [your reasoning]
 ACT: [tool call or "none"]
 OBSERVE: [analysis of results]
+CONFIDENCE: [HIGH/MEDIUM/LOW]
 
-When you have enough information to answer, start with:
+Confidence protocol:
+- HIGH: You have enough information. Proceed to FINAL.
+- MEDIUM after 2+ iterations: Provide your best answer with [CONFIDENCE: MEDIUM] and note what additional info would help.
+- LOW: Use ACT to gather more data, or write CLARIFY: [question for the operator] if you need input.
+
+When ready to answer:
 FINAL: [your complete answer]"""
 
 
@@ -328,12 +489,34 @@ async def _react_reasoning_loop(client, model: str, user_message: str,
     """
     events = []  # list of dicts for streaming to frontend
 
+    # ── Retrieve similar past reasoning traces ──
+    prior_context = ""
+    if os.getenv("REASONING_TRACE_ENABLED", "true").lower() in ("true", "1", "yes"):
+        try:
+            from memory import get_embeddings
+            query_emb = get_embeddings([user_message])[0]
+            query_emb_bytes = _serialize_embedding(query_emb)
+            similar = find_similar_traces(query_emb_bytes, n=3)
+            if similar:
+                parts = ["[PRIOR REASONING — similar problems you solved before]"]
+                for trace in similar:
+                    parts.append(
+                        f"Query: {trace['query_text'][:100]}\n"
+                        f"Domain: {trace['domain']}\n"
+                        f"Tools used: {trace['tool_sequence']}\n"
+                        f"Result: {trace['final_summary']}"
+                    )
+                parts.append("[END PRIOR REASONING]\n")
+                prior_context = "\n\n".join(parts)
+        except Exception as e:
+            logger.debug(f"Trace retrieval failed: {e}")
+
     react_system = _REACT_SYSTEM_PROMPT.format(max_iter=_REACT_MAX_ITERATIONS)
     context_prefix = f"{rag_context}\n" if rag_context else ""
 
     messages = history + [
         {"role": "system", "content": react_system},
-        {"role": "user", "content": f"{context_prefix}{user_message}"},
+        {"role": "user", "content": f"{prior_context}{context_prefix}{user_message}"},
     ]
 
     for iteration in range(_REACT_MAX_ITERATIONS):
@@ -348,10 +531,28 @@ async def _react_reasoning_loop(client, model: str, user_message: str,
         content = msg.get("content", "")
         tool_calls = msg.get("tool_calls")
 
+        # Extract confidence level if present
+        confidence = "unknown"
+        if "CONFIDENCE: HIGH" in content:
+            confidence = "high"
+        elif "CONFIDENCE: MEDIUM" in content:
+            confidence = "medium"
+        elif "CONFIDENCE: LOW" in content:
+            confidence = "low"
+
         # Check if model reached a FINAL answer
         if "FINAL:" in content:
             final_text = content.split("FINAL:", 1)[1].strip()
+            _save_react_trace(user_message, final_text, content, events, confidence=confidence)
             return final_text, events
+
+        # Check if model needs clarification from user
+        if "CLARIFY:" in content and _REACT_ALLOW_CLARIFY:
+            clarify_text = content.split("CLARIFY:", 1)[1].strip()
+            events.append({"t": "clarify", "c": clarify_text})
+            # Return clarification request — frontend will handle user input
+            _save_react_trace(user_message, "", content, events, confidence=confidence, success=False)
+            return f"[CONFIDENCE: LOW] I need more information: {clarify_text}", events
 
         # Process tool calls if any
         if tool_calls:
@@ -381,9 +582,38 @@ async def _react_reasoning_loop(client, model: str, user_message: str,
     if content:
         # Try to find any FINAL or just use the last content
         if "FINAL:" in content:
-            return content.split("FINAL:", 1)[1].strip(), events
+            final_text = content.split("FINAL:", 1)[1].strip()
+            _save_react_trace(user_message, final_text, content, events)
+            return final_text, events
+        _save_react_trace(user_message, content, content, events)
         return content, events
+    _save_react_trace(user_message, "Reasoning loop completed without a clear answer.", content or "", events)
     return "Reasoning loop completed without a clear answer.", events
+
+
+def _save_react_trace(user_message: str, final_text: str, content: str, events: list,
+                       confidence: str = "unknown", success: bool = None):
+    """Save a reasoning trace after a ReAct loop completes."""
+    if os.getenv("REASONING_TRACE_ENABLED", "true").lower() not in ("true", "1", "yes"):
+        return
+    try:
+        from memory import get_embeddings
+        query_emb = get_embeddings([user_message])[0]
+        query_emb_bytes = _serialize_embedding(query_emb)
+        tool_seq = ",".join(ev.get("n", "") for ev in events if ev.get("t") == "tool")
+        was_success = success if success is not None else ("FINAL:" in (content or "") or bool(final_text))
+        save_reasoning_trace(
+            query_text=user_message,
+            domain=None,
+            steps_json=json.dumps(events),
+            final_summary=final_text[:500] if final_text else "",
+            tool_sequence=tool_seq,
+            success=was_success,
+            confidence=confidence,
+            embedding=query_emb_bytes,
+        )
+    except Exception as e:
+        logger.debug(f"Trace save failed: {e}")
 
 
 async def _backup_health_loop():
@@ -730,6 +960,16 @@ async def _resource_manager_loop():
             if RAG_AVAILABLE:
                 try:
                     cleanup_expired()
+                except Exception:
+                    pass
+
+            # ── 7. REASONING TRACE PRUNING (every ~30 min) ──
+            if int(now) % 1800 < _RESOURCE_CHECK_INTERVAL:
+                try:
+                    prune_old_traces(
+                        max_age_days=30,
+                        max_count=int(os.getenv("REASONING_TRACE_MAX", "500"))
+                    )
                 except Exception:
                     pass
 
@@ -1595,7 +1835,20 @@ async def chat(req: ChatRequest):
     else:
         user_content = f"{voice_prefix}{req.message}" if voice_prefix else req.message
 
-    messages = _get_history() + [{"role": "user", "content": user_content}]
+    messages = _get_smart_history(max_tokens=decision.num_ctx) + [{"role": "user", "content": user_content}]
+
+    # Filter tools based on query domain and complexity
+    relevant_tools = filter_tools(TOOLS, domain=decision.adapter_domain,
+                                  tier=decision.tier, category=decision.query_category,
+                                  query=req.message)
+
+    # Track metadata for quality scoring and routing feedback
+    _chat_metadata = {
+        "tier": decision.tier, "domain": decision.adapter_domain or "general",
+        "model": decision.model, "tool_calls": [], "tool_results": [],
+        "react_used": False,
+    }
+    _chat_start_time = _time.time()
 
     async def stream_local():
         nonlocal messages
@@ -1608,17 +1861,24 @@ async def chat(req: ChatRequest):
 
         # ── ReAct reasoning path for complex local queries ──
         if _is_react_eligible(decision):
+            _chat_metadata["react_used"] = True
             yield json.dumps({"t": "react", "c": "Entering structured reasoning mode..."}) + "\n"
             async with httpx.AsyncClient(timeout=120) as react_client:
                 final_text, tool_events = await _react_reasoning_loop(
                     react_client, decision.model, req.message,
-                    rag_context, _get_history(), TOOLS, execute_tool,
+                    rag_context, _get_smart_history(max_tokens=decision.num_ctx),
+                    relevant_tools, execute_tool,
                     num_gpu=decision.num_gpu, num_ctx=decision.num_ctx
                 )
                 for ev in tool_events:
                     yield json.dumps(ev) + "\n"
+                    if ev.get("t") == "tool":
+                        _chat_metadata["tool_calls"].append(ev.get("n", ""))
+                    if ev.get("t") == "result":
+                        _chat_metadata["tool_results"].append({"name": ev.get("n", ""), "success": True})
                 yield json.dumps({"t": "text", "c": final_text}) + "\n"
-                _append_to_history(req.message, final_text)
+                _chat_metadata["latency_ms"] = (_time.time() - _chat_start_time) * 1000
+                _append_to_history(req.message, final_text, chat_metadata=_chat_metadata)
                 yield json.dumps({"t": "done", "turns": len(_conversation_history) // 2}) + "\n"
             return
 
@@ -2076,6 +2336,55 @@ def cold_memory_stats():
         return get_cold_stats()
     except Exception as e:
         return {"error": str(e)}
+
+
+# ── KNOWLEDGE GAP ENDPOINTS ───────────────────────────────────────────
+
+@app.get("/knowledge/gaps")
+def knowledge_gaps():
+    """Get unresolved knowledge gaps."""
+    try:
+        gaps = get_unresolved_gaps(limit=50)
+        return {"gaps": gaps, "count": len(gaps)}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/knowledge/gaps/{gap_id}/resolve")
+def resolve_gap(gap_id: int):
+    """Mark a knowledge gap as resolved."""
+    try:
+        resolve_knowledge_gap(gap_id)
+        return {"status": "ok", "resolved": gap_id}
+    except Exception as e:
+        return {"status": "error", "reason": str(e)}
+
+
+# ── TRAINING INTELLIGENCE ENDPOINTS ──────────────────────────────────
+
+@app.get("/training/weaknesses")
+def training_weaknesses():
+    """Identify domains where E3N performs poorly."""
+    if not TRAINING_AVAILABLE:
+        return {"error": "Training not available"}
+    try:
+        from training import identify_weak_domains
+        return {"weaknesses": identify_weak_domains()}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/training/improve/{domain}")
+async def training_improve(domain: str):
+    """Trigger an improvement cycle for a weak domain."""
+    if not TRAINING_AVAILABLE:
+        return {"error": "Training not available"}
+    try:
+        from training import run_improvement_cycle
+        result = await asyncio.to_thread(run_improvement_cycle, domain)
+        return result
+    except Exception as e:
+        return {"status": "error", "reason": str(e)}
 
 
 # ── WEBSOCKET ALERTS ─────────────────────────────────────────────────

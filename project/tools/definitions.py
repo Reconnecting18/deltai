@@ -451,3 +451,103 @@ if _TELEMETRY_API_URL:
     # Update TOOL_MAP
     for t in TELEMETRY_TOOLS:
         TOOL_MAP[t["function"]["name"]] = t
+
+
+# ── TOOL RELEVANCE FILTERING ────────────────────────────────────────────
+# Pre-filter tools by query domain to improve model tool selection accuracy
+# and reduce prompt token usage (~1000 tokens saved per call).
+
+# Telemetry tool names (may or may not be loaded)
+_TELEMETRY_TOOL_NAMES = {"get_session_status", "get_lap_summary",
+                          "get_tire_status", "get_strategy_recommendation"}
+
+# Universal tools always included
+_UNIVERSAL_TOOLS = {"search_knowledge", "calculate"}
+
+# Domain-specific tool sets
+TOOL_DOMAIN_MAP = {
+    "racing": {"search_knowledge", "calculate", "solve_math", "lookup_reference",
+               "get_system_info", "summarize_data"} | _TELEMETRY_TOOL_NAMES,
+    "engineering": {"calculate", "solve_math", "lookup_reference", "search_knowledge",
+                    "read_file", "summarize_data", "get_system_info"},
+    "reasoning": {"search_knowledge", "calculate", "solve_math", "summarize_data",
+                  "read_file", "lookup_reference"},
+    "system": {"read_file", "write_file", "list_directory", "run_powershell",
+               "get_system_info", "memory_stats", "self_diagnostics",
+               "manage_ollama_models", "repair_subsystem", "resource_status"},
+    "diagnostics": {"self_diagnostics", "manage_ollama_models", "repair_subsystem",
+                    "resource_status", "get_system_info", "memory_stats"},
+}
+
+# Patterns that indicate system/diagnostic queries
+import re as _re
+_SYSTEM_PATTERNS = _re.compile(
+    r'\b(file|folder|directory|path|powershell|command|process|disk|'
+    r'read|write|create|delete|list|open)\b', _re.IGNORECASE)
+_DIAG_PATTERNS = _re.compile(
+    r'\b(diagnostic|health|status|repair|fix|restart|ollama|model|vram|'
+    r'gpu|subsystem|watcher|circuit.breaker)\b', _re.IGNORECASE)
+
+
+def filter_tools(tools: list, domain: str | None = None, tier: int = 1,
+                 category: str = "general", query: str = "") -> list:
+    """
+    Filter the tool list to the most relevant subset for the current query.
+
+    Args:
+        tools: Full tool list (TOOLS)
+        domain: Adapter domain (racing/engineering/reasoning/None)
+        tier: Complexity tier (1/2/3)
+        category: Query category from router (general/telemetry_*)
+        query: Raw query text for pattern matching
+
+    Returns:
+        Filtered tool list (subset of tools). Falls back to full list if
+        no domain match or if result would be empty.
+    """
+    # Determine which tool names are relevant
+    relevant_names = set(_UNIVERSAL_TOOLS)
+
+    # Check for system/diagnostic queries by pattern
+    if _SYSTEM_PATTERNS.search(query):
+        relevant_names |= TOOL_DOMAIN_MAP.get("system", set())
+    if _DIAG_PATTERNS.search(query):
+        relevant_names |= TOOL_DOMAIN_MAP.get("diagnostics", set())
+
+    # Add domain-specific tools
+    if domain and domain in TOOL_DOMAIN_MAP:
+        relevant_names |= TOOL_DOMAIN_MAP[domain]
+
+    # Telemetry category → include telemetry tools
+    if category and category.startswith("telemetry_"):
+        relevant_names |= _TELEMETRY_TOOL_NAMES
+
+    # If no specific domain matched, include a broad set
+    if not domain and not _SYSTEM_PATTERNS.search(query) and not _DIAG_PATTERNS.search(query):
+        # General query: include common tools but skip diagnostics
+        relevant_names = {"search_knowledge", "calculate", "solve_math",
+                         "lookup_reference", "summarize_data", "read_file",
+                         "get_system_info", "web_search"}
+
+    # Always include web_search for non-system queries
+    if domain != "system":
+        relevant_names.add("web_search")
+
+    # Tier 1 (simple): cap at 6 tools to keep prompt short
+    if tier <= 1 and len(relevant_names) > 6:
+        # Prioritize: universal + domain-specific, drop less common
+        priority = list(_UNIVERSAL_TOOLS)
+        for name in relevant_names:
+            if name not in _UNIVERSAL_TOOLS and len(priority) < 6:
+                priority.append(name)
+        relevant_names = set(priority)
+
+    # Filter the actual tool list
+    filtered = [t for t in tools
+                if t.get("function", t).get("name") in relevant_names]
+
+    # Safety: never return empty — fall back to full list
+    if not filtered:
+        return tools
+
+    return filtered
