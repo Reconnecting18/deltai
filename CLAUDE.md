@@ -93,6 +93,8 @@ E3N does NOT directly process telemetry, UDP packets, or game data. Instead:
 | `project/tests/verify_distill.py` | 34-test distillation suite — config validation, teacher generation, blending, retention, distill mode integration, override parameters |
 | `app/main.js` | Electron main process |
 | `tools/llama.cpp/` | GGUF conversion toolchain — `convert_hf_to_gguf.py` + `build/bin/Release/llama-quantize.exe` |
+| `scripts/backup_s3.py` | S3 nightly backup — full backup, incremental (MD5 skip), restore, retention cleanup |
+| `scripts/setup_backup_task.ps1` | Windows Task Scheduler registration for nightly backup at 3 AM |
 
 ## How to Start
 ```powershell
@@ -131,6 +133,49 @@ JSON lines from `/chat`:
 - **pynvml warning:** Cosmetic FutureWarning, ignore it.
 - **Ollama KEEP_ALIVE:** Models stay in VRAM 5min. Can tune with `OLLAMA_KEEP_ALIVE=2m`.
 - **E3N boundary:** Never add domain-specific data processing (telemetry, game parsers, etc.) inside E3N. External services push data in via /ingest.
+
+## Development Workflow (IMPORTANT — follow on every feature/fix)
+After completing any feature, bug fix, or significant change, you MUST do ALL of the following before considering the task done:
+
+### 1. GitHub Issues
+- If the work corresponds to an existing GitHub issue, **close it** with a comment describing what was done: `gh issue close <N> --comment "..."`
+- If implementing a new feature that doesn't have an issue, **create one first** with `gh issue create`, then close it when done.
+- The repo is at `Reconnecting18/e3n`. The `gh` CLI is authenticated via keyring.
+
+### 2. Update CLAUDE.md
+- Update **every relevant section** of this file to reflect the changes: Architecture, Key Files, Current Status, Build Phases, Known Issues, feature-specific sections, env config blocks, etc.
+- Add new sections for major new features.
+- Keep the Current Status list up to date — mark new items as DONE.
+- This file is the primary context for future AI sessions. If it's stale, future sessions will make incorrect assumptions.
+
+### 3. Update README.md
+- Update the README to reflect any user-facing changes: new features, new endpoints, new configuration, new scripts, changed project structure.
+- The README should be high-quality and comprehensive — it's what people see on GitHub.
+- Update the Build Phases table, API Endpoints tables, Project Structure tree, and feature descriptions as needed.
+
+### 4. Commit and Push
+- Stage only the relevant files (not `.env`, credentials, or data files).
+- Write a clear commit message following the existing convention: `feat:`, `fix:`, `refactor:`, `docs:`.
+- Include `Closes #N` for any issues being closed.
+- Push to `origin main`.
+- The commit message must end with:
+  ```
+  Co-Authored-By: Claude <co-author> <noreply@anthropic.com>
+  ```
+
+### Example Workflow
+```
+1. Implement the feature in code
+2. gh issue create --title "feat: ..." --body "..."   (if no issue exists)
+3. Edit CLAUDE.md — update all relevant sections
+4. Edit README.md — update user-facing docs
+5. git add <files>
+6. git commit -m "feat: ... Closes #N ..."
+7. git push origin main
+8. gh issue close N --comment "Implemented in ..."
+```
+
+This ensures the repo, docs, and project board stay in sync across sessions.
 
 ## VRAM-Aware Model Tiers
 | Tier | VRAM Free | Model | Ollama Name | Notes |
@@ -675,6 +720,26 @@ INGEST_FLUSH_INTERVAL=2.0
 INGEST_FLUSH_BATCH_SIZE=10
 ```
 
+## S3 Nightly Backup
+Automated backup of E3N's persistent data to AWS S3 with incremental uploads and retention.
+
+- **Script:** `scripts/backup_s3.py` — full backup, dry-run, restore, list backups
+- **Scheduler:** `scripts/setup_backup_task.ps1` — registers Windows Task Scheduler job at 3 AM daily
+- **Incremental:** MD5 hash comparison — skips files that haven't changed since last backup
+- **Retention:** Auto-deletes backups older than `E3N_S3_RETENTION` days (default 30)
+- **What's backed up:** `data/chromadb/`, `data/sqlite/`, `data/knowledge/`, `data/training/`, `data/cold_memory.db`
+- **Max file size:** 500MB per file (skips large GGUF exports)
+- **Restore:** `python scripts/backup_s3.py --restore 2026-03-24` — downloads all files back to `C:\e3n\data\`
+
+**Config (env vars):**
+```
+E3N_S3_BUCKET=your-bucket-name   # required
+E3N_S3_PREFIX=e3n-backups
+E3N_S3_REGION=us-east-1
+E3N_S3_RETENTION=30              # days (0 = keep forever)
+E3N_DATA_PATH=C:\e3n\data
+```
+
 ## Current Status
 - Phase 1-4 complete (dashboard, RAG, tools, router, cloud client, split workload, budget, voice, training)
 - Phase 5 complete (telemetry prep — all 11 issues implemented, verified 50/50, debugged)
@@ -725,6 +790,7 @@ INGEST_FLUSH_BATCH_SIZE=10
 - Mixture-of-LoRA routing: DONE (domain-specific adapter selection via resolve_adapter_model, default off)
 - Hierarchical memory: DONE (hot/warm/cold tiers, SQLite cold storage with zlib compression, background compaction)
 - Streaming async ingest: DONE (queue-based batching, non-blocking /ingest, backpressure at 500 items, metrics endpoint)
+- S3 nightly backup: DONE (scripts/backup_s3.py, Task Scheduler setup, incremental MD5, restore, 30-day retention)
 - Future (separate projects): Telemetry API for LMU
 
 ## Build Phases

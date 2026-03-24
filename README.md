@@ -285,6 +285,9 @@ C:\e3n\
 │   ├── sqlite\                   Persistent state (not committed)
 │   ├── knowledge\                Drop files here for RAG ingestion
 │   └── training\                 Datasets, adapters, GGUF exports, eval results
+├── scripts\
+│   ├── backup_s3.py              S3 backup — full/incremental/restore
+│   └── setup_backup_task.ps1     Windows Task Scheduler registration
 ├── tools\
 │   └── llama.cpp\                GGUF conversion toolchain
 └── CLAUDE.md                     Full project context for AI sessions
@@ -389,6 +392,73 @@ Tactical operations center aesthetic with a muted grey-green palette. Features i
 - **Diagnostics panel**: Circuit breaker, VRAM prediction, self-heal status, resource action log
 - **Live widgets**: GPU/CPU/RAM stats with 60s sparklines
 - **WebSocket toasts**: Real-time alert notifications with priority coloring
+
+---
+
+## Backup & Restore
+
+Automated nightly backup of E3N's persistent data to AWS S3.
+
+### Setup
+
+```powershell
+# 1. Install boto3
+cd C:\e3n\project
+.\venv\Scripts\activate
+pip install boto3
+
+# 2. Configure AWS credentials
+aws configure
+# Or set environment variables:
+#   AWS_ACCESS_KEY_ID=...
+#   AWS_SECRET_ACCESS_KEY=...
+
+# 3. Set bucket name (system-wide)
+setx E3N_S3_BUCKET your-bucket-name /M
+
+# 4. Register nightly task (run as Administrator)
+powershell -ExecutionPolicy Bypass -File C:\e3n\scripts\setup_backup_task.ps1
+```
+
+### Manual Backup
+
+```powershell
+python scripts/backup_s3.py              # full backup
+python scripts/backup_s3.py --dry-run    # preview what would be uploaded
+python scripts/backup_s3.py --list       # list available backups
+```
+
+### Restore
+
+```powershell
+# List available backup dates
+python scripts/backup_s3.py --list
+
+# Restore from a specific date
+python scripts/backup_s3.py --restore 2026-03-24
+```
+
+This restores all files to `C:\e3n\data\` — ChromaDB, SQLite, knowledge base, training data, cold memory, and adapter registry. After restoring, restart the E3N backend to pick up the recovered data.
+
+### What Gets Backed Up
+
+| Directory/File | Contents |
+|----------------|----------|
+| `data/chromadb/` | Vector store (hot/warm RAG tiers) |
+| `data/sqlite/` | Conversation history, cloud budget |
+| `data/knowledge/` | Knowledge base documents |
+| `data/training/` | Datasets, adapters, GGUF exports, eval results |
+| `data/cold_memory.db` | Cold tier compressed archive |
+
+### Configuration
+
+| Env Var | Default | Description |
+|---------|---------|-------------|
+| `E3N_S3_BUCKET` | *(required)* | S3 bucket name |
+| `E3N_S3_PREFIX` | `e3n-backups` | Prefix inside bucket |
+| `E3N_S3_REGION` | `us-east-1` | AWS region |
+| `E3N_S3_RETENTION` | `30` | Days to keep old backups (0 = forever) |
+| `E3N_DATA_PATH` | `C:\e3n\data` | Path to data directory |
 
 ---
 
