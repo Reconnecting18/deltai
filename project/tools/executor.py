@@ -7,7 +7,6 @@ import os
 import subprocess
 import json
 import psutil
-import platform
 
 # ── SAFETY ──────────────────────────────────────────────────────────────
 PROTECTED_PATHS = [
@@ -382,6 +381,170 @@ def web_search(query: str, max_results=5) -> str:
         if "timeout" in str(e).lower() or "timed out" in str(e).lower():
             return "ERROR: Search timed out (10s limit). Try a simpler query."
         return f"ERROR: Web search failed: {e}"
+
+
+# ── COMPUTATION DELEGATION TOOLS ──────────────────────────────────────
+
+# Sandboxed builtins for calculate tool — math + statistics only, no I/O
+_CALC_SAFE_BUILTINS = {
+    "abs": abs, "round": round, "min": min, "max": max, "sum": sum,
+    "len": len, "pow": pow, "int": int, "float": float, "bool": bool,
+    "range": range, "list": list, "tuple": tuple, "sorted": sorted,
+    "enumerate": enumerate, "zip": zip, "map": map, "filter": filter,
+    "True": True, "False": False, "None": None,
+}
+
+
+def calculate(expression: str, description: str = None) -> str:
+    """Evaluate a mathematical expression in a sandboxed Python environment."""
+    try:
+        if not expression or not expression.strip():
+            return "ERROR: Empty expression"
+        expression = expression.strip()
+        if len(expression) > 500:
+            return "ERROR: Expression too long (max 500 chars)"
+
+        # Block dangerous patterns
+        _blocked = ["import ", "exec(", "eval(", "open(", "__", "os.", "sys.",
+                     "subprocess", "compile(", "globals(", "locals(",
+                     "getattr(", "setattr(", "delattr(", "dir(",
+                     "breakpoint(", "input(", "print("]
+        expr_lower = expression.lower()
+        for b in _blocked:
+            if b in expr_lower:
+                return f"ERROR: Blocked operation in expression: {b.strip()}"
+
+        import math
+        import statistics
+
+        safe_globals = {"__builtins__": _CALC_SAFE_BUILTINS, "math": math, "statistics": statistics}
+        result = eval(expression, safe_globals)
+
+        desc = f" ({description})" if description else ""
+        if isinstance(result, float):
+            # Smart formatting: avoid excessive decimals
+            if result == int(result) and abs(result) < 1e15:
+                return f"= {int(result)}{desc}"
+            return f"= {result:.6g}{desc}"
+        return f"= {result}{desc}"
+    except ZeroDivisionError:
+        return "ERROR: Division by zero"
+    except Exception as e:
+        return f"ERROR: {e}"
+
+
+def summarize_data(data: str, focus: str = "all") -> str:
+    """Summarize structured data into key statistics."""
+    try:
+        if not data or not data.strip():
+            return "ERROR: Empty data"
+        if len(data) > 50000:
+            return "ERROR: Data too large (max 50000 chars)"
+
+        focus = (focus or "all").lower().strip()
+        import statistics
+        import re
+
+        # Try to extract numbers from the data
+        numbers = []
+
+        # Try JSON first
+        try:
+            parsed = json.loads(data)
+            if isinstance(parsed, list):
+                for item in parsed:
+                    if isinstance(item, (int, float)):
+                        numbers.append(float(item))
+                    elif isinstance(item, dict):
+                        for v in item.values():
+                            if isinstance(v, (int, float)):
+                                numbers.append(float(v))
+            elif isinstance(parsed, dict):
+                for v in parsed.values():
+                    if isinstance(v, (int, float)):
+                        numbers.append(float(v))
+                    elif isinstance(v, list):
+                        for item in v:
+                            if isinstance(item, (int, float)):
+                                numbers.append(float(item))
+        except (json.JSONDecodeError, TypeError):
+            # Fall back to regex number extraction
+            number_matches = re.findall(r'-?\d+\.?\d*', data)
+            numbers = [float(n) for n in number_matches if abs(float(n)) < 1e15]
+
+        if not numbers:
+            # Text summary: word/line count
+            lines = data.strip().split('\n')
+            words = data.split()
+            return f"Text data: {len(lines)} lines, {len(words)} words, {len(data)} chars. No numeric data found."
+
+        lines = [f"DATA SUMMARY ({len(numbers)} values)", "=" * 35]
+
+        # Basic stats (always included)
+        lines.append(f"Count:  {len(numbers)}")
+        lines.append(f"Min:    {min(numbers):.4g}")
+        lines.append(f"Max:    {max(numbers):.4g}")
+        lines.append(f"Range:  {max(numbers) - min(numbers):.4g}")
+
+        if len(numbers) >= 2:
+            mean = statistics.mean(numbers)
+            median = statistics.median(numbers)
+            stdev = statistics.stdev(numbers) if len(numbers) >= 2 else 0
+            lines.append(f"Mean:   {mean:.4g}")
+            lines.append(f"Median: {median:.4g}")
+            lines.append(f"Stdev:  {stdev:.4g}")
+
+            if focus in ("all", "distribution"):
+                q1 = statistics.quantiles(numbers, n=4)[0] if len(numbers) >= 4 else min(numbers)
+                q3 = statistics.quantiles(numbers, n=4)[2] if len(numbers) >= 4 else max(numbers)
+                lines.append(f"Q1:     {q1:.4g}")
+                lines.append(f"Q3:     {q3:.4g}")
+
+            if focus in ("all", "outliers") and stdev > 0:
+                outliers = [n for n in numbers if abs(n - mean) > 2 * stdev]
+                if outliers:
+                    lines.append(f"\nOutliers (>2σ): {len(outliers)} — {[round(o, 4) for o in outliers[:5]]}")
+                else:
+                    lines.append("\nOutliers: none (all within 2σ)")
+
+            if focus in ("all", "trends") and len(numbers) >= 3:
+                # Simple trend: compare first third vs last third
+                third = max(1, len(numbers) // 3)
+                first_avg = statistics.mean(numbers[:third])
+                last_avg = statistics.mean(numbers[-third:])
+                if first_avg != 0:
+                    change_pct = ((last_avg - first_avg) / abs(first_avg)) * 100
+                    direction = "increasing" if change_pct > 5 else "decreasing" if change_pct < -5 else "stable"
+                    lines.append(f"\nTrend: {direction} ({change_pct:+.1f}% first→last third)")
+                else:
+                    lines.append(f"\nTrend: first={first_avg:.4g}, last={last_avg:.4g}")
+
+        return "\n".join(lines)
+    except Exception as e:
+        return f"ERROR: {e}"
+
+
+def lookup_reference(query: str) -> str:
+    """Quick formula/constant lookup from knowledge base — top 1-2 most relevant chunks."""
+    try:
+        if not query or not query.strip():
+            return "ERROR: Empty query"
+        from memory import query_knowledge
+        # Use lower threshold (0.6) for more targeted results, fewer results
+        matches = query_knowledge(query.strip(), n_results=2)
+        if not matches:
+            return f"No reference found for: {query}. Try search_knowledge for broader results."
+        lines = [f"REFERENCE: {query}", "-" * 35]
+        for i, m in enumerate(matches, 1):
+            lines.append(f"[{m['source']}] (relevance: {1 - m['distance']:.0%})")
+            lines.append(m["text"])
+            if i < len(matches):
+                lines.append("")
+        return "\n".join(lines)
+    except ImportError:
+        return "ERROR: Memory system not available (chromadb not installed)"
+    except Exception as e:
+        return f"ERROR: {e}"
 
 
 # ── TELEMETRY TOOLS (conditional) ─────────────────────────────────────
@@ -988,6 +1151,84 @@ def resource_status() -> str:
     return "\n".join(lines)
 
 
+# ── ADAPTER SURGERY TOOL ────────────────────────────────────────────────
+
+def manage_adapters(action: str, domain: str = None,
+                    adapter_name: str = None, dataset: str = None) -> str:
+    """Manage E3N's augmentation slot adapters."""
+    try:
+        from training import (list_adapters, get_active_adapters, start_domain_training,
+                              merge_adapters, set_active_adapter, update_adapter,
+                              get_adapter, rollback_adapter, ADAPTER_DOMAINS)
+    except ImportError:
+        return "ERROR: Training module not available"
+
+    if action == "status":
+        lines = ["ADAPTER AUGMENTATION SLOTS", "=" * 40]
+        active = get_active_adapters()
+        for d in ADAPTER_DOMAINS:
+            active_name = active.get(d, None)
+            adapters = list_adapters(domain=d)
+            lines.append(f"\n[{d.upper()}] Active: {active_name or 'none'}")
+            if adapters:
+                for a in adapters:
+                    status_mark = " ★" if a["name"] == active_name else ""
+                    score = f" (score: {a['eval_score']})" if a.get("eval_score") else ""
+                    lines.append(f"  {a['name']} v{a['version']} — "
+                                 f"{a['examples_used']} examples, "
+                                 f"r={a.get('lora_r', '?')}, "
+                                 f"freeze={a.get('frozen_layers', 0)}"
+                                 f"{score}{status_mark}")
+            else:
+                lines.append("  (no adapters trained)")
+        return "\n".join(lines)
+
+    elif action == "train":
+        if not domain:
+            return f"ERROR: domain required for training. Valid: {ADAPTER_DOMAINS}"
+        result = start_domain_training(domain=domain, dataset_name=dataset)
+        if result.get("status") == "error":
+            return f"ERROR: {result['reason']}"
+        return (f"Domain training started: {result['adapter_name']}\n"
+                f"Domain: {result['domain']} v{result['version']}\n"
+                f"Dataset: {result['dataset']}\n"
+                f"Frozen layers: {result['frozen_layers']}\n"
+                f"LoRA rank: {result['lora_r']}")
+
+    elif action == "merge":
+        result = merge_adapters()
+        if result.get("status") == "error":
+            return f"ERROR: {result['reason']}"
+        return (f"Merge complete: {result['output_model']}\n"
+                f"Method: {result['method']} (density={result['density']})\n"
+                f"Adapters merged: {', '.join(result['adapters_merged'])}")
+
+    elif action == "promote":
+        if not adapter_name:
+            return "ERROR: adapter_name required for promote"
+        info = get_adapter(adapter_name)
+        if not info:
+            return f"ERROR: Adapter not found: {adapter_name}"
+        domain = info.get("domain")
+        result = set_active_adapter(domain, adapter_name)
+        if result.get("status") == "ok":
+            update_adapter(adapter_name, promoted=True)
+            return f"Promoted {adapter_name} to active slot for domain: {domain}"
+        return f"ERROR: {result.get('reason', 'unknown')}"
+
+    elif action == "rollback":
+        if not domain:
+            return f"ERROR: domain required for rollback. Valid: {ADAPTER_DOMAINS}"
+        result = rollback_adapter(domain)
+        if result.get("status") == "error":
+            return f"ERROR: {result['reason']}"
+        return (f"Rolled back {domain}: {result.get('previous', 'none')} → "
+                f"{result['rolled_back_to']}")
+
+    else:
+        return f"ERROR: Unknown action '{action}'. Valid: status, train, merge, promote, rollback"
+
+
 # ── DISPATCH ────────────────────────────────────────────────────────────
 
 EXECUTORS = {
@@ -999,10 +1240,14 @@ EXECUTORS = {
     "search_knowledge": search_knowledge,
     "memory_stats": memory_stats,
     "web_search": web_search,
+    "calculate": calculate,
+    "summarize_data": summarize_data,
+    "lookup_reference": lookup_reference,
     "self_diagnostics": self_diagnostics,
     "manage_ollama_models": manage_ollama_models,
     "repair_subsystem": repair_subsystem,
     "resource_status": resource_status,
+    "manage_adapters": manage_adapters,
 }
 
 if _TELEMETRY_API_URL:

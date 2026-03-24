@@ -7,11 +7,14 @@ import os
 import re
 import hashlib
 import json
+import logging
 import time as _time
 from collections import defaultdict
 import httpx
 import chromadb
 from chromadb.config import Settings
+
+logger = logging.getLogger("e3n.memory")
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 EMBED_MODEL = os.getenv("E3N_EMBED_MODEL", "nomic-embed-text")
@@ -97,14 +100,21 @@ def file_hash(path: str) -> str:
 
 def get_embeddings(texts: list[str]) -> list[list[float]]:
     """Get embeddings from Ollama's embedding API."""
-    with httpx.Client(timeout=60) as client:
-        resp = client.post(
-            f"{OLLAMA_URL}/api/embed",
-            json={"model": EMBED_MODEL, "input": texts}
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return data["embeddings"]
+    try:
+        with httpx.Client(timeout=60) as client:
+            resp = client.post(
+                f"{OLLAMA_URL}/api/embed",
+                json={"model": EMBED_MODEL, "input": texts}
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data["embeddings"]
+    except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException) as e:
+        logger.error(f"Embedding request failed: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected embedding error: {e}")
+        raise
 
 
 # ── CHROMADB CLIENT ─────────────────────────────────────────────────────
@@ -173,8 +183,8 @@ def ingest_file(filepath: str) -> dict:
                 return {"status": "skipped", "reason": "unchanged"}
             # Delete old chunks
             collection.delete(ids=existing["ids"])
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Change detection check failed for {rel_path}: {e}")
 
     # Chunk the content
     chunks = chunk_text(content, rel_path)
@@ -446,6 +456,9 @@ def query_knowledge(query: str, n_results: int = 5, threshold: float = 0.75,
 
         results = collection.query(**query_kwargs)
 
+        if not results["ids"] or not results["ids"][0]:
+            continue
+
         for i in range(len(results["ids"][0])):
             chunk_id = results["ids"][0][i]
             if chunk_id in seen_ids:
@@ -527,9 +540,15 @@ def get_memory_stats() -> dict:
 
     # ChromaDB disk size
     total_bytes = 0
-    for dp, dn, fn in os.walk(CHROMADB_PATH):
-        for f in fn:
-            total_bytes += os.path.getsize(os.path.join(dp, f))
+    try:
+        for dp, dn, fn in os.walk(CHROMADB_PATH):
+            for f in fn:
+                try:
+                    total_bytes += os.path.getsize(os.path.join(dp, f))
+                except OSError:
+                    pass
+    except OSError as e:
+        logger.debug(f"ChromaDB disk size scan failed: {e}")
 
     result = {
         "total_chunks": count,
@@ -721,6 +740,7 @@ def cleanup_expired() -> dict:
         return {"removed": len(expired_ids), "checked": checked}
 
     except Exception as e:
+        logger.warning(f"TTL cleanup primary method failed, trying fallback: {e}")
         # Fallback: if $and filter fails (older ChromaDB), use the old approach
         # but only fetch ingested entries, not knowledge files
         try:
@@ -737,4 +757,5 @@ def cleanup_expired() -> dict:
                 collection.delete(ids=expired_ids)
             return {"removed": len(expired_ids), "checked": len(ingest_data["ids"])}
         except Exception as e2:
+            logger.warning(f"TTL cleanup failed (both methods): {e2}")
             return {"removed": 0, "checked": 0, "error": str(e2)}

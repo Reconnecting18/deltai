@@ -1554,8 +1554,8 @@ def memory_delete_file(filepath: str):
     if not RAG_AVAILABLE:
         return {"error": "RAG not available"}
     try:
-        full_path = os.path.normpath(os.path.join(KNOWLEDGE_PATH, filepath))
-        if not full_path.startswith(os.path.normpath(KNOWLEDGE_PATH)):
+        full_path = os.path.realpath(os.path.join(KNOWLEDGE_PATH, filepath))
+        if not full_path.startswith(os.path.realpath(KNOWLEDGE_PATH)):
             return {"status": "error", "reason": "Invalid path — outside knowledge directory"}
         result = remove_file(full_path)
         return result
@@ -1902,7 +1902,9 @@ class TrainingStart(BaseModel):
     dataset: str
     base_model: str = "e3n-qwen3b"
     output_model: str | None = None
-    mode: str = "auto"  # "lora", "fewshot", or "auto"
+    mode: str = "auto"  # "lora", "fewshot", "auto", or "distill"
+    teacher_dataset: str | None = None      # for distill mode
+    replay_datasets: list[str] | None = None  # for distill mode
 
 
 @app.post("/training/start")
@@ -1914,6 +1916,8 @@ def training_start(req: TrainingStart):
         base_model=req.base_model,
         output_model=req.output_model,
         mode=req.mode,
+        teacher_dataset=req.teacher_dataset,
+        replay_datasets=req.replay_datasets,
     )
 
 
@@ -1948,6 +1952,195 @@ def training_ab_eval(req: ABEvalRequest):
         return {"error": "Training system unavailable"}
     from training import run_ab_eval
     return run_ab_eval(req.model_a, req.model_b, req.dataset, req.max_examples)
+
+
+# ── ADAPTER SURGERY ENDPOINTS ────────────────────────────────────────
+# Modular LoRA augmentation slots: train, merge, evaluate, promote.
+
+@app.get("/adapters")
+def adapters_list(domain: str = None, status: str = None):
+    """List all registered adapters, optionally filtered."""
+    if not TRAINING_AVAILABLE:
+        return {"error": "Training system unavailable"}
+    from training import list_adapters
+    return {"adapters": list_adapters(domain=domain, status=status)}
+
+
+@app.get("/adapters/active")
+def adapters_active():
+    """Get the current active adapter map."""
+    if not TRAINING_AVAILABLE:
+        return {"error": "Training system unavailable"}
+    from training import get_active_adapters
+    return {"active": get_active_adapters()}
+
+
+@app.get("/adapters/{name}")
+def adapters_get(name: str):
+    """Get details for a specific adapter."""
+    if not TRAINING_AVAILABLE:
+        return {"error": "Training system unavailable"}
+    from training import get_adapter
+    result = get_adapter(name)
+    if not result:
+        return JSONResponse({"error": f"Adapter not found: {name}"}, status_code=404)
+    return result
+
+
+class AdapterTrainRequest(BaseModel):
+    domain: str
+    dataset: str = None
+    freeze_layers: int = None
+    lr: float = None
+    epochs: int = None
+
+
+@app.post("/adapters/train")
+def adapters_train(req: AdapterTrainRequest):
+    """Start domain-targeted adapter training for an augmentation slot."""
+    if not TRAINING_AVAILABLE:
+        return {"error": "Training system unavailable"}
+    from training import start_domain_training
+    return start_domain_training(
+        domain=req.domain,
+        dataset_name=req.dataset,
+        freeze_layers=req.freeze_layers,
+        lr_override=req.lr,
+        epochs_override=req.epochs,
+    )
+
+
+class AdapterMergeRequest(BaseModel):
+    adapters: list[str] = None
+    method: str = "ties"
+    density: float = 0.5
+    output_model: str = None
+
+
+@app.post("/adapters/merge")
+def adapters_merge(req: AdapterMergeRequest):
+    """Merge active adapters into a single production GGUF model via TIES."""
+    if not TRAINING_AVAILABLE:
+        return {"error": "Training system unavailable"}
+    from training import merge_adapters
+    return merge_adapters(
+        adapter_names=req.adapters,
+        method=req.method,
+        density=req.density,
+        output_model=req.output_model,
+    )
+
+
+@app.post("/adapters/eval/{name}")
+def adapters_eval(name: str, dataset: str = None, max_examples: int = 20):
+    """Evaluate an adapter against the baseline model."""
+    if not TRAINING_AVAILABLE:
+        return {"error": "Training system unavailable"}
+    from training import eval_adapter
+    return eval_adapter(name, eval_dataset=dataset, max_examples=max_examples)
+
+
+@app.post("/adapters/promote/{name}")
+def adapters_promote(name: str):
+    """Promote an adapter to the active slot for its domain."""
+    if not TRAINING_AVAILABLE:
+        return {"error": "Training system unavailable"}
+    from training import get_adapter, set_active_adapter, update_adapter
+    info = get_adapter(name)
+    if not info:
+        return JSONResponse({"error": f"Adapter not found: {name}"}, status_code=404)
+    domain = info.get("domain")
+    result = set_active_adapter(domain, name)
+    if result.get("status") == "ok":
+        update_adapter(name, promoted=True)
+    return result
+
+
+class AdapterRollbackRequest(BaseModel):
+    domain: str
+    version: int = None
+
+
+@app.post("/adapters/rollback")
+def adapters_rollback(req: AdapterRollbackRequest):
+    """Roll back a domain to a previous adapter version."""
+    if not TRAINING_AVAILABLE:
+        return {"error": "Training system unavailable"}
+    from training import rollback_adapter
+    return rollback_adapter(req.domain, target_version=req.version)
+
+
+@app.delete("/adapters/{name}")
+def adapters_delete(name: str, delete_files: bool = False):
+    """Remove an adapter from the registry."""
+    if not TRAINING_AVAILABLE:
+        return {"error": "Training system unavailable"}
+    from training import remove_adapter
+    return remove_adapter(name, delete_files=delete_files)
+
+
+# ── KNOWLEDGE DISTILLATION ENDPOINTS ─────────────────────────────────
+
+class TeacherGenerateRequest(BaseModel):
+    queries: list[str]
+    teacher: str = "local14b"  # "local14b" or "anthropic"
+    dataset: str = "e3n-teacher"
+    category: str = "distilled"
+
+
+@app.post("/training/generate-teacher")
+def training_generate_teacher(req: TeacherGenerateRequest):
+    """Generate training data using a teacher model (14B local or Anthropic API)."""
+    if not TRAINING_AVAILABLE:
+        return {"error": "Training system unavailable"}
+    if req.teacher not in ("local14b", "anthropic"):
+        return {"error": f"Unknown teacher: {req.teacher}. Use 'local14b' or 'anthropic'."}
+    if not req.queries:
+        return {"error": "No queries provided"}
+    from training import generate_teacher_data
+    return generate_teacher_data(
+        queries=req.queries,
+        teacher=req.teacher,
+        dataset_name=req.dataset,
+        category=req.category,
+    )
+
+
+class BlendRequest(BaseModel):
+    sources: list[dict]  # [{"dataset":"name", "weight":0.3, "max_examples":100}]
+    output: str
+
+
+@app.post("/training/blend")
+def training_blend(req: BlendRequest):
+    """Blend multiple datasets with weighted sampling for distillation training."""
+    if not TRAINING_AVAILABLE:
+        return {"error": "Training system unavailable"}
+    if not req.sources:
+        return {"error": "No source datasets provided"}
+    if not req.output:
+        return {"error": "No output dataset name provided"}
+    from training import blend_datasets
+    return blend_datasets(sources=req.sources, output_name=req.output)
+
+
+class RetentionRequest(BaseModel):
+    model: str
+    baseline: str = "e3n-qwen3b"
+    min_pass_rate: float = 0.7
+
+
+@app.post("/training/verify-retention")
+def training_verify_retention(req: RetentionRequest):
+    """Verify a trained model hasn't lost base capabilities."""
+    if not TRAINING_AVAILABLE:
+        return {"error": "Training system unavailable"}
+    from training import verify_retention
+    return verify_retention(
+        model_name=req.model,
+        baseline_model=req.baseline,
+        min_pass_rate=req.min_pass_rate,
+    )
 
 
 # ── VOICE ENDPOINTS ──────────────────────────────────────────────────
@@ -1993,7 +2186,7 @@ async def voice_stt(request: Request):
         return {"error": "No audio data received"}
     if len(body) > 25 * 1024 * 1024:  # 25MB limit
         return {"error": "Audio file too large (max 25MB)"}
-    result = transcribe_audio(body)
+    result = await asyncio.to_thread(transcribe_audio, body)
     return result
 
 
@@ -2029,7 +2222,7 @@ async def voice_chat(request: Request, voice: str = None, rate: str = None):
         return {"error": "No audio data"}
 
     # Step 1: Transcribe
-    stt_result = transcribe_audio(body)
+    stt_result = await asyncio.to_thread(transcribe_audio, body)
     if "error" in stt_result or not stt_result.get("text"):
         return {"error": stt_result.get("error", "No speech detected"), "stt": stt_result}
 

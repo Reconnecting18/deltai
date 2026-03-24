@@ -22,7 +22,7 @@ _db_path = os.getenv("SQLITE_PATH", r"C:\e3n\data\sqlite\e3n.db")
 def _connect() -> sqlite3.Connection:
     """Open a short-lived connection. Caller should use `with` or close manually."""
     os.makedirs(os.path.dirname(_db_path), exist_ok=True)
-    return sqlite3.connect(_db_path)
+    return sqlite3.connect(_db_path, timeout=10)
 
 
 def init_db():
@@ -41,7 +41,7 @@ def init_db():
         # Migration: add session_id column if missing
         try:
             conn.execute("ALTER TABLE conversation_history ADD COLUMN session_id TEXT DEFAULT NULL")
-        except Exception:
+        except sqlite3.OperationalError:
             pass  # Column already exists
         conn.execute("""
             CREATE TABLE IF NOT EXISTS budget_daily (

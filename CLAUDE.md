@@ -12,6 +12,7 @@ E3N is ONLY the AI intelligence layer — reasoning, memory, tool execution, and
 - **Backend:** FastAPI at `C:\e3n\project\main.py`, served on localhost:8000
 - **Frontend:** Single-file `C:\e3n\project\static\index.html` (~60KB, CSS+HTML+JS)
 - **Electron:** `C:\e3n\app\main.js` (frameless window, IPC)
+- **CLI Terminal:** `C:\e3n\project\cli.py` — standalone terminal client (JARVIS-inspired, rich library, NDJSON streaming). Launch: `C:\e3n\e3n.bat`
 - **Models (primary):** Ollama — `e3n-qwen14b` (Qwen2.5-14B Q4_K_M, Tier A), `e3n-qwen3b` (Qwen2.5-3B Q4_K_M, Tier B/C)
 - **Models (emergency backup):** `e3n-nemo` (Mistral Nemo 12B), `e3n` (LLaMA 3.1 8B) — last resort only
 - **Modelfiles:** `C:\e3n\modelfiles\` — 4 modelfiles (E3N-qwen14b, E3N-qwen3b, E3N-nemo, E3N), identical system prompts, only FROM/parameters differ. E3N-qwen3b has a condensed prompt variant.
@@ -19,7 +20,7 @@ E3N is ONLY the AI intelligence layer — reasoning, memory, tool execution, and
 - **Knowledge:** Drop files in `C:\e3n\data\knowledge\` — watchdog auto-ingests
 - **Ingest connector:** `POST /ingest` — external services push structured context into ChromaDB with source tags and TTL
 - **Router:** `C:\e3n\project\router.py` — VRAM-aware GPU detection, sim process detection, tier classification, model cascade, emergency backup chain, cloud budget enforcement, split workload detection, session mode, telemetry query classification
-- **Tools:** 7 core tools + 4 diagnostic/self-management tools + 4 conditional telemetry tools in `C:\e3n\project\tools\` (core: read_file, write_file, list_directory, run_powershell, get_system_info, search_knowledge, memory_stats; diagnostic: self_diagnostics, manage_ollama_models, repair_subsystem, resource_status; telemetry: get_session_status, get_lap_summary, get_tire_status, get_strategy_recommendation — only loaded when TELEMETRY_API_URL is set)
+- **Tools:** 8 core tools + 3 computation delegation tools + 4 diagnostic/self-management tools + 4 conditional telemetry tools in `C:\e3n\project\tools\` (core: read_file, write_file, list_directory, run_powershell, get_system_info, search_knowledge, memory_stats, web_search; computation: calculate, summarize_data, lookup_reference; diagnostic: self_diagnostics, manage_ollama_models, repair_subsystem, resource_status; telemetry: get_session_status, get_lap_summary, get_tire_status, get_strategy_recommendation — only loaded when TELEMETRY_API_URL is set)
 - **Resource self-manager:** Background loop (30s interval) — auto VRAM lifecycle, Ollama health monitoring + auto-restart, watcher recovery, TTL cleanup
 - **Circuit breaker:** Protects Ollama inference path — 3-failure threshold, exponential backoff (5s→60s max), half-open recovery testing
 - **Anthropic client:** `C:\e3n\project\anthropic_client.py` — cloud inference with tool use, split workload mode, telemetry mode prompt injection, conversation history support (dormant — no API key set)
@@ -75,13 +76,15 @@ E3N does NOT directly process telemetry, UDP packets, or game data. Instead:
 | `project/persistence.py` | SQLite backing store for conversation history (session-aware), cloud budget, session history export (WAL mode, short-lived connections) |
 | `project/training.py` | Training pipeline: dataset CRUD, export (alpaca/sharegpt/chatml), QLoRA fine-tuning + GGUF export + Ollama registration, few-shot fallback, A/B eval, auto-capture with racing category support |
 | `project/voice.py` | Voice module: STT (faster-whisper, VRAM-aware device selection), TTS (edge-tts + Windows SAPI fallback), audio cleanup |
-| `project/tools/executor.py` | Tool execution with type coercion, safety checks, tool retry on error, self-diagnostics (7 subsystem deep checks), manage_ollama_models (status/unload/preload with sim guard), repair_subsystem (4 allowlisted repairs), resource_status, conditional telemetry tools |
-| `project/tools/definitions.py` | 7 core + 4 diagnostic + 4 conditional telemetry tool JSON schemas |
+| `project/tools/executor.py` | Tool execution with type coercion, safety checks, tool retry on error, calculate (sandboxed math eval), summarize_data (statistics), lookup_reference (targeted RAG), self-diagnostics (7 subsystem deep checks), manage_ollama_models (status/unload/preload with sim guard), repair_subsystem (4 allowlisted repairs), resource_status, conditional telemetry tools |
+| `project/tools/definitions.py` | 8 core + 3 computation + 4 diagnostic + 4 conditional telemetry tool JSON schemas |
 | `project/static/index.html` | Full dashboard UI (single file) — header health monitor, budget display, terminal with history CLR, WebSocket alert toasts |
 | `project/.env` | Config (models, VRAM thresholds, backup, budget, history, paths, cloud settings, voice, session mode, telemetry) |
-| `project/tests/verify_full.py` | 33-test verification suite — training, safety guards, router stress, persistence, RAG, CUDA, anthropic client |
+| `project/tests/verify_full.py` | 46-test verification suite — training, safety guards, router stress, persistence, RAG, CUDA, computation tools (18 new), anthropic client |
 | `project/tests/verify_stress.py` | 30-test stress suite — review fix verification (10), high-stress simulations (20): low VRAM, backup cascade, concurrent routing, tool safety |
 | `project/tests/verify_resource_mgmt.py` | 29-test resource management suite — circuit breaker (5), resource manager (3), diagnostic tools (11), stress simulations (10) |
+| `project/tests/verify_distill.py` | 34-test distillation suite — config, teacher generation, blending, retention, distill mode integration, override parameters |
+| `project/cli.py` | Standalone CLI terminal — JARVIS-inspired, rich library, NDJSON streaming, 16 slash commands, connects to FastAPI backend via HTTP |
 | `app/main.js` | Electron main process |
 | `tools/llama.cpp/` | GGUF conversion toolchain — `convert_hf_to_gguf.py` + `build/bin/Release/llama-quantize.exe` |
 
@@ -296,6 +299,19 @@ High-throughput ingestion for multiple context items in a single call.
 ## Training Pipeline
 Dataset management, QLoRA fine-tuning, and progressive model improvement.
 
+> **Strategy Note (March 2026):** The LoRA training infrastructure below is preserved but **currently inactive**. QLoRA fine-tuning of the 3B model with ~350 examples caused catastrophic forgetting — the model lost its personality and instruction-following ability. The active improvement strategy is:
+> 1. **Cloud Hybrid** — Set `ANTHROPIC_API_KEY` in .env for complex reasoning (split workload already built)
+> 2. **RAG Knowledge Building** — High-quality reference docs in `C:\e3n\data\knowledge\` (auto-ingested by watchdog)
+> 3. **Model Upgrade Readiness** — Swap in better base models (Qwen3, etc.) as they release
+>
+> LoRA may be revisited when: (a) a larger base model fits in 12GB VRAM, or (b) cloud models can generate high-quality training data instead of self-generation.
+>
+> **Knowledge Distillation (Phase 7):** A `mode="distill"` training path now exists that uses teacher models (Claude Code daily review, local 14B, or Anthropic API) to generate training data, blends it with replay data (70/30 ratio) to prevent forgetting, and trains with gentler hyperparameters (LR=1e-4, 2 epochs, 10% warmup). Retention verification runs automatically post-training.
+> - `POST /training/generate-teacher` — generate data from 14B or Anthropic teacher
+> - `POST /training/blend` — weighted dataset blending with replay
+> - `POST /training/verify-retention` — test trained model against 15 baseline queries
+> - `POST /training/start` with `mode="distill"` — full pipeline: blend → train → verify
+
 - **Two training modes:**
   - `"lora"` — Real QLoRA fine-tuning via transformers/peft/trl on Qwen2.5-3B (~6-7GB VRAM)
   - `"fewshot"` — Legacy few-shot embedding into system prompt (always available, no deps needed)
@@ -361,6 +377,20 @@ Live subsystem health monitor in the dashboard header.
 - **Alert badges:** Non-nominal systems show warning/error badges (e.g., "CLOUD — STANDBY", "WATCHER — STOPPED")
 - **Dynamic count:** Subsystem count adjusts based on whether telemetry is configured
 - **Polled every 10 seconds** via JS `pollHealth()`
+
+## CLI Terminal
+Standalone terminal client that runs in a real terminal window (PowerShell, Windows Terminal, cmd). Connects to the FastAPI backend via HTTP — zero backend imports, pure HTTP client.
+
+- **File:** `C:\e3n\project\cli.py` (~700 lines, single file)
+- **Launcher:** `C:\e3n\e3n.bat` (run from any terminal)
+- **Dep:** `rich` library (terminal rendering)
+- **Design:** JARVIS Stark Industries terminal aesthetic — military/tactical colors, ASCII art banner
+- **Startup:** Banner → connection check (3 retries) → subsystem health grid → stats snapshot → REPL
+- **Chat:** Type any message to talk to E3N. Streams NDJSON responses with live output (like Claude Code).
+- **Metadata:** Routing decisions, tool calls, RAG injections shown as dim lines above response.
+- **Slash commands:** 16 commands for system management (`/health`, `/stats`, `/budget`, `/resources`, `/memory`, `/history`, `/clear`, `/backup`, `/heal`, `/events`, `/session`, `/help`, `/cls`, `/quit`)
+- **Ctrl+C:** During streaming → cancel response. At prompt → "press again to exit". Double Ctrl+C → exit.
+- **Args:** `--host HOST`, `--port PORT`, `--no-banner`
 
 ## Greeting Short-Circuit
 Server-side pattern matcher in `main.py` intercepts obvious greetings/farewells BEFORE they reach any model. Fixes 3B over-triggering tools on simple messages. Model-agnostic, zero latency. Maps ~40 phrases to canned E3N-style responses (e.g., "hey" → "Operational."). Non-greeting messages pass through normally to the model. Greetings are NOT stored in conversation history.
@@ -479,6 +509,58 @@ SELF_HEAL_ENABLED=true
 SELF_HEAL_INTERVAL_SEC=300
 ```
 
+## Prompt Reasoning Scaffolds
+Structured reasoning templates in all 4 modelfile system prompts. Forces local models to think step-by-step for different query types.
+
+**3 scaffold types:**
+- **Engineering/Physics/Math:** GIVEN → FIND → APPROACH → SOLVE → VERIFY
+- **Strategy/Decisions:** SITUATION → OPTIONS → TRADEOFFS → RECOMMENDATION
+- **Diagnostics/Debugging:** SYMPTOM → CAUSE → FIX → VERIFY
+
+Each section stays 1-3 lines. Models skip sections that don't apply. Zero cost — no training, no API key, no VRAM impact.
+
+## Computation Delegation Tools
+3 new tools that let local models offload computation instead of attempting it in-context.
+
+| Tool | Purpose | Safety |
+|------|---------|--------|
+| `calculate(expression, description)` | Sandboxed Python eval — math + statistics only | Blocklist: no import, exec, eval, os, subprocess, __builtins__. 500 char cap. |
+| `summarize_data(data, focus)` | Condense large datasets into min/max/mean/median/stdev/trends/outliers | Read-only, 50KB cap |
+| `lookup_reference(query)` | Targeted ChromaDB query — top 1-2 chunks, faster than full search_knowledge | Uses existing RAG read path |
+
+**Protocol 6 (in modelfiles):** "Never attempt multi-step math — use calculate. Never guess reference values — use lookup_reference. When data exceeds 10 items, use summarize_data."
+
+**Resource impact:** Zero VRAM (tools run on CPU), negligible latency. Tool count: 8 core + 3 computation + 4 diagnostic + 4 conditional telemetry = 19 total.
+
+## Knowledge Distillation Pipeline
+Teacher-student training system: better models generate training data for the 3B student, with anti-forgetting safeguards.
+
+**New functions in `training.py`:**
+- `generate_teacher_data(queries, teacher, dataset)` — generates training pairs from 14B local or Anthropic API
+- `blend_datasets(sources, output_name)` — weighted random sampling from multiple datasets with replay
+- `verify_retention(model_name, baseline_model)` — 15 baseline queries to detect catastrophic forgetting
+- `_run_distill_training(teacher_dataset, replay_datasets, ...)` — orchestrates blend → train → verify
+
+**New endpoints in `main.py`:**
+- `POST /training/generate-teacher` — generate teacher data
+- `POST /training/blend` — blend datasets
+- `POST /training/verify-retention` — retention verification
+
+**Anti-forgetting strategy:**
+- Dataset blending: 70% replay (personality, auto-captured, anti-hallucination) + 30% teacher data
+- Gentler hyperparameters: LR 1e-4 (vs 2e-4), 2 epochs (vs 3), 10% warmup (vs 5%)
+- Retention verification: 15 baseline queries across personality, instruction-following, and domain knowledge
+
+**Config (.env):**
+```
+DISTILL_LR=1e-4
+DISTILL_EPOCHS=2
+DISTILL_WARMUP_RATIO=0.10
+DISTILL_REPLAY_RATIO=0.70
+DISTILL_MIN_QUALITY_LEN=50
+DISTILL_TEACHER_TIMEOUT=120
+```
+
 ## Current Status
 - Phase 1-4 complete (dashboard, RAG, tools, router, cloud client, split workload, budget, voice, training)
 - Phase 5 complete (telemetry prep — all 11 issues implemented, verified 50/50, debugged)
@@ -514,7 +596,14 @@ SELF_HEAL_INTERVAL_SEC=300
 - Health event bus: DONE (typed events, sync/async emitters, WebSocket /ws/health, REST /health/events, CB wiring)
 - Proactive model lifecycle: DONE (auto-unload 14B on sim start, auto-preload on sim stop after 30s cooldown)
 - AI self-heal loop: DONE (5min interval, LLM-driven diagnostics, repair execution, verification, idle/session/CB guards)
-- Stress tests: PASSED (33/33 verification + 30/30 stress + 29/29 resource mgmt + 25/25 self-mgmt = 117/117 total)
+- Prompt reasoning scaffolds: DONE (3 scaffold types in all 4 modelfiles — engineering, strategy, diagnostics)
+- Computation delegation tools: DONE (calculate, summarize_data, lookup_reference — sandboxed, zero VRAM)
+- Knowledge distillation pipeline: DONE (generate_teacher, blend_datasets, verify_retention, anti-forgetting, 3 new endpoints)
+- CLI terminal: DONE (standalone cli.py, JARVIS-inspired, 16 slash commands, NDJSON streaming, rich library)
+- Stress tests: PASSED (46/46 verification + 30/30 stress + 29/29 resource mgmt + 34/34 distillation = 139/139 total)
+- Knowledge-first strategy: ACTIVE (RAG knowledge building replaces LoRA training as primary improvement path)
+- Knowledge distillation: DONE (teacher data generation, dataset blending with replay, distill training mode, retention verification — 34/34 tests)
+- Cloud hybrid: READY (set `ANTHROPIC_API_KEY` in .env to activate — split workload, GPU protection, Tier 2/3 routing all built)
 - Future (separate projects): Telemetry API for LMU
 
 ## Build Phases
@@ -526,6 +615,7 @@ SELF_HEAL_INTERVAL_SEC=300
 | 4 | DONE | Smarter RAG, training pipeline execution, text-as-tool hardening, error recovery UX, voice module (STT/TTS) |
 | 5 | DONE | Telemetry prep — session mode, GPU protection, query classification, racing prompts, RAG recency tuning, telemetry tools, WebSocket alerts, session-aware history, batch ingest, dynamic health, racing auto-capture |
 | 6 | DONE | Self-management — resource self-manager, circuit breaker, self-diagnostic tools (4), auto-recovery watchdog, VRAM lifecycle management |
+| 7 | DONE | Knowledge-first improvement — prompt reasoning scaffolds (3 types), computation delegation tools (calculate, summarize_data, lookup_reference), knowledge distillation pipeline (teacher-student with anti-forgetting) |
 | — | SEPARATE PROJECT | Telemetry API (LMU race engineer) — connects to E3N via /ingest |
 
 ## Known Issues
@@ -539,3 +629,5 @@ SELF_HEAL_INTERVAL_SEC=300
 8. Voice STT loads Whisper model on first use — ~2-5 second cold start on first transcription
 9. ~~LoRA training requires external deps~~ — INSTALLED: PyTorch 2.10.0+cu126, transformers 5.3, peft 0.18, trl 0.29, bitsandbytes 0.49, accelerate 1.13, datasets 4.8. llama.cpp cloned and built at `C:\e3n\tools\llama.cpp`. Full pipeline verified (33/33 tests). Only Qwen2.5-3B is trainable on 12GB VRAM.
 10. Session mode without API key falls back to CPU-only local inference — functional but slow. Cloud is strongly recommended for racing sessions.
+11. LoRA fine-tuning on 3B model causes catastrophic forgetting at current data volume (~350 examples). Active improvement strategy uses RAG knowledge building instead. LoRA infrastructure preserved for future use with larger models.
+12. **ACTION REQUIRED:** Set `ANTHROPIC_API_KEY` in `.env` (get from console.anthropic.com, separate from Claude Max subscription). This is the single most impactful change — enables split workload, GPU protection during racing, and Tier 2/3 reasoning.

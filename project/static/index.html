@@ -934,7 +934,8 @@ function showToast(alert){
   const prio=alert.priority||'normal'
   toast.className=`toast toast--${prio}`
   const icon=prio==='critical'?'⚠':'●'
-  toast.innerHTML=`<span class="toast-icon">${icon}</span><span class="toast-text">${alert.context||''}</span><span class="toast-src">${alert.source||''}</span>`
+  const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+  toast.innerHTML=`<span class="toast-icon">${icon}</span><span class="toast-text">${esc(alert.context)}</span><span class="toast-src">${esc(alert.source)}</span>`
   container.appendChild(toast)
   setTimeout(()=>{toast.classList.add('toast--fade');setTimeout(()=>toast.remove(),500)},10000)
 }

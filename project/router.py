@@ -388,6 +388,63 @@ def classify_telemetry_category(message: str) -> str | None:
     return None
 
 
+# ── ADAPTER DOMAIN CLASSIFIER ──────────────────────────────────────────
+# Maps queries to augmentation slot domains for adapter-aware routing.
+
+ADAPTER_DOMAIN_PATTERNS = {
+    "racing": [
+        r"\b(racing|race|lap\s*time|tire|tyre|pit\s*stop|stint|telemetry)\b",
+        r"\b(overtake|undercut|overcut|draft|slipstream|DRS)\b",
+        r"\b(qualifying|pole|grid|safety\s*car|yellow\s*flag)\b",
+        r"\b(compound|soft|medium|hard|intermediate|wet)\b",
+        r"\b(sector|split|delta|gap|interval)\b",
+        r"\b(downforce|aero|wing|ride\s*height|rake)\b",
+        r"\b(LMU|Le\s*Mans|endurance|prototype|GT[34]?)\b",
+        r"\b(fuel\s*load|fuel\s*save|lift.and.coast)\b",
+        r"\b(setup|spring\s*rate|damper|ARB|anti.roll)\b",
+    ],
+    "engineering": [
+        r"\b(derive|equation|integral|differential|simulation)\b",
+        r"\b(stress|strain|torque|thermodynamic|fluid\s*dynamic)\b",
+        r"\b(free\s*body|FBD|moment\s*of\s*inertia|reynolds|bernoulli)\b",
+        r"\b(finite\s*element|FEA|CFD|heat\s*transfer)\b",
+        r"\b(calculate|compute|solve).{0,30}(force|pressure|velocity|temperature|mass)\b",
+        r"\b(engineering|physics|calculus|statics|thermo|materials)\b",
+        r"\b(Newton|Euler|Lagrange|Hooke|Fourier|Navier.Stokes)\b",
+        r"\b(beam|truss|shear|bending|deflection|buckling)\b",
+        r"\b(matrix|eigenvalue|determinant|linear\s*algebra)\b",
+        r"\b(Carnot|Rankine|entropy|enthalpy|specific\s*heat)\b",
+    ],
+    "reasoning": [
+        r"\b(analyze|compare|evaluate|reason|decompose|break\s*down)\b",
+        r"\b(step.by.step|chain.of.thought|think.through|logical)\b",
+        r"\b(pro.*con|tradeoff|trade.off|decision|weigh.option)\b",
+        r"\b(summarize|synthesize|critique|assess|review)\b",
+        r"\b(what\s+are\s+the\s+implications|how\s+does\s+this\s+affect)\b",
+    ],
+    # "personality" is always-on (blended into base), not query-triggered
+}
+
+def classify_adapter_domain(message: str) -> str | None:
+    """
+    Classify a query into an adapter domain for augmentation slot routing.
+    Returns domain string or None for general queries.
+    """
+    text = message.lower().strip()
+    scores = {}
+    for domain, patterns in ADAPTER_DOMAIN_PATTERNS.items():
+        score = 0
+        for pattern in patterns:
+            if re.search(pattern, text, re.IGNORECASE):
+                score += 1
+        if score > 0:
+            scores[domain] = score
+    if not scores:
+        return None
+    # Return domain with highest pattern match count
+    return max(scores, key=scores.get)
+
+
 # ── CONNECTIVITY CHECK ──────────────────────────────────────────────────
 
 _last_connectivity_check = 0
@@ -583,7 +640,7 @@ async def check_model_exists(model: str) -> bool:
             resp = await client.get(f"{ollama_url}/api/tags")
             if resp.status_code != 200:
                 return False
-            models = [m["name"] for m in resp.json().get("models", [])]
+            models = [m.get("name", "") for m in resp.json().get("models", [])]
             return any(model in m or m.startswith(model + ":") for m in models)
     except Exception as e:
         logger.warning(f"Model existence check failed for {model}: {e}")
@@ -598,7 +655,8 @@ class RouteDecision:
                  split: bool = False, gpu_loaded: bool = False,
                  sim_running: bool = False, cpu_only: bool = False,
                  backup_model: str | None = None,
-                 query_category: str = "general"):
+                 query_category: str = "general",
+                 adapter_domain: str | None = None):
         self.backend = backend      # "ollama" or "anthropic"
         self.model = model          # model name/id
         self.tier = tier            # 1, 2, or 3
@@ -609,6 +667,7 @@ class RouteDecision:
         self.cpu_only = cpu_only
         self.backup_model = backup_model  # emergency fallback (None = no backup)
         self.query_category = query_category
+        self.adapter_domain = adapter_domain  # augmentation slot domain (racing/engineering/etc)
 
     def to_dict(self) -> dict:
         """Serialize for frontend. backup_model excluded — invisible infrastructure."""
@@ -622,6 +681,7 @@ class RouteDecision:
             "sim_running": self.sim_running,
             "cpu_only": self.cpu_only,
             "query_category": self.query_category,
+            "adapter_domain": self.adapter_domain,
         }
 
     def __repr__(self):
@@ -698,6 +758,14 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
     split = is_split_workload(message)
 
     query_cat = "general"
+    # Classify telemetry queries when session is active or sim is running
+    if is_session_active() or is_sim_running():
+        tel_cat = classify_telemetry_category(message)
+        if tel_cat:
+            query_cat = tel_cat
+
+    # Classify adapter domain (augmentation slot routing)
+    adapter_domain = classify_adapter_domain(message)
 
     cloud_ready = (cloud_enabled and has_api_key()
                    and await is_cloud_available() and _check_budget())
@@ -711,12 +779,14 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
             return RouteDecision("anthropic", model, tier,
                                  "user requested cloud", split=split,
                                  sim_running=sim_active, backup_model=backup,
-                                 query_category=query_cat)
+                                 query_category=query_cat,
+                                 adapter_domain=adapter_domain)
         return RouteDecision("ollama", local_model, tier,
                              "cloud requested but unavailable — local fallback",
                              gpu_loaded=gpu_loaded, sim_running=sim_active,
                              cpu_only=cpu_only, backup_model=backup,
-                             query_category=query_cat)
+                             query_category=query_cat,
+                                 adapter_domain=adapter_domain)
 
     # ── Force local ──
     if force_local:
@@ -726,7 +796,8 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
                              f"{' (sim active)' if sim_active else ''}",
                              gpu_loaded=gpu_loaded, sim_running=sim_active,
                              cpu_only=cpu_only, backup_model=backup,
-                             query_category=query_cat)
+                             query_category=query_cat,
+                                 adapter_domain=adapter_domain)
 
     # ── Sim running — VRAM is precious ──
     if sim_active:
@@ -737,14 +808,16 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
                                  f"complex task routed to cloud",
                                  split=split, sim_running=True,
                                  gpu_loaded=gpu_loaded, backup_model=backup,
-                                 query_category=query_cat)
+                                 query_category=query_cat,
+                                 adapter_domain=adapter_domain)
         # Tier 1 or no cloud — use small local model
         return RouteDecision("ollama", local_model, tier,
                              f"sim running, VRAM {vram_free}MB free — "
                              f"{local_model}{' (CPU)' if cpu_only else ''}",
                              sim_running=True, gpu_loaded=gpu_loaded,
                              cpu_only=cpu_only, backup_model=backup,
-                             query_category=query_cat)
+                             query_category=query_cat,
+                                 adapter_domain=adapter_domain)
 
     # ── GPU loaded (no sim, but something else using GPU) ──
     if gpu_loaded:
@@ -753,43 +826,51 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
             return RouteDecision("anthropic", model, tier,
                                  f"GPU loaded ({get_gpu_utilization()}%) — routing to cloud",
                                  split=split, gpu_loaded=True, backup_model=backup,
-                                 query_category=query_cat)
+                                 query_category=query_cat,
+                                 adapter_domain=adapter_domain)
         return RouteDecision("ollama", local_model, tier,
                              f"GPU loaded ({get_gpu_utilization()}%) — "
                              f"using {local_model}{' (CPU)' if cpu_only else ''}",
                              gpu_loaded=True, cpu_only=cpu_only, backup_model=backup,
-                             query_category=query_cat)
+                             query_category=query_cat,
+                                 adapter_domain=adapter_domain)
 
     # ── Normal routing by tier ──
     if tier == 1:
         return RouteDecision("ollama", local_model, 1,
                              f"simple task — {local_model}",
                              backup_model=backup,
-                             query_category=query_cat)
+                             query_category=query_cat,
+                                 adapter_domain=adapter_domain)
 
     if tier == 2:
         if cloud_ready:
             return RouteDecision("anthropic", sonnet_model, 2,
                                  "moderate complexity — Sonnet",
                                  split=split, backup_model=backup,
-                                 query_category=query_cat)
+                                 query_category=query_cat,
+                                 adapter_domain=adapter_domain)
         return RouteDecision("ollama", local_model, 2,
                              f"moderate complexity — no cloud, using {local_model}",
                              backup_model=backup,
-                             query_category=query_cat)
+                             query_category=query_cat,
+                                 adapter_domain=adapter_domain)
 
     if tier == 3:
         if cloud_ready:
             return RouteDecision("anthropic", opus_model, 3,
                                  "heavy reasoning — Opus",
                                  split=split, backup_model=backup,
-                                 query_category=query_cat)
+                                 query_category=query_cat,
+                                 adapter_domain=adapter_domain)
         return RouteDecision("ollama", local_model, 3,
                              f"heavy reasoning — no cloud, using {local_model} (best effort)",
                              backup_model=backup,
-                             query_category=query_cat)
+                             query_category=query_cat,
+                                 adapter_domain=adapter_domain)
 
     return RouteDecision("ollama", local_model, 1,
                          f"default — {local_model}",
                          backup_model=backup,
-                         query_category=query_cat)
+                         query_category=query_cat,
+                                 adapter_domain=adapter_domain)

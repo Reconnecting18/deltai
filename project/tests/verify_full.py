@@ -171,8 +171,70 @@ def run():
         import bitsandbytes as bnb
         check('bitsandbytes loaded', True, bnb.__version__)
 
-    # === 7. ANTHROPIC CLIENT ===
-    print('\n--- 7. Anthropic Client ---')
+    # === 7. COMPUTATION DELEGATION TOOLS ===
+    print('\n--- 7. Computation Delegation Tools ---')
+    from tools.executor import calculate, summarize_data, lookup_reference
+
+    # calculate — basic math
+    r = calculate('2 + 2')
+    check('calculate basic', '4' in r, r.strip())
+
+    r = calculate('math.sqrt(144)')
+    check('calculate math.sqrt', '12' in r, r.strip())
+
+    r = calculate('statistics.mean([10, 20, 30])')
+    check('calculate statistics', '20' in r, r.strip())
+
+    # calculate — engineering formula with description
+    r = calculate('9.81 * 75 * math.sin(math.radians(30))', 'Force component on 30deg incline, 75kg')
+    check('calculate with description', '367' in r, r.strip())
+
+    # calculate — security: blocked patterns
+    r = calculate('import os')
+    check('calculate blocks import', 'ERROR' in r or 'Blocked' in r, r.strip())
+
+    r = calculate('__builtins__')
+    check('calculate blocks __builtins__', 'ERROR' in r or 'Blocked' in r, r.strip())
+
+    r = calculate('')
+    check('calculate empty rejected', 'ERROR' in r)
+
+    r = calculate('x' * 600)
+    check('calculate length cap', 'ERROR' in r and 'too long' in r.lower())
+
+    # summarize_data — numeric JSON
+    r = summarize_data('[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]')
+    check('summarize_data JSON list', 'Mean' in r and '5.5' in r, r.split('\n')[0])
+
+    # summarize_data — text with numbers
+    r = summarize_data('Lap 1: 1:32.5\nLap 2: 1:31.8\nLap 3: 1:33.1')
+    check('summarize_data text extraction', 'values' in r.lower() or 'Count' in r)
+
+    # summarize_data — empty
+    r = summarize_data('')
+    check('summarize_data empty', 'ERROR' in r)
+
+    # lookup_reference — basic query (depends on ChromaDB having data)
+    r = lookup_reference('test query')
+    check('lookup_reference callable', isinstance(r, str) and len(r) > 0)
+
+    # lookup_reference — empty query
+    r = lookup_reference('')
+    check('lookup_reference empty rejected', 'ERROR' in r)
+
+    # Tool registration
+    from tools.definitions import TOOLS, TOOL_MAP
+    tool_names = [t['function']['name'] for t in TOOLS]
+    check('calculate in TOOLS', 'calculate' in tool_names)
+    check('summarize_data in TOOLS', 'summarize_data' in tool_names)
+    check('lookup_reference in TOOLS', 'lookup_reference' in tool_names)
+    check('TOOL_MAP has new tools', all(t in TOOL_MAP for t in ['calculate', 'summarize_data', 'lookup_reference']))
+
+    from tools.executor import EXECUTORS
+    check('EXECUTORS has new tools', all(t in EXECUTORS for t in ['calculate', 'summarize_data', 'lookup_reference']))
+
+    # === 8. ANTHROPIC CLIENT ===
+    print('\n--- 8. Anthropic Client ---')
     import anthropic_client
     check('anthropic_client imports', True)
     has_split = 'split_mode' in anthropic_client.stream_chat.__code__.co_varnames

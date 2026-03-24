@@ -350,9 +350,13 @@ async def chat_once(message: str, model: str, max_tokens: int = 2048) -> str:
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(ANTHROPIC_API_URL, json=payload, headers=headers)
-            data = resp.json()
             if resp.status_code != 200:
-                return f"ERROR: {data.get('error', {}).get('message', 'Unknown')}"
+                try:
+                    data = resp.json()
+                    return f"ERROR: {data.get('error', {}).get('message', 'Unknown')}"
+                except Exception:
+                    return f"ERROR: HTTP {resp.status_code}"
+            data = resp.json()
             content = data.get("content", [])
             return "".join(c.get("text", "") for c in content if c.get("type") == "text")
     except Exception as e:
