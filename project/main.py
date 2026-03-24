@@ -46,6 +46,7 @@ RAG_AVAILABLE = False
 try:
     from memory import (query_knowledge, ingest_all, get_memory_stats, get_file_details,
                         remove_file, ingest_context, cleanup_expired, ingest_context_batch,
+                        compact_warm_to_cold, get_cold_stats,
                         KNOWLEDGE_PATH)
     from watcher import start_watcher, stop_watcher, watcher_running
     RAG_AVAILABLE = True
@@ -188,10 +189,13 @@ def _get_history() -> list[dict]:
 
 
 async def _try_ollama_inference(client: httpx.AsyncClient, model: str,
-                                messages: list, tools: list | None = None) -> tuple[dict | None, str | None]:
+                                messages: list, tools: list | None = None,
+                                num_gpu: int | None = None,
+                                num_ctx: int | None = None) -> tuple[dict | None, str | None]:
     """
     Attempt a single Ollama inference call with circuit breaker protection.
     Returns (data, None) on success or (None, error_string) on failure.
+    Supports num_gpu (partial GPU offloading) and num_ctx (dynamic context window).
     """
     # Circuit breaker: don't hammer Ollama when it's down
     if not _cb_check():
@@ -200,6 +204,14 @@ async def _try_ollama_inference(client: httpx.AsyncClient, model: str,
     payload = {"model": model, "messages": messages, "stream": False}
     if tools:
         payload["tools"] = tools
+    # Dynamic GPU layer offloading + context window sizing
+    options = {}
+    if num_gpu is not None:
+        options["num_gpu"] = num_gpu
+    if num_ctx is not None:
+        options["num_ctx"] = num_ctx
+    if options:
+        payload["options"] = options
     try:
         resp = await client.post(f"{OLLAMA_URL}/api/chat", json=payload)
         if resp.status_code != 200:
@@ -226,6 +238,7 @@ async def _try_ollama_inference(client: httpx.AsyncClient, model: str,
 async def _inference_with_emergency_fallback(
     client: httpx.AsyncClient, model: str, messages: list,
     tools: list | None, backup_model: str | None,
+    num_gpu: int | None = None, num_ctx: int | None = None,
 ) -> tuple[dict | None, str | None, str, bool]:
     """
     Try primary model with retries, then emergency backup as last resort.
@@ -235,7 +248,8 @@ async def _inference_with_emergency_fallback(
     # ── Attempt primary (with retries) ──
     last_error = None
     for attempt in range(1 + BACKUP_MAX_RETRIES):
-        data, err = await _try_ollama_inference(client, model, messages, tools)
+        data, err = await _try_ollama_inference(client, model, messages, tools,
+                                                 num_gpu=num_gpu, num_ctx=num_ctx)
         if data is not None:
             return data, None, model, False
         last_error = err
@@ -244,6 +258,7 @@ async def _inference_with_emergency_fallback(
             await asyncio.sleep(3)
 
     # ── Primary exhausted — engage emergency backup ──
+    # Backups run with default settings (no partial offload)
     if backup_model:
         logger.error(f"PRIMARY MODEL DOWN: {model} failed {1 + BACKUP_MAX_RETRIES} attempts. "
                      f"Engaging emergency backup: {backup_model}")
@@ -263,6 +278,112 @@ async def _inference_with_emergency_fallback(
         return None, f"All models failed. Primary: {last_error}", model, False
 
     return None, last_error, model, False
+
+
+# ── ReAct REASONING LOOP ──────────────────────────────────────────────
+# Structured Think→Act→Observe→Respond loop for complex multi-step queries.
+# Activated for Tier 2/3 complexity when using local models.
+
+_REACT_MAX_ITERATIONS = int(os.getenv("REACT_MAX_ITERATIONS", "3"))
+_REACT_ENABLED = os.getenv("REACT_ENABLED", "true").lower() in ("true", "1", "yes")
+
+_REACT_SYSTEM_PROMPT = """You are in structured reasoning mode. For each step:
+
+THINK: State what you need to figure out or what information you're missing.
+ACT: Call a tool to gather information, calculate, or look something up. If no tool is needed, write ACT: none.
+OBSERVE: Analyze the result you got back.
+
+After sufficient information is gathered (max {max_iter} iterations), provide your final answer.
+
+Format your response EXACTLY as:
+THINK: [your reasoning]
+ACT: [tool call or "none"]
+OBSERVE: [analysis of results]
+
+When you have enough information to answer, start with:
+FINAL: [your complete answer]"""
+
+
+def _is_react_eligible(decision) -> bool:
+    """Check if a query should use the ReAct reasoning loop."""
+    if not _REACT_ENABLED:
+        return False
+    if decision.backend != "ollama":
+        return False
+    # Only for complex queries (Tier 2/3) on local models
+    if decision.tier < 2:
+        return False
+    return True
+
+
+async def _react_reasoning_loop(client, model: str, user_message: str,
+                                 rag_context: str, history: list,
+                                 tools: list, execute_fn,
+                                 num_gpu: int | None = None,
+                                 num_ctx: int | None = None) -> tuple[str, list]:
+    """
+    Execute a ReAct (Think-Act-Observe) reasoning loop.
+
+    Returns (final_response_text, tool_events_for_streaming).
+    """
+    events = []  # list of dicts for streaming to frontend
+
+    react_system = _REACT_SYSTEM_PROMPT.format(max_iter=_REACT_MAX_ITERATIONS)
+    context_prefix = f"{rag_context}\n" if rag_context else ""
+
+    messages = history + [
+        {"role": "system", "content": react_system},
+        {"role": "user", "content": f"{context_prefix}{user_message}"},
+    ]
+
+    for iteration in range(_REACT_MAX_ITERATIONS):
+        data, err = await _try_ollama_inference(
+            client, model, messages, tools,
+            num_gpu=num_gpu, num_ctx=num_ctx
+        )
+        if data is None:
+            return f"Reasoning error: {err}", events
+
+        msg = data.get("message", {})
+        content = msg.get("content", "")
+        tool_calls = msg.get("tool_calls")
+
+        # Check if model reached a FINAL answer
+        if "FINAL:" in content:
+            final_text = content.split("FINAL:", 1)[1].strip()
+            return final_text, events
+
+        # Process tool calls if any
+        if tool_calls:
+            messages.append({"role": "assistant", "content": content})
+            for tc in tool_calls:
+                fn = tc.get("function", {})
+                name = fn.get("name", "unknown")
+                args = fn.get("arguments", {})
+                events.append({"t": "tool", "n": name, "a": args})
+
+                try:
+                    result = execute_fn(name, args)
+                    result_str = str(result)[:4000]
+                except Exception as e:
+                    result_str = f"Error: {e}"
+
+                events.append({"t": "result", "n": name, "s": result_str[:200]})
+                messages.append({"role": "tool", "content": result_str})
+        else:
+            # No tool calls and no FINAL — model is thinking
+            messages.append({"role": "assistant", "content": content})
+            # Nudge toward conclusion
+            messages.append({"role": "user",
+                           "content": "Continue reasoning. If you have enough information, respond with FINAL: followed by your answer."})
+
+    # Max iterations reached — extract best answer from last response
+    if content:
+        # Try to find any FINAL or just use the last content
+        if "FINAL:" in content:
+            return content.split("FINAL:", 1)[1].strip(), events
+        return content, events
+    return "Reasoning loop completed without a clear answer.", events
 
 
 async def _backup_health_loop():
@@ -307,6 +428,8 @@ _resource_state = {
     "last_sim_state": False,     # previous sim running state (for transition detection)
     "sim_stop_detected_at": 0.0, # when sim stop was first detected
     "pending_14b_preload": False, # waiting to preload 14B after sim stop
+    "vram_history": [],          # sliding window of (timestamp, vram_free_mb) for prediction
+    "priority_lowered": False,   # whether OS process priority is currently lowered
 }
 _RESOURCE_CHECK_INTERVAL = 30    # seconds between resource checks
 _VRAM_CRITICAL_MB = 1500        # below this, aggressively free VRAM
@@ -314,6 +437,9 @@ _VRAM_WARN_MB = 3000            # below this, start monitoring closely
 _MAX_WATCHER_RESTARTS = 5       # don't restart watcher more than this
 _OLLAMA_FAILURE_THRESHOLD = 3   # consecutive failures before auto-restart attempt
 _RESOURCE_ACTION_COOLDOWN = 60  # seconds between automatic VRAM actions
+_VRAM_HISTORY_WINDOW = 60       # seconds of VRAM history to keep for prediction
+_VRAM_DECLINE_RATE_THRESHOLD = 100  # MB/s — preemptive unload if declining faster
+_GPU_TEMP_THROTTLE = 80         # celsius — switch to smaller model above this
 
 
 def _log_resource_action(action: str):
@@ -323,6 +449,76 @@ def _log_resource_action(action: str):
     if len(_resource_state["actions_taken"]) > 50:
         _resource_state["actions_taken"] = _resource_state["actions_taken"][-50:]
     logger.info(f"Resource manager: {action}")
+
+
+def _adjust_process_priority(lower: bool):
+    """
+    Adjust OS-level process priority for E3N and Ollama.
+    When sim is running or VRAM pressure is high, lower priority so games get CPU/IO first.
+    """
+    if _resource_state["priority_lowered"] == lower:
+        return  # already in desired state
+
+    try:
+        import subprocess as _sp
+        target = psutil.BELOW_NORMAL_PRIORITY_CLASS if lower else psutil.NORMAL_PRIORITY_CLASS
+        label = "BELOW_NORMAL" if lower else "NORMAL"
+
+        # Adjust own process
+        own = psutil.Process()
+        own.nice(target)
+
+        # Adjust Ollama process(es)
+        for proc in psutil.process_iter(['name', 'pid']):
+            try:
+                if proc.info['name'] and 'ollama' in proc.info['name'].lower():
+                    proc.nice(target)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
+        _resource_state["priority_lowered"] = lower
+        _log_resource_action(f"Process priority → {label}")
+    except Exception as e:
+        logger.debug(f"Priority adjustment failed: {e}")
+
+
+def _record_vram_reading(vram_free: int):
+    """Record a VRAM reading for predictive trend analysis."""
+    now = _time.time()
+    history = _resource_state["vram_history"]
+    history.append((now, vram_free))
+    # Trim to window
+    cutoff = now - _VRAM_HISTORY_WINDOW
+    _resource_state["vram_history"] = [(t, v) for t, v in history if t >= cutoff]
+
+
+def _predict_vram_decline() -> float:
+    """
+    Calculate VRAM decline rate (MB/s) from recent history.
+    Positive = declining (losing VRAM), negative = recovering.
+    Returns 0.0 if insufficient data.
+    """
+    history = _resource_state["vram_history"]
+    if len(history) < 3:
+        return 0.0
+    # Use first and last readings for slope
+    t0, v0 = history[0]
+    t1, v1 = history[-1]
+    dt = t1 - t0
+    if dt < 5:  # need at least 5s of data
+        return 0.0
+    # Positive = VRAM is decreasing (bad)
+    return (v0 - v1) / dt
+
+
+def _get_gpu_temp() -> int:
+    """Get GPU temperature in celsius, or 0 if unavailable."""
+    try:
+        import pynvml
+        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+        return pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
+    except Exception:
+        return 0
 
 
 async def _resource_manager_loop():
@@ -344,10 +540,55 @@ async def _resource_manager_loop():
             await asyncio.sleep(_RESOURCE_CHECK_INTERVAL)
             now = _time.time()
 
-            # ── 1. VRAM MANAGEMENT ──
+            # ── 0. PROCESS PRIORITY + THERMAL MANAGEMENT ──
             vram_free = get_vram_free_mb()
             sim_active = is_sim_running()
+            _record_vram_reading(vram_free)
 
+            # Lower process priority when sim running or VRAM under pressure
+            should_lower = sim_active or vram_free < _VRAM_WARN_MB
+            _adjust_process_priority(should_lower)
+
+            # Thermal-aware: if GPU is hot, prefer smaller model / CPU offload
+            gpu_temp = _get_gpu_temp()
+            if gpu_temp > _GPU_TEMP_THROTTLE and not sim_active:
+                if now - _resource_state["last_vram_action"] > _RESOURCE_ACTION_COOLDOWN:
+                    try:
+                        async with httpx.AsyncClient(timeout=5) as client:
+                            resp = await client.get(f"{OLLAMA_URL}/api/ps")
+                            if resp.status_code == 200:
+                                for m in resp.json().get("models", []):
+                                    if "14b" in m.get("name", "").lower():
+                                        await client.post(f"{OLLAMA_URL}/api/generate",
+                                            json={"model": m["name"], "prompt": "", "keep_alive": 0},
+                                            timeout=10)
+                                        _log_resource_action(f"Unloaded {m['name']} (GPU temp {gpu_temp}°C)")
+                                        _resource_state["last_vram_action"] = now
+                    except Exception:
+                        pass
+
+            # ── 0b. PREDICTIVE VRAM — preemptive action on rapid decline ──
+            decline_rate = _predict_vram_decline()
+            if (decline_rate > _VRAM_DECLINE_RATE_THRESHOLD and
+                    vram_free < _VRAM_WARN_MB * 1.5 and
+                    now - _resource_state["last_vram_action"] > _RESOURCE_ACTION_COOLDOWN):
+                try:
+                    async with httpx.AsyncClient(timeout=5) as client:
+                        resp = await client.get(f"{OLLAMA_URL}/api/ps")
+                        if resp.status_code == 200:
+                            for m in resp.json().get("models", []):
+                                if "14b" in m.get("name", "").lower():
+                                    await client.post(f"{OLLAMA_URL}/api/generate",
+                                        json={"model": m["name"], "prompt": "", "keep_alive": 0},
+                                        timeout=10)
+                                    _log_resource_action(
+                                        f"Preemptive unload {m['name']} "
+                                        f"(VRAM declining {decline_rate:.0f}MB/s, {vram_free}MB free)")
+                                    _resource_state["last_vram_action"] = now
+                except Exception:
+                    pass
+
+            # ── 1. VRAM MANAGEMENT ──
             if vram_free < _VRAM_CRITICAL_MB:
                 _resource_state["vram_warnings"] += 1
                 # Critical VRAM — aggressive action after 2 consecutive readings
@@ -489,6 +730,15 @@ async def _resource_manager_loop():
             if RAG_AVAILABLE:
                 try:
                     cleanup_expired()
+                except Exception:
+                    pass
+
+            # ── 6. HIERARCHICAL MEMORY COMPACTION (every ~10 min) ──
+            if RAG_AVAILABLE and int(now) % 600 < _RESOURCE_CHECK_INTERVAL:
+                try:
+                    result = compact_warm_to_cold()
+                    if result.get("demoted", 0) > 0:
+                        _log_resource_action(f"Cold compaction: {result['demoted']} chunks demoted")
                 except Exception:
                     pass
 
@@ -739,11 +989,12 @@ async def lifespan(app: FastAPI):
     health_task = asyncio.create_task(_backup_health_loop())
     resource_task = asyncio.create_task(_resource_manager_loop())
     self_heal_task = asyncio.create_task(_ai_self_heal_loop())
+    ingest_task = asyncio.create_task(_ingest_pipeline_worker())
 
     yield
 
     # ── Shutdown ──
-    for task in (health_task, resource_task, self_heal_task):
+    for task in (health_task, resource_task, self_heal_task, ingest_task):
         task.cancel()
         try:
             await task
@@ -1026,8 +1277,17 @@ def build_rag_context(user_message: str, source_filter: str = None,
     if not RAG_AVAILABLE:
         return ""
     try:
+        from memory import iterative_query_knowledge, generate_sub_queries
+        # Round 1: Standard retrieval
         matches = query_knowledge(user_message, n_results=3, threshold=0.75,
                                   source_filter=source_filter, max_age_sec=max_age_sec)
+        # Round 2: Iterative refinement if first round has results
+        if matches and len(matches) >= 1:
+            sub_queries = generate_sub_queries(user_message, matches)
+            if sub_queries:
+                matches = iterative_query_knowledge(
+                    user_message, sub_queries=sub_queries, n_results=5,
+                    threshold=0.75, source_filter=source_filter, max_age_sec=max_age_sec)
         if not matches:
             return ""
         context_parts = ["[KNOWLEDGE CONTEXT — from your ingested documents]"]
@@ -1159,7 +1419,8 @@ async def chat(req: ChatRequest):
                 async with httpx.AsyncClient(timeout=120) as client:
                     for round_num in range(MAX_TOOL_ROUNDS):
                         data, err, used_model, is_emergency = await _inference_with_emergency_fallback(
-                            client, local_model, local_messages, TOOLS, backup
+                            client, local_model, local_messages, TOOLS, backup,
+                            num_gpu=decision.num_gpu, num_ctx=decision.num_ctx
                         )
 
                         if data is None:
@@ -1345,6 +1606,22 @@ async def chat(req: ChatRequest):
             chunk_count = rag_context.count("[Source:")
             yield json.dumps({"t": "rag", "n": chunk_count}) + "\n"
 
+        # ── ReAct reasoning path for complex local queries ──
+        if _is_react_eligible(decision):
+            yield json.dumps({"t": "react", "c": "Entering structured reasoning mode..."}) + "\n"
+            async with httpx.AsyncClient(timeout=120) as react_client:
+                final_text, tool_events = await _react_reasoning_loop(
+                    react_client, decision.model, req.message,
+                    rag_context, _get_history(), TOOLS, execute_tool,
+                    num_gpu=decision.num_gpu, num_ctx=decision.num_ctx
+                )
+                for ev in tool_events:
+                    yield json.dumps(ev) + "\n"
+                yield json.dumps({"t": "text", "c": final_text}) + "\n"
+                _append_to_history(req.message, final_text)
+                yield json.dumps({"t": "done", "turns": len(_conversation_history) // 2}) + "\n"
+            return
+
         # Track which model is active (may change if emergency backup engages)
         active_model = decision.model
         backup = decision.backup_model
@@ -1357,7 +1634,8 @@ async def chat(req: ChatRequest):
 
                 # ── Inference with retry-first, backup-last ──
                 data, err, used_model, is_emergency = await _inference_with_emergency_fallback(
-                    client, active_model, messages, TOOLS, backup if not emergency_active else None
+                    client, active_model, messages, TOOLS, backup if not emergency_active else None,
+                    num_gpu=decision.num_gpu, num_ctx=decision.num_ctx
                 )
 
                 if is_emergency and not emergency_active:
@@ -1436,7 +1714,8 @@ async def chat(req: ChatRequest):
 
             # ── Max tool rounds — final response ──
             data, err, used_model, is_emergency = await _inference_with_emergency_fallback(
-                client, active_model, messages, None, backup if not emergency_active else None
+                client, active_model, messages, None, backup if not emergency_active else None,
+                num_gpu=decision.num_gpu, num_ctx=decision.num_ctx
             )
             if is_emergency and not emergency_active:
                 yield json.dumps({
@@ -1563,6 +1842,90 @@ def memory_delete_file(filepath: str):
         return {"status": "error", "reason": str(e)}
 
 
+# ── STREAMING INGEST PIPELINE ─────────────────────────────────────────
+# Async queue-based ingest: /ingest returns immediately, background worker
+# batches and processes embeddings efficiently.
+
+_INGEST_QUEUE_MAX = int(os.getenv("INGEST_QUEUE_MAX", "500"))
+_INGEST_FLUSH_INTERVAL = float(os.getenv("INGEST_FLUSH_INTERVAL", "2.0"))  # seconds
+_INGEST_FLUSH_BATCH_SIZE = int(os.getenv("INGEST_FLUSH_BATCH_SIZE", "10"))
+
+_ingest_queue: asyncio.Queue | None = None
+_ingest_metrics = {
+    "queued": 0,
+    "processed": 0,
+    "errors": 0,
+    "avg_latency_ms": 0.0,
+    "last_flush": 0.0,
+}
+
+
+async def _ingest_pipeline_worker():
+    """
+    Background worker: drain ingest queue, batch-embed, write to ChromaDB.
+    Flushes every FLUSH_INTERVAL seconds or when FLUSH_BATCH_SIZE items accumulate.
+    """
+    global _ingest_queue
+    _ingest_queue = asyncio.Queue(maxsize=_INGEST_QUEUE_MAX)
+    await asyncio.sleep(5)  # let startup finish
+    logger.info("Ingest pipeline worker started")
+
+    while True:
+        batch = []
+        try:
+            # Collect items up to batch size or flush interval
+            deadline = _time.time() + _INGEST_FLUSH_INTERVAL
+            while len(batch) < _INGEST_FLUSH_BATCH_SIZE:
+                timeout = max(0.1, deadline - _time.time())
+                try:
+                    item = await asyncio.wait_for(_ingest_queue.get(), timeout=timeout)
+                    batch.append(item)
+                except asyncio.TimeoutError:
+                    break
+
+            if not batch or not RAG_AVAILABLE:
+                continue
+
+            # Process batch
+            start = _time.time()
+            items_for_batch = [
+                {"source": it["source"], "context": it["context"],
+                 "ttl": it["ttl"], "tags": it["tags"]}
+                for it in batch
+            ]
+            try:
+                result = await asyncio.to_thread(ingest_context_batch, items_for_batch)
+                _ingest_metrics["processed"] += len(batch)
+                elapsed = (_time.time() - start) * 1000
+                _ingest_metrics["avg_latency_ms"] = (
+                    _ingest_metrics["avg_latency_ms"] * 0.8 + elapsed * 0.2
+                )
+            except Exception as e:
+                _ingest_metrics["errors"] += len(batch)
+                logger.warning(f"Ingest pipeline batch failed: {e}")
+
+            _ingest_metrics["last_flush"] = _time.time()
+
+            # Forward alerts
+            for it in batch:
+                if "alert" in it.get("tags", []):
+                    alert = {
+                        "source": it["source"],
+                        "context": it["context"],
+                        "tags": it["tags"],
+                        "ts": _time.time(),
+                        "priority": "critical" if "critical" in it["tags"] else "high" if "high" in it["tags"] else "normal",
+                    }
+                    _recent_alerts.append(alert)
+                    await _broadcast_alert(alert)
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Ingest pipeline error: {e}")
+            await asyncio.sleep(1)
+
+
 # ── INGEST CONNECTOR ──────────────────────────────────────────────────
 # External services push structured context into E3N's RAG memory.
 
@@ -1578,6 +1941,7 @@ async def ingest_endpoint(req: IngestRequest):
     """
     Ingest structured context from an external service into ChromaDB.
     This is E3N's connector — any service can push context here.
+    When the async pipeline is active, returns immediately after queuing.
     """
     if not RAG_AVAILABLE:
         return {"error": "RAG not available"}
@@ -1585,6 +1949,36 @@ async def ingest_endpoint(req: IngestRequest):
         return {"status": "error", "reason": "source is required"}
     if not req.context or not req.context.strip():
         return {"status": "error", "reason": "context is required"}
+
+    # Try async pipeline first (non-blocking)
+    if _ingest_queue is not None:
+        try:
+            _ingest_queue.put_nowait({
+                "source": req.source.strip(),
+                "context": req.context.strip(),
+                "ttl": req.ttl,
+                "tags": req.tags,
+            })
+            _ingest_metrics["queued"] += 1
+            # Immediate alert forwarding (don't wait for pipeline)
+            if "alert" in req.tags:
+                alert = {
+                    "source": req.source,
+                    "context": req.context,
+                    "tags": req.tags,
+                    "ts": _time.time(),
+                    "priority": "critical" if "critical" in req.tags else "high" if "high" in req.tags else "normal",
+                }
+                _recent_alerts.append(alert)
+                await _broadcast_alert(alert)
+            return {"status": "queued", "queue_depth": _ingest_queue.qsize()}
+        except asyncio.QueueFull:
+            return JSONResponse(
+                status_code=429,
+                content={"status": "error", "reason": "Ingest queue full — backpressure"},
+            )
+
+    # Fallback: synchronous ingest
     try:
         result = await asyncio.to_thread(
             ingest_context,
@@ -1593,7 +1987,6 @@ async def ingest_endpoint(req: IngestRequest):
             ttl=req.ttl,
             tags=req.tags,
         )
-        # Forward alerts to WebSocket clients
         if "alert" in req.tags:
             alert = {
                 "source": req.source,
@@ -1638,6 +2031,17 @@ async def ingest_batch_endpoint(req: IngestBatchRequest):
         return {"status": "error", "reason": str(e)}
 
 
+@app.get("/ingest/pipeline/status")
+def ingest_pipeline_status():
+    """Get ingest pipeline queue metrics."""
+    return {
+        "pipeline_active": _ingest_queue is not None,
+        "queue_depth": _ingest_queue.qsize() if _ingest_queue else 0,
+        "queue_max": _INGEST_QUEUE_MAX,
+        **_ingest_metrics,
+    }
+
+
 @app.post("/ingest/cleanup")
 def ingest_cleanup():
     """Manually trigger TTL cleanup of expired ingested entries."""
@@ -1647,6 +2051,31 @@ def ingest_cleanup():
         return cleanup_expired()
     except Exception as e:
         return {"status": "error", "reason": str(e)}
+
+
+# ── HIERARCHICAL MEMORY ENDPOINTS ─────────────────────────────────────
+
+@app.post("/memory/compact")
+async def memory_compact():
+    """Manually trigger warm→cold memory compaction."""
+    if not RAG_AVAILABLE:
+        return {"error": "RAG not available"}
+    try:
+        result = await asyncio.to_thread(compact_warm_to_cold)
+        return result
+    except Exception as e:
+        return {"status": "error", "reason": str(e)}
+
+
+@app.get("/memory/cold/stats")
+def cold_memory_stats():
+    """Get cold tier storage statistics."""
+    if not RAG_AVAILABLE:
+        return {"error": "RAG not available"}
+    try:
+        return get_cold_stats()
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # ── WEBSOCKET ALERTS ─────────────────────────────────────────────────
@@ -1720,10 +2149,17 @@ def self_heal_status():
 @app.get("/resources/status")
 def resource_status():
     """Resource self-manager status — VRAM, circuit breaker, auto-recovery."""
+    vram_free = get_vram_free_mb()
+    decline_rate = _predict_vram_decline()
+    gpu_temp = _get_gpu_temp()
     return {
         "resource_manager": {
-            "vram_free_mb": get_vram_free_mb(),
+            "vram_free_mb": vram_free,
             "vram_warnings": _resource_state["vram_warnings"],
+            "vram_decline_rate_mb_s": round(decline_rate, 1),
+            "vram_prediction": "declining" if decline_rate > 50 else "stable" if abs(decline_rate) < 20 else "recovering",
+            "gpu_temp_c": gpu_temp,
+            "process_priority": "below_normal" if _resource_state["priority_lowered"] else "normal",
             "ollama_failures": _resource_state["ollama_failures"],
             "watcher_restarts": _resource_state["watcher_restarts"],
             "last_vram_action": _resource_state["last_vram_action"] or None,
@@ -2242,7 +2678,8 @@ async def voice_chat(request: Request, voice: str = None, rate: str = None):
 
         async with httpx.AsyncClient(timeout=120) as client:
             data, err, used_model, is_emergency = await _inference_with_emergency_fallback(
-                client, decision.model, msg_list, TOOLS, decision.backup_model
+                client, decision.model, msg_list, TOOLS, decision.backup_model,
+                num_gpu=decision.num_gpu, num_ctx=decision.num_ctx
             )
         if data is None:
             response_text = "Systems encountered an error. Try again."

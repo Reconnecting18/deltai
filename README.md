@@ -3,13 +3,14 @@
   <img src="https://img.shields.io/badge/platform-Windows%2011-0078D4?style=flat-square" alt="Platform">
   <img src="https://img.shields.io/badge/python-3.14-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/CUDA-12.6-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="CUDA">
+  <img src="https://img.shields.io/badge/Ollama-Qwen2.5-FF6F00?style=flat-square" alt="Ollama">
 </p>
 
 # E3N
 
-**Local AI system with VRAM-aware routing, RAG memory, and a training pipeline — built to serve as a race engineer brain for Le Mans Ultimate.**
+**Local AI system with VRAM-aware routing, RAG memory, structured reasoning, and a training pipeline — built to serve as a race engineer brain for Le Mans Ultimate.**
 
-E3N is the intelligence layer: reasoning, memory, tool execution, and model routing. External services (like a future Telemetry API) connect via the `/ingest` endpoint to push context into its RAG memory. Named after E3N from COD: Infinite Warfare and BT-7274 from Titanfall 2 — warm, loyal, confident, with a distinct voice (en-US-AndrewNeural with electronic resonance filter). Not a chatbot. A teammate.
+E3N is the intelligence layer: reasoning, memory, tool execution, and model routing. External services (like a future Telemetry API) connect via the `/ingest` endpoint to push context into its RAG memory. Named after E3N from COD: Infinite Warfare and BT-7274 from Titanfall 2 — warm, loyal, confident, with a distinct voice. Not a chatbot. A teammate.
 
 ---
 
@@ -31,21 +32,21 @@ E3N is the intelligence layer: reasoning, memory, tool execution, and model rout
 │  FastAPI Backend          main.py :8000                     │
 │  ┌────────┐ ┌──────────┐ ┌──────────┐ ┌─────────────────┐  │
 │  │ Router │ │ RAG      │ │ Tools    │ │ Training        │  │
-│  │ VRAM-  │ │ ChromaDB │ │ 7 core + │ │ QLoRA + GGUF    │  │
-│  │ aware  │ │ + nomic  │ │ 4 telem  │ │ + A/B eval      │  │
+│  │ VRAM + │ │ ChromaDB │ │ 7 core + │ │ QLoRA + GGUF    │  │
+│  │ Quant  │ │ + Cold   │ │ 4 telem  │ │ + Adapters      │  │
 │  └───┬────┘ └──────────┘ └──────────┘ └─────────────────┘  │
 │      │      ┌──────────┐ ┌──────────┐ ┌─────────────────┐  │
-│      │      │ Persist  │ │ Voice    │ │ Anthropic       │  │
-│      │      │ SQLite   │ │ STT/TTS  │ │ Cloud (dormant) │  │
+│      │      │ Persist  │ │ Voice    │ │ ReAct + Ingest  │  │
+│      │      │ SQLite   │ │ STT/TTS  │ │ Pipeline        │  │
 │      │      └──────────┘ └──────────┘ └─────────────────┘  │
 └──────┼──────────────────────────────────────────────────────┘
        │
 ┌──────┴──────────────────────────────────────────────────────┐
-│  Ollama                                                     │
+│  Ollama (dynamic quantization + partial GPU offloading)     │
 │  ┌──────────────┐  ┌──────────────┐  ┌───────────────────┐  │
 │  │ e3n-qwen14b  │  │ e3n-qwen3b   │  │ e3n-nemo / e3n    │  │
 │  │ Tier A (14B) │  │ Tier B/C (3B)│  │ Emergency backup  │  │
-│  │ >9GB VRAM    │  │ 3-9GB / CPU  │  │ Last resort only  │  │
+│  │ Q6/Q4/Q3     │  │ Q4/Q2        │  │ Last resort only  │  │
 │  └──────────────┘  └──────────────┘  └───────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -53,7 +54,7 @@ E3N is the intelligence layer: reasoning, memory, tool execution, and model rout
 ### External Services → E3N
 
 ```
-Telemetry API ──POST /ingest──►  E3N ChromaDB (RAG)
+Telemetry API ──POST /ingest──►  Async Queue → Batch Embed → ChromaDB (RAG)
 (future)        POST /ingest/batch
                 tags: ["alert"] ──► WebSocket → Dashboard toast
 ```
@@ -93,7 +94,7 @@ ollama create e3n-qwen3b -f C:\e3n\modelfiles\E3N-qwen3b.modelfile
 cd C:\e3n\project
 python -m venv venv
 .\venv\Scripts\activate
-pip install -r requirements.txt    # or install manually — see below
+pip install -r requirements.txt
 
 # 3. Electron app
 cd C:\e3n\app
@@ -136,40 +137,109 @@ TTS_VOICE=en-US-AndrewNeural
 # Training
 HF_BASE_MODEL=Qwen/Qwen2.5-3B-Instruct
 LLAMA_CPP_PATH=C:\e3n\tools\llama.cpp
+
+# Phase 8 — Advanced Intelligence & Resource Optimization
+REACT_ENABLED=true              # ReAct reasoning loop for complex queries
+REACT_MAX_ITERATIONS=3          # Max think-act-observe cycles
+RAR_ENABLED=true                # Iterative RAG (two-round retrieval)
+DEDUP_THRESHOLD=0.15            # Semantic dedup cosine distance threshold
+MIXTURE_LORA_ENABLED=false      # Dynamic LoRA adapter routing (needs trained adapters)
+VRAM_TIER_AB_MIN_MB=5000        # Partial GPU offload threshold
+WARM_TO_COLD_AGE_SEC=86400      # Age before demoting to cold storage (24h)
+INGEST_QUEUE_MAX=500            # Async ingest pipeline queue size
+INGEST_FLUSH_INTERVAL=2.0       # Seconds between batch flushes
 ```
 
 ---
 
 ## Key Features
 
-### VRAM-Aware Model Routing
-The router detects available VRAM in real-time and selects the best model:
+### Intelligent Model Routing
 
-| Tier | VRAM Free | Model | Use Case |
+The router detects available VRAM in real-time and selects the optimal model, quantization level, and GPU layer count:
+
+| Tier | VRAM Free | Model | Strategy |
 |------|-----------|-------|----------|
-| A | > 9GB | Qwen2.5-14B (Q4_K_M) | Full power — no sim running |
-| B | 3–9GB | Qwen2.5-3B on GPU | Sim running, GPU shared |
-| C | < 3GB | Qwen2.5-3B on CPU | VRAM critical |
+| A | > 9GB | Qwen2.5-14B Q6_K/Q4_K_M | Full GPU — best quality |
+| AB | 5–9GB | Qwen2.5-14B (partial offload) | N layers on GPU, rest in RAM |
+| B | 3–5GB | Qwen2.5-3B Q4_K_M on GPU | Sim running, GPU shared |
+| C | < 3GB | Qwen2.5-3B Q2_K/CPU | VRAM critical — emergency |
 
-Sim process detection via psutil. On LMU launch → unload large model, preload 3B. On sim close → swap back to 14B within 30 seconds.
+**Dynamic quantization**: The router selects from pre-registered quantization variants (Q6_K → Q4_K_M → Q3_K_M → Q2_K) based on available VRAM, providing smooth quality degradation instead of cliff edges.
+
+**Partial GPU offloading**: For the Tier AB zone (5–9GB), the router calculates the optimal `num_gpu` — putting as many transformer layers on GPU as fit while spilling the rest to RAM. This gives 50–70% GPU speed at ~4GB VRAM instead of 8.5GB.
+
+**Dynamic context window**: `num_ctx` scales automatically with available VRAM (4096 → 2048 → 1024) to reduce KV cache memory usage under pressure.
+
+### ReAct Structured Reasoning
+
+For complex queries (Tier 2/3 complexity), E3N enters a structured **Think → Act → Observe** reasoning loop:
+
+1. **THINK**: Identify what information is needed
+2. **ACT**: Call tools, query RAG, run calculations
+3. **OBSERVE**: Analyze results, check for gaps
+4. **FINAL**: Synthesize complete answer
+
+Up to 3 iterations per query. Dramatically improves multi-step problem solving on local models without any model changes — pure prompt engineering.
 
 ### RAG Memory
-ChromaDB with nomic-embed-text embeddings. Multi-query expansion generates 2–3 search variants, results are deduplicated and reranked with source grouping and recency bias.
 
+ChromaDB with nomic-embed-text embeddings. Three-tier hierarchical storage with intelligent retrieval:
+
+- **Iterative retrieval**: Two-round RAG — first round retrieves, second round fills knowledge gaps with model-directed sub-queries
+- **Semantic deduplication**: Near-duplicate chunks detected before ingest (cosine < 0.15) — metadata freshened instead of duplicating
+- **Hierarchical storage**: Hot (ChromaDB in-memory) → Warm (ChromaDB persistent, <24h) → Cold (SQLite + zlib compression, >24h)
+- **Cold tier search**: Brute-force cosine fallback when hot/warm returns insufficient results
 - **Knowledge base**: Drop files in `data/knowledge/` — watchdog auto-ingests
-- **Ingest connector**: External services push context via `POST /ingest` with TTL and source tags
-- **Live data**: Source and age filtering for real-time telemetry queries
-- **Batch ingest**: Single embedding call for up to 100 items
+- **Async ingest pipeline**: Queue-based non-blocking ingestion with batch embedding (2s flush interval)
+
+### Adaptive Resource Management
+
+The resource self-manager runs every 30 seconds with predictive intelligence:
+
+- **Predictive VRAM**: 60-second sliding window tracks VRAM trend — preemptive model unload when declining >100MB/s
+- **Thermal throttling**: GPU temperature monitoring via pynvml — auto-unloads large models above 80°C before GPU self-throttles
+- **OS process priority**: Automatically lowers E3N + Ollama to `BELOW_NORMAL_PRIORITY_CLASS` during racing or VRAM pressure, restores when idle
+- **Proactive model lifecycle**: Auto-unload 14B on sim start, preload 3B; reverse on sim stop after 30s cooldown
+- **Circuit breaker**: 3-failure threshold on Ollama with exponential backoff (5s → 60s), half-open recovery
+- **Memory compaction**: Background warm→cold tier demotion every ~10 minutes
+
+### Mixture-of-LoRA Adapter Routing
+
+Instead of statically merging all domain adapters (TIES), E3N can dynamically route queries to the best single LoRA adapter:
+
+| Domain | Adapter | Purpose |
+|--------|---------|---------|
+| Racing | r=16, 50% frozen | Tire strategy, telemetry, driving technique |
+| Engineering | r=16, 33% frozen | Physics, calculus, statics, thermo |
+| Personality | r=8, 67% frozen | E3N voice and response style |
+| Reasoning | r=32, 22% frozen | Chain-of-thought, analysis |
+
+Query domain classification routes to the best adapter at full fidelity — no merge quality loss.
+
+### Streaming Ingest Pipeline
+
+High-throughput async ingest with backpressure:
+
+```
+POST /ingest → Queue (500 max) → Batch Worker (every 2s or 10 items) → Embed → Dedup → ChromaDB
+                                                                              ↓
+                                                                     Alert → WebSocket
+```
+
+- **Non-blocking**: `/ingest` returns immediately after queuing
+- **Backpressure**: Returns `429` when queue is full
+- **Metrics**: Queue depth, processed count, average latency via `/ingest/pipeline/status`
 
 ### Training Pipeline
+
 Two improvement paths: **RAG knowledge enrichment** (preferred for 3B) and **QLoRA fine-tuning** (for larger datasets).
 
-- **Knowledge enrichment**: 8 reference documents (143 expert examples) covering anti-hallucination, engineering, race strategy, data interpretation, personality, MechE, reasoning, and race simulations. Ingested into ChromaDB, retrieved via RAG at query time
-- **QLoRA**: 4-bit training on Qwen2.5-3B (~6-7GB VRAM) via PEFT/TRL — full pipeline verified end-to-end (LoRA → merge → GGUF Q4_K_M → Ollama registration)
+- **Knowledge enrichment**: 8 reference documents (143 expert examples) — ingested into ChromaDB, retrieved via iterative RAG at query time
+- **QLoRA**: 4-bit training on Qwen2.5-3B (~6-7GB VRAM) via PEFT/TRL — full pipeline verified end-to-end
+- **Adapter surgery**: 4 domain slots (racing/engineering/personality/reasoning) with selective layer freezing and TIES merge
 - **A/B evaluation**: Compare two models on a dataset with latency + quality metrics
-- **Auto-capture**: Good exchanges automatically saved to `e3n-auto` dataset
-- **Safety**: Blocked when sim is running; cancellable mid-training
-- **Finding**: RAG enrichment outperforms LoRA on 3B models with small datasets (143 examples) — model retains instruction-following behavior while gaining expert reference context
+- **Auto-capture**: Good exchanges automatically saved to training datasets
 
 ### Voice Module
 - **STT**: faster-whisper (CTranslate2) — GPU or CPU, VRAM-aware
@@ -190,31 +260,28 @@ C:\e3n\
 ├── app\                          Electron desktop app
 │   └── main.js                   Frameless window + IPC
 ├── project\                      FastAPI backend
-│   ├── main.py                   Chat, ingest, training, voice endpoints
-│   ├── router.py                 VRAM detection, sim detection, tier routing
-│   ├── memory.py                 ChromaDB RAG — embed, query, ingest, batch, TTL cleanup
+│   ├── main.py                   Chat, ingest pipeline, ReAct loop, resource manager
+│   ├── router.py                 VRAM detection, dynamic quant, partial offload, MoLoRA
+│   ├── memory.py                 Hierarchical RAG — hot/warm/cold, iterative retrieval, dedup
 │   ├── persistence.py            SQLite — conversation history, budget tracking
 │   ├── anthropic_client.py       Cloud inference with tool use (dormant until API key)
-│   ├── training.py               QLoRA fine-tuning, dataset CRUD, A/B eval, auto-capture
-│   ├── voice.py                  STT (faster-whisper) + TTS (edge-tts)
+│   ├── training.py               QLoRA, adapter surgery, TIES merge, dataset CRUD, A/B eval
+│   ├── voice/                    STT (faster-whisper) + TTS (edge-tts) package
 │   ├── watcher.py                Watchdog file watcher for knowledge dir
 │   ├── tools/
-│   │   ├── definitions.py        8 core + 4 conditional telemetry tool schemas
-│   │   └── executor.py           Tool execution with retry + telemetry API calls
+│   │   ├── definitions.py        Tool JSON schemas (core + telemetry)
+│   │   └── executor.py           Tool execution with retry + safety checks
 │   ├── static/
 │   │   └── index.html            Full dashboard UI (single file — CSS + HTML + JS)
 │   ├── tests/
-│   │   ├── verify_full.py        28 core tests
-│   │   ├── verify_stress.py      30 stress simulation tests
-│   │   └── verify_resource_mgmt.py  29 resource management tests
+│   │   ├── verify_full.py        Core system tests
+│   │   ├── verify_stress.py      Stress simulation tests
+│   │   └── verify_resource_mgmt.py  Resource management tests
 │   └── .env                      Configuration (not committed)
 ├── modelfiles\                   Ollama modelfiles (identical prompts, different FROM)
-│   ├── E3N-qwen14b.modelfile
-│   ├── E3N-qwen3b.modelfile
-│   ├── E3N-nemo.modelfile
-│   └── E3N.modelfile
 ├── data\
-│   ├── chromadb\                 Vector store (not committed)
+│   ├── chromadb\                 Vector store — hot/warm tiers (not committed)
+│   ├── cold_memory.db            Cold tier compressed archive (not committed)
 │   ├── sqlite\                   Persistent state (not committed)
 │   ├── knowledge\                Drop files here for RAG ingestion
 │   └── training\                 Datasets, adapters, GGUF exports, eval results
@@ -230,15 +297,22 @@ C:\e3n\
 ### Chat
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/chat` | Streaming chat (NDJSON) — routes automatically |
+| POST | `/chat` | Streaming chat (NDJSON) — auto-routes, ReAct for complex queries |
 | GET | `/chat/history` | Conversation history metadata |
 | DELETE | `/chat/history` | Clear conversation history |
 
 ### Ingest
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/ingest` | Push context into RAG (source, context, TTL, tags) |
+| POST | `/ingest` | Push context into RAG (async queue, non-blocking) |
 | POST | `/ingest/batch` | Batch ingest up to 100 items |
+| GET | `/ingest/pipeline/status` | Queue depth, throughput, latency metrics |
+
+### Memory
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/memory/compact` | Trigger warm→cold tier compaction |
+| GET | `/memory/cold/stats` | Cold tier storage statistics |
 
 ### Training
 | Method | Endpoint | Description |
@@ -252,6 +326,15 @@ C:\e3n\
 | GET | `/training/status` | Progress, loss, step count |
 | POST | `/training/eval/ab` | A/B model comparison |
 
+### Adapters
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/adapters` | List all adapters (optional domain filter) |
+| GET | `/adapters/active` | Current active adapter map |
+| POST | `/adapters/train` | Start domain-specific LoRA training |
+| POST | `/adapters/merge` | TIES merge active adapters → production GGUF |
+| POST | `/adapters/eval/{name}` | Evaluate adapter against baseline |
+
 ### System
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -259,7 +342,7 @@ C:\e3n\
 | GET | `/stats` | System stats + model info + budget |
 | GET | `/budget/status` | Cloud spend tracking |
 | GET | `/backup/status` | Emergency backup diagnostics |
-| GET | `/resources/status` | VRAM, circuit breaker, resource manager state |
+| GET | `/resources/status` | VRAM prediction, GPU temp, process priority, circuit breaker |
 | GET | `/self-heal/status` | AI self-heal loop status + recent actions |
 | GET | `/health/events` | Timestamped health event log |
 | WS | `/ws/alerts` | Real-time alert notifications |
@@ -283,9 +366,11 @@ C:\e3n\
 | 2 | **Complete** | VRAM-aware routing, Qwen migration, sim detection, /ingest, emergency backup |
 | 3 | **Complete** | Cloud tool-use, split workload, cost budget, conversation history, SQLite persistence |
 | 4 | **Complete** | Smarter RAG, training pipeline, text-as-tool hardening, error recovery, voice module |
-| 5 | **Complete** | Telemetry prep — WebSocket alerts, batch ingest, conditional telemetry tools, /ingest connector |
-| 6 | **Complete** | Dashboard Tier 1 — training pipeline UI, diagnostics panel, live voice chat (always-listening), settings panel, resource self-manager, circuit breaker, AI self-heal, voice filter v3 |
-| — | **Separate project** | Telemetry API for Le Mans Ultimate — connects to E3N via /ingest |
+| 5 | **Complete** | Telemetry prep — WebSocket alerts, batch ingest, conditional telemetry tools |
+| 6 | **Complete** | Dashboard UI — training pipeline, diagnostics, live voice chat, settings, self-heal |
+| 7 | **Complete** | Adapter surgery — modular domain LoRA, TIES merge, computation tools, distillation |
+| 8 | **Complete** | Advanced intelligence — ReAct reasoning, iterative RAG, dynamic quant/offload, hierarchical memory, async ingest, MoLoRA, predictive VRAM, process priority |
+| — | **Separate** | Telemetry API for Le Mans Ultimate — connects to E3N via /ingest |
 
 ---
 
@@ -296,28 +381,25 @@ Tactical operations center aesthetic with a muted grey-green palette. Features i
 - **Header**: Subsystem health monitor (X/8 ONLINE) + cloud budget display
 - **3D particle sphere**: Network node map with speech waveform animation during voice chat
 - **Terminal**: Streaming chat with conversation history (CLR + turn counter)
-- **Live voice chat**: Always-listening JARVIS/E3N style. Click VOICE to activate — Whisper pre-warms, just talk naturally, VAD auto-detects speech and silence. Split pipeline: STT (instant transcription) → streaming chat (response streams in real-time) → TTS (AudioContext.decodeAudioData with electronic resonance filter — vocal presence + 4.2kHz/6.8kHz shimmer + 12ms micro-chorus). Whisper hallucination filtering. Auto-cycles back to listening after each response
-- **Web search**: DuckDuckGo-powered web search tool — E3N can autonomously look up specs, current events, and topics not in its knowledge base. No API key required. Blocked during active racing sessions.
-- **Electronic voice filter**: Subtle AI texture applied via Web Audio API — bandpass emphasis, soft saturation, low-frequency electronic hum. Configurable intensity (0-100%) in Settings. Gives E3N his signature robotic undertone.
-- **Settings panel**: Audio device selection (mic input/speaker output), TTS voice + speed config, voice filter toggle + intensity slider, system status overview
-- **Training pipeline**: Start/stop training, mode selector (auto/lora/fewshot), live progress bar + loss, LoRA status chip
-- **Diagnostics panel**: Circuit breaker state, VRAM monitor, self-heal status, resource action log, health event timeline
+- **Live voice chat**: Always-listening JARVIS/E3N style — Whisper pre-warms, VAD auto-detects speech
+- **Web search**: DuckDuckGo-powered autonomous web search tool
+- **Electronic voice filter**: Subtle AI texture via Web Audio API — configurable intensity
+- **Settings panel**: Audio devices, TTS config, voice filter, system status
+- **Training pipeline**: Start/stop training, mode selector, live progress + loss
+- **Diagnostics panel**: Circuit breaker, VRAM prediction, self-heal status, resource action log
 - **Live widgets**: GPU/CPU/RAM stats with 60s sparklines
 - **WebSocket toasts**: Real-time alert notifications with priority coloring
-- **Drag-and-drop**: Alt+drag widgets between panels
 
 ---
 
 ## Verification
 
-Run the full test suites (92 tests across all subsystems):
-
 ```powershell
 cd C:\e3n\project
 .\venv\Scripts\activate
-python tests/verify_full.py          # 33 tests — core systems
-python tests/verify_stress.py        # 30 tests — stress simulations
-python tests/verify_resource_mgmt.py # 29 tests — resource management
+python tests/verify_full.py          # Core system tests
+python tests/verify_stress.py        # Stress simulation tests
+python tests/verify_resource_mgmt.py # Resource management tests
 ```
 
 ---

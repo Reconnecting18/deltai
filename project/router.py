@@ -58,6 +58,35 @@ def _env_float(key: str, default: float) -> float:
         return default
 
 
+# ── DYNAMIC QUANTIZATION TIERS ───────────────────────────────────────────
+# Multiple quantization levels for smooth performance degradation.
+# Each tier maps VRAM availability to a model variant with appropriate quant.
+# Models must be pre-registered in Ollama (e.g. ollama create e3n-qwen14b-q6 -f ...)
+
+_QUANT_TIERS_14B = [
+    # (min_vram_mb, model_name, quant_label)
+    (10000, os.getenv("E3N_STRONG_MODEL_Q6", ""), "Q6_K"),       # Best quality
+    (8500,  os.getenv("E3N_STRONG_MODEL", "e3n-qwen14b"), "Q4_K_M"),  # Current default
+    (6500,  os.getenv("E3N_STRONG_MODEL_Q3", ""), "Q3_K_M"),    # Good quality, less VRAM
+]
+
+_QUANT_TIERS_3B = [
+    (2500, os.getenv("E3N_MODEL", "e3n-qwen3b"), "Q4_K_M"),     # Current default
+    (1200, os.getenv("E3N_MODEL_Q2", ""), "Q2_K"),               # Emergency minimal
+]
+
+
+def _pick_best_quant(model_tiers: list, vram_free: int) -> tuple[str, str] | None:
+    """
+    Pick the best quantization variant that fits in available VRAM.
+    Returns (model_name, quant_label) or None if no model fits or no variants configured.
+    """
+    for min_vram, model_name, quant_label in model_tiers:
+        if model_name and vram_free >= min_vram:
+            return model_name, quant_label
+    return None
+
+
 # ── GPU / VRAM DETECTION ─────────────────────────────────────────────────
 
 _nvml_initialized = False
@@ -445,6 +474,47 @@ def classify_adapter_domain(message: str) -> str | None:
     return max(scores, key=scores.get)
 
 
+# ── MIXTURE-OF-LORA ROUTING ──────────────────────────────────────────────
+# Instead of always using the TIES-merged model, dynamically select which
+# LoRA adapter to apply at inference time for best per-domain quality.
+
+_MIXTURE_LORA_ENABLED = _env_bool("MIXTURE_LORA_ENABLED", False)
+
+
+def resolve_adapter_model(base_model: str, adapter_domain: str | None) -> tuple[str, str | None]:
+    """
+    Resolve the best model to use given the adapter domain.
+
+    If a domain-specific adapter is active in the registry AND Mixture-of-LoRA
+    is enabled, returns the adapter's Ollama model name.
+    Otherwise returns the base model unchanged.
+
+    Returns (model_name, adapter_name_or_none).
+    """
+    if not _MIXTURE_LORA_ENABLED or not adapter_domain:
+        return base_model, None
+
+    try:
+        from training import get_active_adapters, _load_registry
+        active = get_active_adapters()
+        adapter_name = active.get(adapter_domain)
+        if not adapter_name:
+            return base_model, None
+
+        registry = _load_registry()
+        adapter_entry = registry.get("adapters", {}).get(adapter_name, {})
+        # Check if adapter has an Ollama model registered
+        ollama_model = adapter_entry.get("ollama_model")
+        if ollama_model:
+            logger.info(f"MoLoRA: routing to domain adapter {adapter_name} ({ollama_model}) for {adapter_domain}")
+            return ollama_model, adapter_name
+
+        return base_model, None
+    except Exception as e:
+        logger.debug(f"MoLoRA resolution failed: {e}")
+        return base_model, None
+
+
 # ── CONNECTIVITY CHECK ──────────────────────────────────────────────────
 
 _last_connectivity_check = 0
@@ -656,7 +726,9 @@ class RouteDecision:
                  sim_running: bool = False, cpu_only: bool = False,
                  backup_model: str | None = None,
                  query_category: str = "general",
-                 adapter_domain: str | None = None):
+                 adapter_domain: str | None = None,
+                 num_gpu: int | None = None,
+                 num_ctx: int | None = None):
         self.backend = backend      # "ollama" or "anthropic"
         self.model = model          # model name/id
         self.tier = tier            # 1, 2, or 3
@@ -668,10 +740,12 @@ class RouteDecision:
         self.backup_model = backup_model  # emergency fallback (None = no backup)
         self.query_category = query_category
         self.adapter_domain = adapter_domain  # augmentation slot domain (racing/engineering/etc)
+        self.num_gpu = num_gpu      # number of GPU layers (None = Ollama default / all)
+        self.num_ctx = num_ctx      # context window size (None = model default)
 
     def to_dict(self) -> dict:
         """Serialize for frontend. backup_model excluded — invisible infrastructure."""
-        return {
+        d = {
             "backend": self.backend,
             "model": self.model,
             "tier": self.tier,
@@ -683,6 +757,11 @@ class RouteDecision:
             "query_category": self.query_category,
             "adapter_domain": self.adapter_domain,
         }
+        if self.num_gpu is not None:
+            d["num_gpu"] = self.num_gpu
+        if self.num_ctx is not None:
+            d["num_ctx"] = self.num_ctx
+        return d
 
     def __repr__(self):
         tag = f"Route({self.backend}/{self.model}, tier={self.tier}"
@@ -697,16 +776,62 @@ class RouteDecision:
         return tag + f", reason={self.reason})"
 
 
-def _pick_local_model() -> tuple[str, bool, str | None]:
+def _calc_num_gpu(model_name: str, vram_free: int) -> int | None:
+    """
+    Calculate optimal number of GPU layers for partial offloading.
+    Returns None for full GPU, 0 for full CPU, or N for partial offload.
+
+    14B Q4_K_M has ~40 layers, ~210MB per layer on GPU.
+    3B Q4_K_M has ~32 layers, ~78MB per layer on GPU.
+    """
+    if "14b" in model_name.lower():
+        total_layers = 40
+        mb_per_layer = 210
+    elif "3b" in model_name.lower():
+        total_layers = 32
+        mb_per_layer = 78
+    else:
+        return None  # unknown model, let Ollama decide
+
+    # Reserve 500MB for KV cache and overhead
+    usable_vram = max(0, vram_free - 500)
+    max_layers = min(total_layers, int(usable_vram / mb_per_layer))
+
+    if max_layers >= total_layers:
+        return None  # full GPU — no need to specify
+    if max_layers <= 0:
+        return 0     # full CPU
+    return max_layers
+
+
+def _calc_num_ctx(vram_free: int, sim_active: bool) -> int | None:
+    """
+    Dynamically adjust context window based on VRAM pressure.
+    Smaller context = less KV cache VRAM usage.
+    Returns None for default (model decides), or explicit value.
+    """
+    if sim_active and vram_free < 4000:
+        return 1024  # minimal context during racing
+    if vram_free < 2000:
+        return 1024
+    if vram_free < 4000:
+        return 2048
+    return None  # default (typically 4096)
+
+
+def _pick_local_model() -> tuple[str, bool, str | None, int | None, int | None]:
     """
     Pick the best local model based on VRAM availability and sim status.
-    Returns (model_name, cpu_only, backup_model).
+    Returns (model_name, cpu_only, backup_model, num_gpu, num_ctx).
 
     Strategy:
-      VRAM free > TIER_A_MIN (9GB) → strong model (14B)
-      VRAM free > TIER_B_MIN (3GB) → sim model (3B on GPU)
-      VRAM free < TIER_B_MIN       → sim model (3B on CPU)
+      VRAM free > TIER_A_MIN (9GB)  → strong model (14B), full GPU
+      VRAM free > TIER_AB_MIN (5GB) → strong model (14B), partial GPU offload
+      VRAM free > TIER_B_MIN (3GB)  → sim model (3B on GPU)
+      VRAM free < TIER_B_MIN        → sim model (3B on CPU)
 
+    num_gpu: number of GPU layers for partial offloading (None = all layers).
+    num_ctx: context window size override (None = model default).
     backup_model is the emergency fallback if the primary fails.
     """
     strong_model = os.getenv("E3N_STRONG_MODEL", "e3n-qwen14b")
@@ -714,25 +839,40 @@ def _pick_local_model() -> tuple[str, bool, str | None]:
     sim_model = os.getenv("E3N_SIM_MODEL", default_model)
 
     tier_a_min = _env_int("VRAM_TIER_A_MIN_MB", 9000)
+    tier_ab_min = _env_int("VRAM_TIER_AB_MIN_MB", 5000)  # partial offload zone
     tier_b_min = _env_int("VRAM_TIER_B_MIN_MB", 3000)
 
     vram_free = get_vram_free_mb()
     sim_active = is_sim_running()
+    num_ctx = _calc_num_ctx(vram_free, sim_active)
 
     # If sim is running, always prefer the small model to save VRAM
     if sim_active:
         if vram_free >= tier_b_min:
-            return sim_model, False, get_backup_model(sim_model)
+            return sim_model, False, get_backup_model(sim_model), None, num_ctx
         else:
-            return sim_model, True, get_backup_model(sim_model)
+            return sim_model, True, get_backup_model(sim_model), 0, num_ctx
 
-    # No sim — pick based on available VRAM
-    if vram_free >= tier_a_min:
-        return strong_model, False, get_backup_model(strong_model)
-    elif vram_free >= tier_b_min:
-        return default_model, False, get_backup_model(default_model)
-    else:
-        return default_model, True, get_backup_model(default_model)
+    # No sim — pick based on available VRAM with dynamic quantization
+    # Try higher-quality quant tiers first (14B variants)
+    quant_14b = _pick_best_quant(_QUANT_TIERS_14B, vram_free)
+    if quant_14b and vram_free >= tier_ab_min:
+        quant_model, quant_label = quant_14b
+        if vram_free >= tier_a_min:
+            return quant_model, False, get_backup_model(quant_model), None, num_ctx
+        else:
+            # Partial offload for mid-VRAM
+            ngpu = _calc_num_gpu(quant_model, vram_free)
+            return quant_model, False, get_backup_model(quant_model), ngpu, num_ctx
+
+    # Fall back to 3B tiers
+    quant_3b = _pick_best_quant(_QUANT_TIERS_3B, vram_free)
+    if quant_3b and vram_free >= tier_b_min:
+        quant_model, quant_label = quant_3b
+        return quant_model, False, get_backup_model(quant_model), None, num_ctx
+
+    # CPU fallback
+    return default_model, True, get_backup_model(default_model), 0, num_ctx
 
 
 async def route(message: str, force_cloud: bool = False, force_local: bool = False) -> RouteDecision:
@@ -752,7 +892,7 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
     opus_model = os.getenv("ANTHROPIC_OPUS_MODEL", "claude-opus-4-20250514")
 
     tier = classify_complexity(message)
-    local_model, cpu_only, backup = _pick_local_model()
+    local_model, cpu_only, backup, num_gpu, num_ctx = _pick_local_model()
     sim_active = is_sim_running()
     gpu_loaded = is_gpu_loaded()
     split = is_split_workload(message)
@@ -767,10 +907,25 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
     # Classify adapter domain (augmentation slot routing)
     adapter_domain = classify_adapter_domain(message)
 
+    # Mixture-of-LoRA: resolve domain-specific adapter model
+    resolved_model, active_adapter = resolve_adapter_model(local_model, adapter_domain)
+    if active_adapter:
+        local_model = resolved_model
+
     cloud_ready = (cloud_enabled and has_api_key()
                    and await is_cloud_available() and _check_budget())
 
     vram_free = get_vram_free_mb()
+
+    # Helper: common kwargs for local (ollama) decisions
+    _local_kw = dict(num_gpu=num_gpu, num_ctx=num_ctx)
+
+    # Partial offload label for reason strings
+    _offload_note = ""
+    if num_gpu is not None and num_gpu > 0:
+        _offload_note = f" ({num_gpu}L GPU)"
+    elif num_gpu == 0 or cpu_only:
+        _offload_note = " (CPU)"
 
     # ── Force cloud ──
     if force_cloud:
@@ -786,18 +941,17 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
                              gpu_loaded=gpu_loaded, sim_running=sim_active,
                              cpu_only=cpu_only, backup_model=backup,
                              query_category=query_cat,
-                                 adapter_domain=adapter_domain)
+                             adapter_domain=adapter_domain, **_local_kw)
 
     # ── Force local ──
     if force_local:
         return RouteDecision("ollama", local_model, tier,
-                             f"user forced local — {local_model}"
-                             f"{' (CPU)' if cpu_only else ''}"
+                             f"user forced local — {local_model}{_offload_note}"
                              f"{' (sim active)' if sim_active else ''}",
                              gpu_loaded=gpu_loaded, sim_running=sim_active,
                              cpu_only=cpu_only, backup_model=backup,
                              query_category=query_cat,
-                                 adapter_domain=adapter_domain)
+                             adapter_domain=adapter_domain, **_local_kw)
 
     # ── Sim running — VRAM is precious ──
     if sim_active:
@@ -810,14 +964,13 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
                                  gpu_loaded=gpu_loaded, backup_model=backup,
                                  query_category=query_cat,
                                  adapter_domain=adapter_domain)
-        # Tier 1 or no cloud — use small local model
         return RouteDecision("ollama", local_model, tier,
                              f"sim running, VRAM {vram_free}MB free — "
-                             f"{local_model}{' (CPU)' if cpu_only else ''}",
+                             f"{local_model}{_offload_note}",
                              sim_running=True, gpu_loaded=gpu_loaded,
                              cpu_only=cpu_only, backup_model=backup,
                              query_category=query_cat,
-                                 adapter_domain=adapter_domain)
+                             adapter_domain=adapter_domain, **_local_kw)
 
     # ── GPU loaded (no sim, but something else using GPU) ──
     if gpu_loaded:
@@ -830,18 +983,18 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
                                  adapter_domain=adapter_domain)
         return RouteDecision("ollama", local_model, tier,
                              f"GPU loaded ({get_gpu_utilization()}%) — "
-                             f"using {local_model}{' (CPU)' if cpu_only else ''}",
+                             f"using {local_model}{_offload_note}",
                              gpu_loaded=True, cpu_only=cpu_only, backup_model=backup,
                              query_category=query_cat,
-                                 adapter_domain=adapter_domain)
+                             adapter_domain=adapter_domain, **_local_kw)
 
     # ── Normal routing by tier ──
     if tier == 1:
         return RouteDecision("ollama", local_model, 1,
-                             f"simple task — {local_model}",
+                             f"simple task — {local_model}{_offload_note}",
                              backup_model=backup,
                              query_category=query_cat,
-                                 adapter_domain=adapter_domain)
+                             adapter_domain=adapter_domain, **_local_kw)
 
     if tier == 2:
         if cloud_ready:
@@ -851,10 +1004,10 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
                                  query_category=query_cat,
                                  adapter_domain=adapter_domain)
         return RouteDecision("ollama", local_model, 2,
-                             f"moderate complexity — no cloud, using {local_model}",
+                             f"moderate complexity — no cloud, using {local_model}{_offload_note}",
                              backup_model=backup,
                              query_category=query_cat,
-                                 adapter_domain=adapter_domain)
+                             adapter_domain=adapter_domain, **_local_kw)
 
     if tier == 3:
         if cloud_ready:
@@ -864,13 +1017,13 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
                                  query_category=query_cat,
                                  adapter_domain=adapter_domain)
         return RouteDecision("ollama", local_model, 3,
-                             f"heavy reasoning — no cloud, using {local_model} (best effort)",
+                             f"heavy reasoning — no cloud, using {local_model}{_offload_note} (best effort)",
                              backup_model=backup,
                              query_category=query_cat,
-                                 adapter_domain=adapter_domain)
+                             adapter_domain=adapter_domain, **_local_kw)
 
     return RouteDecision("ollama", local_model, 1,
-                         f"default — {local_model}",
+                         f"default — {local_model}{_offload_note}",
                          backup_model=backup,
                          query_category=query_cat,
-                                 adapter_domain=adapter_domain)
+                         adapter_domain=adapter_domain, **_local_kw)

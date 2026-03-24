@@ -139,6 +139,186 @@ def get_collection():
     return _collection
 
 
+# ── HIERARCHICAL MEMORY (Hot/Warm/Cold) ──────────────────────────────────
+# Three-tier storage: hot (in-memory, <5min), warm (ChromaDB persistent, 5min-24hr),
+# cold (SQLite compressed, >24hr). Automatic demotion based on age.
+
+import sqlite3
+import zlib
+
+_COLD_DB_PATH = os.getenv("COLD_MEMORY_DB",
+    os.path.join(os.path.dirname(CHROMADB_PATH), "cold_memory.db"))
+_WARM_TO_COLD_AGE = int(os.getenv("WARM_TO_COLD_AGE_SEC", str(24 * 3600)))  # 24h
+_COLD_SEARCH_THRESHOLD = 3  # search cold only if hot/warm returns fewer than this
+
+_cold_db_initialized = False
+
+
+def _init_cold_db():
+    """Initialize the cold tier SQLite database."""
+    global _cold_db_initialized
+    if _cold_db_initialized:
+        return
+    os.makedirs(os.path.dirname(_COLD_DB_PATH), exist_ok=True)
+    conn = sqlite3.connect(_COLD_DB_PATH)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS cold_chunks (
+            id TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            text_compressed BLOB NOT NULL,
+            embedding_compressed BLOB NOT NULL,
+            metadata_json TEXT,
+            ingested_at REAL,
+            demoted_at REAL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cold_source ON cold_chunks(source)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cold_ingested ON cold_chunks(ingested_at)")
+    conn.commit()
+    conn.close()
+    _cold_db_initialized = True
+
+
+def _demote_to_cold(chunk_ids: list[str], collection) -> int:
+    """
+    Move aged chunks from warm (ChromaDB) to cold (SQLite).
+    Returns number of chunks demoted.
+    """
+    if not chunk_ids:
+        return 0
+    _init_cold_db()
+    try:
+        # Fetch full data from ChromaDB
+        data = collection.get(ids=chunk_ids, include=["documents", "embeddings", "metadatas"])
+        if not data["ids"]:
+            return 0
+
+        conn = sqlite3.connect(_COLD_DB_PATH)
+        now = _time.time()
+        demoted = 0
+        for i, cid in enumerate(data["ids"]):
+            text = data["documents"][i] if data["documents"] else ""
+            emb = data["embeddings"][i] if data["embeddings"] else []
+            meta = data["metadatas"][i] if data["metadatas"] else {}
+
+            # Compress text and embedding for storage
+            text_compressed = zlib.compress(text.encode("utf-8"), level=6)
+            emb_bytes = json.dumps(emb).encode("utf-8")
+            emb_compressed = zlib.compress(emb_bytes, level=6)
+
+            try:
+                conn.execute(
+                    "INSERT OR REPLACE INTO cold_chunks VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (cid, meta.get("source", ""),
+                     text_compressed, emb_compressed,
+                     json.dumps(meta), meta.get("ingested_at", 0), now)
+                )
+                demoted += 1
+            except Exception:
+                pass
+
+        conn.commit()
+        conn.close()
+
+        # Remove from ChromaDB
+        collection.delete(ids=chunk_ids)
+        return demoted
+    except Exception as e:
+        logger.warning(f"Cold demotion failed: {e}")
+        return 0
+
+
+def _search_cold_tier(query_embedding: list[float], n_results: int = 3,
+                      source_filter: str = None) -> list[dict]:
+    """
+    Search cold tier using brute-force cosine similarity.
+    Only called when hot/warm results are insufficient.
+    """
+    _init_cold_db()
+    try:
+        conn = sqlite3.connect(_COLD_DB_PATH)
+        if source_filter:
+            rows = conn.execute(
+                "SELECT id, source, text_compressed, embedding_compressed, metadata_json FROM cold_chunks WHERE source = ?",
+                (source_filter,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, source, text_compressed, embedding_compressed, metadata_json FROM cold_chunks"
+            ).fetchall()
+        conn.close()
+
+        if not rows:
+            return []
+
+        import math
+        def cosine_distance(a, b):
+            dot = sum(x * y for x, y in zip(a, b))
+            norm_a = math.sqrt(sum(x * x for x in a))
+            norm_b = math.sqrt(sum(x * x for x in b))
+            if norm_a == 0 or norm_b == 0:
+                return 1.0
+            return 1.0 - (dot / (norm_a * norm_b))
+
+        results = []
+        for cid, source, text_c, emb_c, meta_json in rows:
+            text = zlib.decompress(text_c).decode("utf-8")
+            emb = json.loads(zlib.decompress(emb_c).decode("utf-8"))
+            dist = cosine_distance(query_embedding, emb)
+            if dist < 0.75:
+                meta = json.loads(meta_json) if meta_json else {}
+                results.append({
+                    "text": text,
+                    "source": source,
+                    "distance": round(dist, 4),
+                    "chunk_index": meta.get("chunk_index", 0),
+                    "tier": "cold",
+                })
+        results.sort(key=lambda x: x["distance"])
+        return results[:n_results]
+    except Exception as e:
+        logger.debug(f"Cold tier search failed: {e}")
+        return []
+
+
+def compact_warm_to_cold() -> dict:
+    """
+    Background job: move chunks older than WARM_TO_COLD_AGE from ChromaDB to cold SQLite.
+    Returns {"demoted": N, "checked": N}.
+    """
+    collection = get_collection()
+    now = _time.time()
+    cutoff = now - _WARM_TO_COLD_AGE
+
+    try:
+        # Find old ingested entries
+        old_data = collection.get(
+            where={"ingested_at": {"$lt": cutoff}},
+            include=["metadatas"],
+        )
+        if not old_data["ids"]:
+            return {"demoted": 0, "checked": 0}
+
+        demoted = _demote_to_cold(old_data["ids"], collection)
+        return {"demoted": demoted, "checked": len(old_data["ids"])}
+    except Exception as e:
+        logger.warning(f"Warm-to-cold compaction failed: {e}")
+        return {"demoted": 0, "checked": 0, "error": str(e)}
+
+
+def get_cold_stats() -> dict:
+    """Get cold tier storage stats."""
+    _init_cold_db()
+    try:
+        conn = sqlite3.connect(_COLD_DB_PATH)
+        count = conn.execute("SELECT COUNT(*) FROM cold_chunks").fetchone()[0]
+        conn.close()
+        db_size = os.path.getsize(_COLD_DB_PATH) if os.path.exists(_COLD_DB_PATH) else 0
+        return {"chunks": count, "size_mb": round(db_size / 1e6, 2)}
+    except Exception:
+        return {"chunks": 0, "size_mb": 0}
+
+
 # ── INGESTION ───────────────────────────────────────────────────────────
 
 def ingest_file(filepath: str) -> dict:
@@ -490,8 +670,115 @@ def query_knowledge(query: str, n_results: int = 5, threshold: float = 0.75,
     # Rerank with source grouping + recency bias
     reranked = _rerank_results(all_matches, boost_recent=boost_recent)
 
+    # ── Cold tier fallback: search compressed archive if hot/warm insufficient ──
+    if len(reranked) < _COLD_SEARCH_THRESHOLD:
+        try:
+            cold_results = _search_cold_tier(
+                query_embeddings[0], n_results=n_results - len(reranked),
+                source_filter=source_filter)
+            reranked.extend(cold_results)
+        except Exception:
+            pass
+
     # Return top n_results
     return reranked[:n_results]
+
+
+# ── ITERATIVE RAG (Retrieval-Augmented Reasoning) ────────────────────────
+# Two-round retrieval: first round standard, second round with model-directed
+# sub-queries to fill knowledge gaps. Dramatically better for complex queries.
+
+_RAR_ENABLED = os.getenv("RAR_ENABLED", "true").lower() in ("true", "1", "yes")
+_RAR_MIN_RESULTS_FOR_SKIP = int(os.getenv("RAR_MIN_RESULTS", "3"))
+
+
+def iterative_query_knowledge(query: str, sub_queries: list[str] | None = None,
+                               n_results: int = 5, threshold: float = 0.75,
+                               **kwargs) -> list[dict]:
+    """
+    Two-round retrieval: standard query + follow-up with refined sub-queries.
+
+    Args:
+        query: Original user query
+        sub_queries: Model-generated follow-up queries (from first round analysis).
+                     If None, only runs standard single-round retrieval.
+        n_results: Max results to return
+        threshold: Max cosine distance
+        **kwargs: Passed to query_knowledge (boost_recent, source_filter, max_age_sec)
+
+    Returns same format as query_knowledge.
+    """
+    # Round 1: Standard retrieval
+    round1 = query_knowledge(query, n_results=n_results, threshold=threshold, **kwargs)
+
+    if not _RAR_ENABLED or not sub_queries:
+        return round1
+
+    # Round 2: Refined sub-query retrieval
+    seen_ids = {r.get("_id", r.get("text", "")[:50]) for r in round1}
+    additional = []
+
+    for sq in sub_queries[:3]:  # max 3 sub-queries to bound latency
+        sq_results = query_knowledge(sq, n_results=3, threshold=threshold, **kwargs)
+        for r in sq_results:
+            rid = r.get("_id", r.get("text", "")[:50])
+            if rid not in seen_ids:
+                seen_ids.add(rid)
+                additional.append(r)
+
+    # Merge and re-sort by distance
+    combined = round1 + additional
+    combined.sort(key=lambda x: x.get("distance", 1.0))
+    return combined[:n_results]
+
+
+def generate_sub_queries(query: str, initial_results: list[dict]) -> list[str]:
+    """
+    Generate refined sub-queries based on initial retrieval results.
+    Uses keyword extraction from gaps between query and results — no LLM needed.
+
+    Returns up to 3 sub-queries.
+    """
+    # Extract key terms from the query
+    query_terms = set(re.findall(r'\b[a-zA-Z]{3,}\b', query.lower()))
+
+    # Extract terms from results
+    result_terms = set()
+    for r in initial_results:
+        result_terms.update(re.findall(r'\b[a-zA-Z]{3,}\b', r.get("text", "").lower()[:500]))
+
+    # Find related terms in results that weren't in the query (context expansion)
+    expansion_terms = result_terms - query_terms
+    # Filter to meaningful terms (not too common)
+    _common = {"the", "and", "for", "that", "this", "with", "from", "have", "been",
+               "will", "are", "was", "were", "has", "had", "not", "but", "what",
+               "all", "can", "her", "his", "how", "its", "may", "our", "out",
+               "you", "also", "into", "just", "more", "most", "much", "only",
+               "over", "some", "such", "than", "them", "then", "very", "when"}
+    expansion_terms -= _common
+
+    sub_queries = []
+    # Sub-query 1: Original + most relevant expansion terms
+    if expansion_terms:
+        top_expansion = list(expansion_terms)[:5]
+        sub_queries.append(f"{query} {' '.join(top_expansion)}")
+
+    # Sub-query 2: Key noun phrases from query with different framing
+    if len(query_terms) > 2:
+        key_terms = [t for t in query_terms if len(t) > 4][:4]
+        if key_terms:
+            sub_queries.append(" ".join(key_terms))
+
+    # Sub-query 3: If results mention specific sources, query for those
+    sources = set()
+    for r in initial_results:
+        src = r.get("source", "")
+        if src and not src.startswith("ingest:"):
+            sources.add(src)
+    if sources:
+        sub_queries.append(f"{query} {' '.join(list(sources)[:2])}")
+
+    return sub_queries[:3]
 
 
 _file_details_cache = {"data": None, "ts": 0}
@@ -561,6 +848,47 @@ def get_memory_stats() -> dict:
     return result
 
 
+# ── SEMANTIC DEDUPLICATION ────────────────────────────────────────────────
+# Before ingesting new content, check if a near-duplicate already exists.
+# If so, update metadata (freshen timestamp) instead of adding a duplicate.
+
+_DEDUP_THRESHOLD = float(os.getenv("DEDUP_THRESHOLD", "0.15"))  # cosine distance — lower = stricter
+
+def _check_semantic_duplicate(collection, embedding, source: str) -> str | None:
+    """
+    Check if a near-duplicate chunk exists in ChromaDB.
+    Returns the existing chunk ID if a duplicate is found, None otherwise.
+    """
+    try:
+        results = collection.query(
+            query_embeddings=[embedding],
+            n_results=1,
+            include=["distances", "metadatas"],
+            where={"source": f"ingest:{source}"} if source else None,
+        )
+        if (results["ids"] and results["ids"][0] and
+                results["distances"][0][0] < _DEDUP_THRESHOLD):
+            return results["ids"][0][0]
+    except Exception:
+        pass
+    return None
+
+
+def _freshen_metadata(collection, chunk_id: str, tags: list[str] | None = None,
+                      ttl: int = 0):
+    """Update the timestamp and optionally TTL/tags on an existing chunk."""
+    try:
+        now = _time.time()
+        update_meta = {"ingested_at": now}
+        if ttl > 0:
+            update_meta["expires_at"] = now + ttl
+        if tags:
+            update_meta["tags"] = json.dumps(tags)
+        collection.update(ids=[chunk_id], metadatas=[update_meta])
+    except Exception as e:
+        logger.debug(f"Freshen metadata failed for {chunk_id}: {e}")
+
+
 # ── INGEST CONNECTOR ─────────────────────────────────────────────────────
 # Allows external services to push structured context into E3N's RAG memory.
 # Each entry gets a source tag, timestamp, and optional TTL for auto-expiry.
@@ -598,9 +926,29 @@ def ingest_context(source: str, context: str, ttl: int = 0,
     except Exception as e:
         return {"status": "error", "reason": f"embedding failed: {e}"}
 
+    # ── Semantic deduplication: skip chunks that are near-duplicates ──
+    new_texts = []
+    new_embeddings = []
+    new_chunks = []
+    dedup_count = 0
+    for i, emb in enumerate(embeddings):
+        dup_id = _check_semantic_duplicate(collection, emb, source)
+        if dup_id:
+            # Near-duplicate found — just freshen its metadata
+            _freshen_metadata(collection, dup_id, tags=tags, ttl=ttl)
+            dedup_count += 1
+        else:
+            new_texts.append(texts[i])
+            new_embeddings.append(emb)
+            new_chunks.append(chunks[i])
+
+    if not new_texts:
+        return {"status": "ok", "chunks": 0, "deduplicated": dedup_count,
+                "source": source, "expires_at": (now + ttl) if ttl > 0 else None}
+
     # Build IDs with timestamp to allow multiple ingests from same source
     ts_str = str(int(now * 1000))
-    ids = [f"ingest::{source}::{ts_str}::chunk_{i}" for i in range(len(chunks))]
+    ids = [f"ingest::{source}::{ts_str}::chunk_{i}" for i in range(len(new_chunks))]
 
     # Metadata includes source, timestamp, TTL expiry, and tags
     expires_at = now + ttl if ttl > 0 else 0  # 0 = never expires
@@ -614,18 +962,18 @@ def ingest_context(source: str, context: str, ttl: int = 0,
             "tags": json.dumps(tags),
             "char_count": len(c["text"]),
         }
-        for c in chunks
+        for c in new_chunks
     ]
 
     collection.add(
         ids=ids,
-        documents=texts,
-        embeddings=embeddings,
+        documents=new_texts,
+        embeddings=new_embeddings,
         metadatas=metadatas,
     )
 
-    return {"status": "ok", "chunks": len(chunks), "source": source,
-            "expires_at": expires_at if expires_at > 0 else None}
+    return {"status": "ok", "chunks": len(new_chunks), "deduplicated": dedup_count,
+            "source": source, "expires_at": expires_at if expires_at > 0 else None}
 
 
 def ingest_context_batch(items: list[dict]) -> dict:
