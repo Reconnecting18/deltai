@@ -433,6 +433,177 @@ def calculate(expression: str, description: str = None) -> str:
         return f"ERROR: {e}"
 
 
+def solve_math(operation: str, expression: str, variable: str = "x",
+               point: str = None) -> str:
+    """Symbolic mathematics engine powered by SymPy. Handles calculus, algebra, linear algebra, and more."""
+    try:
+        import sympy
+        from sympy import (
+            symbols, Symbol, sympify, solve, diff, integrate, limit, simplify,
+            expand, factor, series, Matrix, oo, pi, E, I,
+            sin, cos, tan, exp, log, sqrt, Abs, sign,
+            asin, acos, atan, sinh, cosh, tanh,
+            Rational, Function, Eq,
+        )
+        from sympy.integrals.transforms import laplace_transform
+
+        if not operation or not expression:
+            return "ERROR: operation and expression are required"
+        if len(expression) > 500:
+            return "ERROR: Expression too long (max 500 chars)"
+
+        operation = operation.strip().lower()
+        expression = expression.strip()
+
+        # Block dangerous patterns (same as calculate)
+        _blocked = ["import ", "exec(", "eval(", "open(", "__", "os.", "sys.",
+                     "subprocess", "compile(", "globals(", "locals(",
+                     "getattr(", "setattr(", "delattr(", "breakpoint(", "input("]
+        expr_lower = expression.lower()
+        for b in _blocked:
+            if b in expr_lower:
+                return f"ERROR: Blocked operation: {b.strip()}"
+
+        # Safe symbol namespace
+        x, y, z, t, s = symbols("x y z t s")
+        a, b_sym, c, n, r = symbols("a b c n r")
+        theta, phi, omega, k, m, g = symbols("theta phi omega k m g")
+        f = Function("f")
+
+        safe_locals = {
+            "x": x, "y": y, "z": z, "t": t, "s": s,
+            "a": a, "b": b_sym, "c": c, "n": n, "r": r,
+            "theta": theta, "phi": phi, "omega": omega,
+            "k": k, "m": m, "g": g, "f": f,
+            "sin": sin, "cos": cos, "tan": tan,
+            "asin": asin, "acos": acos, "atan": atan,
+            "sinh": sinh, "cosh": cosh, "tanh": tanh,
+            "exp": exp, "log": log, "ln": log, "sqrt": sqrt,
+            "abs": Abs, "sign": sign, "Abs": Abs,
+            "pi": pi, "e": E, "E": E, "I": I, "oo": oo,
+            "Rational": Rational, "Matrix": Matrix, "Eq": Eq,
+        }
+
+        var = symbols(variable) if variable else x
+
+        # Parse expression safely
+        if operation == "matrix" or operation == "eigenvalues":
+            # Matrix operations need eval with controlled namespace
+            safe_eval_ns = {"__builtins__": {}, "Matrix": Matrix, "Rational": Rational,
+                            "symbols": symbols, "sqrt": sqrt}
+            safe_eval_ns.update(safe_locals)
+            expr = eval(expression, safe_eval_ns)
+        else:
+            expr = sympify(expression, locals=safe_locals)
+
+        # Execute operation
+        if operation == "solve":
+            result = solve(expr, var)
+            if isinstance(result, list):
+                solutions = [str(s) for s in result]
+                approx = []
+                for s in result:
+                    try:
+                        val = complex(s.evalf())
+                        if val.imag == 0:
+                            approx.append(f"{val.real:.6g}")
+                        else:
+                            approx.append(f"{val.real:.4g} + {val.imag:.4g}i")
+                    except Exception:
+                        approx.append("?")
+                return f"{variable} = {solutions}\nApprox: {approx}"
+            return f"{variable} = {result}"
+
+        elif operation in ("differentiate", "diff", "derivative"):
+            result = diff(expr, var)
+            return f"d/d{variable}({expression}) = {result}"
+
+        elif operation in ("integrate", "integral"):
+            if point:
+                # Definite integral: point should be "a,b"
+                try:
+                    bounds = point.split(",")
+                    lo = sympify(bounds[0].strip(), locals=safe_locals)
+                    hi = sympify(bounds[1].strip(), locals=safe_locals)
+                    result = integrate(expr, (var, lo, hi))
+                    try:
+                        approx = float(result.evalf())
+                        return f"integral({expression}, {variable}={lo}..{hi}) = {result} (approx {approx:.6g})"
+                    except Exception:
+                        return f"integral({expression}, {variable}={lo}..{hi}) = {result}"
+                except (IndexError, ValueError):
+                    return "ERROR: For definite integral, point should be 'lower,upper' (e.g., '0,pi')"
+            result = integrate(expr, var)
+            return f"integral({expression}) d{variable} = {result} + C"
+
+        elif operation == "limit":
+            if not point:
+                return "ERROR: 'point' is required for limit (e.g., '0', 'oo', '-oo')"
+            pt = sympify(point, locals=safe_locals)
+            result = limit(expr, var, pt)
+            return f"lim({variable}->{point}) {expression} = {result}"
+
+        elif operation == "simplify":
+            result = simplify(expr)
+            return f"simplify({expression}) = {result}"
+
+        elif operation == "expand":
+            result = expand(expr)
+            return f"expand({expression}) = {result}"
+
+        elif operation == "factor":
+            result = factor(expr)
+            return f"factor({expression}) = {result}"
+
+        elif operation == "series":
+            pt = sympify(point, locals=safe_locals) if point else 0
+            result = series(expr, var, pt, n=6)
+            return f"series({expression}) around {variable}={pt}:\n{result}"
+
+        elif operation == "laplace":
+            t_sym = symbols("t", positive=True)
+            s_sym = symbols("s")
+            expr_t = sympify(expression, locals={**safe_locals, "t": t_sym})
+            result, cond1, cond2 = laplace_transform(expr_t, t_sym, s_sym)
+            return f"L{{{expression}}} = {result}  (convergence: {cond2})"
+
+        elif operation == "eigenvalues":
+            if not isinstance(expr, sympy.Matrix):
+                return "ERROR: Expression must be a Matrix for eigenvalues (e.g., 'Matrix([[1,2],[3,4]])')"
+            eigenvals = expr.eigenvals()
+            eigenvects = expr.eigenvects()
+            lines = [f"Eigenvalues of {expression}:"]
+            for val, mult in eigenvals.items():
+                try:
+                    approx = f" (approx {complex(val.evalf()).real:.6g})"
+                except Exception:
+                    approx = ""
+                lines.append(f"  lambda = {val} (multiplicity {mult}){approx}")
+            return "\n".join(lines)
+
+        elif operation == "matrix":
+            # General matrix operation — expression should be a full statement
+            if isinstance(expr, sympy.Matrix):
+                lines = [f"Matrix result:"]
+                lines.append(str(expr))
+                lines.append(f"det = {expr.det()}")
+                try:
+                    lines.append(f"rank = {expr.rank()}")
+                except Exception:
+                    pass
+                return "\n".join(lines)
+            return f"Result: {expr}"
+
+        else:
+            valid = "solve, differentiate, integrate, limit, simplify, expand, factor, matrix, series, laplace, eigenvalues"
+            return f"ERROR: Unknown operation '{operation}'. Valid: {valid}"
+
+    except sympy.SympifyError as e:
+        return f"ERROR: Could not parse expression: {e}"
+    except Exception as e:
+        return f"ERROR: {e}"
+
+
 def summarize_data(data: str, focus: str = "all") -> str:
     """Summarize structured data into key statistics."""
     try:
@@ -1241,6 +1412,7 @@ EXECUTORS = {
     "memory_stats": memory_stats,
     "web_search": web_search,
     "calculate": calculate,
+    "solve_math": solve_math,
     "summarize_data": summarize_data,
     "lookup_reference": lookup_reference,
     "self_diagnostics": self_diagnostics,

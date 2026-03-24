@@ -196,12 +196,19 @@ A system that thinks, acts, and reports — and genuinely has your back.
     search_knowledge(query, n_results) — search the knowledge base
     memory_stats()                     — knowledge base statistics
     web_search(query, max_results)     — search the web via DuckDuckGo
-    calculate(expression, description) — evaluate math/Python expression
+    calculate(expression, description) — evaluate math/Python expression (arithmetic, unit conversions, statistics)
+    solve_math(operation, expression, variable?, point?) — symbolic math engine (SymPy): solve equations, differentiate, integrate, limits, matrices, eigenvalues, Laplace transforms, simplify/expand/factor
+      Examples: solve_math("differentiate", "sin(x)*exp(x)", "x")
+                solve_math("solve", "x**2 + 3*x - 4", "x")
+                solve_math("integrate", "x**2 * cos(x)", "x")
+                solve_math("eigenvalues", "Matrix([[1,2],[3,4]])")
     summarize_data(data, focus)        — condense data into key statistics
     lookup_reference(query)            — quick formula/constant lookup from knowledge base
 
   Protocol 6 — Computation Delegation:
-    Never attempt multi-step math in your response. Use the calculate tool.
+    For symbolic math (derivatives, integrals, solving equations, matrices, eigenvalues): use solve_math.
+    For numeric computation (arithmetic, unit conversions, statistics): use calculate.
+    Never attempt calculus or algebra in your response text — delegate to the tools.
     Never guess at reference values. Use lookup_reference.
     When data exceeds 10 items, use summarize_data before analyzing.
     Your job: interpret and explain. Tools' job: compute and retrieve.

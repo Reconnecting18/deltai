@@ -227,6 +227,36 @@ COMPUTATION_TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "solve_math",
+            "description": "Symbolic mathematics engine (SymPy). Solve equations, differentiate, integrate, compute limits, matrix operations, eigenvalues, Laplace transforms, simplify/expand/factor expressions. Use for any problem requiring symbolic manipulation — NOT for simple arithmetic (use calculate for that).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "operation": {
+                        "type": "string",
+                        "enum": ["solve", "differentiate", "integrate", "limit", "simplify", "expand", "factor", "matrix", "series", "laplace", "eigenvalues"],
+                        "description": "The symbolic math operation to perform."
+                    },
+                    "expression": {
+                        "type": "string",
+                        "description": "Math expression in SymPy syntax (e.g., 'x**2 + 3*x - 4', 'sin(x)*exp(x)', 'Matrix([[1,2],[3,4]])')"
+                    },
+                    "variable": {
+                        "type": "string",
+                        "description": "Variable to operate on (default: 'x'). For solve: the unknown. For diff/integrate: the variable."
+                    },
+                    "point": {
+                        "type": "string",
+                        "description": "For limits: point to approach (e.g., '0', 'oo'). For definite integrals: 'lower,upper' (e.g., '0,pi'). For series: expansion point."
+                    }
+                },
+                "required": ["operation", "expression"]
+            }
+        }
+    },
 ]
 
 TOOLS.extend(COMPUTATION_TOOLS)
