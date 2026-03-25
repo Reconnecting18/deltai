@@ -50,11 +50,6 @@ pip install chromadb watchdog
 Add /chat context injection from ChromaDB
 File watcher on C:\e3n\data\knowledge\
 
-### Phase 3 — Racing Coach
-UDP listener port 20777 (Le Mans Ultimate)
-SQLite lap logger
-Post-lap AI coaching report
-
 ### Phase 4 — Remote Access
 Tailscale install (free, 10 min setup)
 S3 nightly backup of C:\e3n\data\
