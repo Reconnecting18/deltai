@@ -238,6 +238,7 @@ In-memory rolling window of recent exchanges so the model can reference prior co
 - **What's stored:** Clean user text + final assistant response text only
 - **What's NOT stored:** Greetings (canned), tool calls, RAG context, errors
 - **Session-aware:** When a racing session is active, history pairs are tagged with `session_id`. On session end, tagged turns are exported to `C:\e3n\data\training\sessions\{session_id}.jsonl` for post-race review.
+- **Smart history:** `_get_smart_history(max_tokens)` replaces `_get_history()`. Last 3 turns: full text. Turns 4-7: compressed (key facts — sentences with numbers, units, conclusions extracted via regex, no LLM). Turns 8-10: one-line summaries. Token budget from `decision.num_ctx` drives compression aggressiveness.
 - **Endpoints:** `DELETE /chat/history` (clear), `GET /chat/history` (turns + max_turns metadata)
 - **Frontend:** CLR button in terminal header, turn counter `[NT]` (e.g., `[3T]` = 3 turns)
 - **Persistent:** Backed by SQLite (`persistence.py`) — survives server restarts. In-memory remains primary; DB is the backing store.
@@ -245,6 +246,7 @@ In-memory rolling window of recent exchanges so the model can reference prior co
 **Config (.env):**
 ```
 CONVERSATION_HISTORY_MAX=10
+SMART_HISTORY_ENABLED=true
 ```
 
 ## Smarter RAG
@@ -384,9 +386,10 @@ Dataset management, QLoRA fine-tuning, and progressive model improvement.
 - **A/B evaluation:** `run_ab_eval()` compares two models on a dataset — measures latency and response quality, saves results to `eval/` directory
 - **Dataset CRUD:** Create, list, add examples, remove examples, get all examples
 - **Export formats:** Alpaca, ShareGPT, ChatML — ready for external training tools
-- **Auto-capture:** `auto_capture()` saves good exchanges (filters greetings, errors, short responses). Racing exchanges → `e3n-racing` dataset with RAG context.
+- **Smart auto-capture:** `smart_auto_capture()` replaces basic `auto_capture()`. Quality-tiered: score >= 0.8 always captured, 0.6-0.8 at 50% probability, < 0.3 stored as negative example in `{dataset}-negative` for DPO training. Hash-based deduplication (recent 200 queries).
+- **Iterative distillation:** `identify_weak_domains()` finds domains with avg quality < 0.6. `distill_targeted()` pulls worst queries for teacher data generation. `run_improvement_cycle()` orchestrates full loop: identify weaknesses → distill targeted data → (train → eval → promote).
 - **Background execution:** Training runs in a background thread, status trackable via `/training/status` (includes loss, step progress, trainable params)
-- **Progressive loop:** Use E3N → auto-capture → accumulate dataset → trigger LoRA → deploy fine-tuned model → repeat
+- **Progressive loop:** Use E3N → smart auto-capture → accumulate dataset → trigger LoRA → deploy fine-tuned model → repeat
 - **Endpoints:**
   - `GET /training/datasets` — list datasets
   - `POST /training/datasets` — create dataset
@@ -397,6 +400,8 @@ Dataset management, QLoRA fine-tuning, and progressive model improvement.
   - `GET /training/status` — progress, status, loss, errors
   - `GET /training/lora/status` — check if LoRA deps are installed
   - `POST /training/eval/ab` — A/B model comparison
+  - `GET /training/weaknesses` — identify weak domains via quality scores
+  - `POST /training/improve/{domain}` — trigger targeted iterative distillation for a domain
 
 **LoRA config (.env):**
 ```
@@ -411,6 +416,8 @@ LORA_LR=2e-4
 LORA_MAX_SEQ_LEN=1024
 LORA_QUANT_METHOD=Q4_K_M
 LLAMA_CPP_PATH=C:\e3n\tools\llama.cpp
+SMART_CAPTURE_ENABLED=true
+CAPTURE_DEDUP_THRESHOLD=0.15
 ```
 
 ## Adapter Surgery (Augmentation Slots)
@@ -427,10 +434,11 @@ Modular LoRA adapters: train, version, evaluate, and merge domain-specific "augm
 ### How It Works
 1. **Domain training:** `start_domain_training(domain)` trains a LoRA adapter with selective layer freezing — bottom layers frozen (universal knowledge), top layers trained (domain-specific)
 2. **Adapter registry:** JSON at `C:\e3n\data\training\adapter_registry.json` tracks all adapters with version, eval score, status, and active slot assignment
-3. **TIES merge:** Combines active adapters from all slots into a single production GGUF — CPU-only, zero GPU cost. Resolves weight conflicts via Trim, Elect Sign, Merge
+3. **TIES merge:** Combines active adapters from all slots into a single production GGUF — CPU-only, zero GPU cost. Resolves weight conflicts via Trim, Elect Sign, Merge. Dynamic weighting based on actual query distribution across domains.
 4. **Eval & promote:** `eval_adapter()` compares against baseline, auto-promotes winners to active slots
 5. **Rollback:** Revert any domain to a previous adapter version
 6. **Self-management:** E3N can call `manage_adapters` tool to inspect and manage its own augmentations
+7. **Cross-domain classification:** `classify_adapter_domains()` returns ALL matching domains sorted by score (not just primary). Cross-domain trace retrieval in ReAct for multi-domain queries.
 
 ### Endpoints
 ```
@@ -647,11 +655,17 @@ Structured Think-Act-Observe protocol for complex local queries that benefit fro
 - **Integration:** Built into `stream_local()` in main.py
 - **Stream events:** `{"t":"react","iteration":N,"phase":"think|act|observe","c":"..."}` plus standard tool/result events
 - **Fallback:** If max iterations reached without convergence, synthesizes answer from gathered observations
+- **Confidence-aware:** System prompt extended with `CONFIDENCE: HIGH/MEDIUM/LOW` protocol. HIGH → FINAL answer. MEDIUM → answer with confidence tag. LOW → `CLARIFY:` asks user for more info. `CLARIFY:` parsed into `{"t":"clarify","c":"..."}` stream event
+- **Reasoning trace memory:** Past ReAct chains persisted in SQLite `reasoning_traces` table. `find_similar_traces()` retrieves relevant past reasoning via embedding similarity and injects as `[PRIOR REASONING]` block. 30-day auto-prune, max 500 traces
+- **Tool filtering:** `filter_tools()` pre-filters 19 tools to 5-8 per query based on domain. Reduces prompt tokens by ~1000. Tier 1 queries capped at 6 tools
 
 **Config (.env):**
 ```
 REACT_ENABLED=true
 REACT_MAX_ITERATIONS=3
+REACT_ALLOW_CLARIFY=true
+REASONING_TRACE_ENABLED=true
+REASONING_TRACE_MAX=500
 ```
 
 ## Iterative RAG (Retrieval-Augmented Reasoning)
@@ -753,10 +767,121 @@ E3N_S3_RETENTION=30              # days (0 = keep forever)
 E3N_DATA_PATH=C:\e3n\data
 ```
 
+## Response Quality Scoring
+Heuristic multi-signal scorer that rates every response 0.0-1.0. Drives smart capture, routing feedback, and knowledge gap detection.
+
+- **File:** `C:\e3n\project\quality.py`
+- **6 signals:** `length_appropriateness` (response length vs query complexity), `tool_success_rate` (tools called vs succeeded), `specificity` (concrete details, numbers, names), `no_error_indicators` (absence of error/fallback language), `structural_match` (format matches query type), `no_repeat` (absence of repetitive phrases)
+- **Persistence:** Scores stored in SQLite `quality_scores` table with query, model, domain, and timestamp
+- **Consumers:** Smart auto-capture (quality threshold for dataset inclusion), adaptive routing feedback (quality per model/tier), knowledge gap detection (low scores trigger gap logging)
+
+**Config (.env):**
+```
+QUALITY_CAPTURE_THRESHOLD=0.6
+```
+
+## Tool Relevance Filtering
+Pre-filters the 19-tool inventory down to 5-8 tools per query based on domain classification.
+
+- **Function:** `filter_tools()` in `tools/definitions.py`
+- **Domain sets:** Racing (telemetry tools + search_knowledge + calculate), Engineering (calculate + solve_math + lookup_reference + search_knowledge), System (self_diagnostics + manage_ollama_models + repair_subsystem + resource_status), General (core tools only)
+- **Tier cap:** Tier 1 (simple) queries capped at 6 tools maximum
+- **Token savings:** ~1000 prompt tokens saved per query by omitting irrelevant tool schemas
+- **Integration:** Called in `stream_local()` and ReAct loop before building the tool prompt
+
+## Reasoning Trace Memory
+Persists ReAct Think/Act/Observe chains so E3N can learn from past multi-step reasoning.
+
+- **Storage:** SQLite `reasoning_traces` table — query, domain, full chain (Think/Act/Observe steps), confidence level, quality score, embedding
+- **Retrieval:** `find_similar_traces()` computes embedding similarity against past traces, returns top matches
+- **Injection:** Retrieved traces injected as `[PRIOR REASONING]` block into the ReAct system prompt, giving the model a head start on similar problems
+- **Pruning:** 30-day auto-prune, max 500 traces (oldest removed first)
+- **Confidence:** Traces store the confidence level (HIGH/MEDIUM/LOW) from the ReAct run that generated them
+
+**Config (.env):**
+```
+REASONING_TRACE_ENABLED=true
+REASONING_TRACE_MAX=500
+```
+
+## Confidence-Aware Reasoning
+Extension to the ReAct system prompt that adds self-assessed confidence levels.
+
+- **Protocol:** Model outputs `CONFIDENCE: HIGH`, `CONFIDENCE: MEDIUM`, or `CONFIDENCE: LOW` alongside its reasoning
+- **HIGH:** Proceeds directly to `FINAL` answer
+- **MEDIUM:** Answers but includes a confidence qualifier in the response
+- **LOW:** Outputs `CLARIFY: <question>` to ask the user for more information before proceeding
+- **Stream event:** `CLARIFY:` parsed into `{"t":"clarify","c":"..."}` for the frontend to display as a distinct clarification request
+- **Trace storage:** Confidence level persisted in reasoning traces for trend analysis
+
+**Config (.env):**
+```
+REACT_ALLOW_CLARIFY=true
+```
+
+## Adaptive Routing Feedback
+Quality scores feed back into the router to adjust model/tier selection based on recent outcomes.
+
+- **Storage:** SQLite `routing_feedback` table tracks quality scores per model, tier, and domain
+- **Adjustment:** `get_routing_adjustment(domain)` analyzes recent quality scores and returns a tier shift of -1, 0, or +1
+- **Integration:** `classify_complexity()` accepts the adjustment as a soft modifier — never forces Tier 3 (cloud)
+- **Cache:** Adjustment results cached for 10 minutes to avoid repeated DB queries
+- **Distillation link:** Routing feedback data feeds into iterative distillation to identify which domains need targeted improvement
+
+## Smart Auto-Capture
+Quality-tiered training data collection that replaces the basic `auto_capture()`.
+
+- **Function:** `smart_auto_capture()` in `training.py`
+- **Quality tiers:**
+  - Score >= 0.8: Always captured (high-quality examples)
+  - Score 0.6-0.8: 50% probability capture (decent examples, avoids dataset bloat)
+  - Score < 0.3: Captured as negative example in `{dataset}-negative` dataset (for future DPO training)
+- **Deduplication:** Hash-based dedup over recent 200 queries — prevents near-identical examples from flooding the dataset
+- **Negative examples:** Stored separately for Directed Preference Optimization training workflows
+
+**Config (.env):**
+```
+SMART_CAPTURE_ENABLED=true
+CAPTURE_DEDUP_THRESHOLD=0.15
+```
+
+## Iterative Distillation Pipeline
+Automated weakness detection and targeted knowledge distillation for continuous model improvement.
+
+- **Weakness identification:** `identify_weak_domains()` queries quality scores to find domains with average quality below 0.6
+- **Targeted distillation:** `distill_targeted()` pulls the worst-performing queries from a weak domain and generates teacher data (14B or cloud) specifically for those failure cases
+- **Improvement cycle:** `run_improvement_cycle()` orchestrates the full loop: identify weaknesses → generate targeted distillation data → (optionally train → eval → promote)
+- **Endpoints:**
+  - `GET /training/weaknesses` — returns domains ranked by weakness (avg quality, query count, worst examples)
+  - `POST /training/improve/{domain}` — triggers targeted distillation + optional training for a specific domain
+
+## Knowledge Gap Detection
+Tracks queries where E3N fails to provide good answers, enabling targeted knowledge base improvement.
+
+- **Storage:** SQLite `knowledge_gaps` table — query text, domain, failure source, timestamp, resolution status
+- **Gap sources:** Low quality scores (< 0.3), ReAct max iterations reached without convergence, RAG queries returning zero results
+- **Endpoints:**
+  - `GET /knowledge/gaps` — list unresolved knowledge gaps (filterable by domain)
+  - `POST /knowledge/gaps/{id}/resolve` — mark a gap as resolved (e.g., after adding knowledge articles)
+- **Future:** Background auto-fill with 14B-generated knowledge articles for common gap patterns
+
+**Config (.env):**
+```
+KNOWLEDGE_GAP_DETECTION=true
+```
+
+## Cross-Domain Reasoning Transfer
+Multi-domain query support that leverages adapters and reasoning traces across domain boundaries.
+
+- **Multi-domain classification:** `classify_adapter_domains()` returns ALL matching domains sorted by relevance score (not just the primary). `classify_adapter_domain()` wraps it for backward compatibility (returns primary only).
+- **Cross-domain traces:** ReAct loop retrieves reasoning traces from all relevant domains for multi-domain queries (e.g., a racing + engineering question pulls traces from both)
+- **Dynamic TIES merge weighting:** Adapter merge weights adjusted based on actual query distribution — domains that are queried more frequently get higher merge weight in production GGUF builds
+
 ## Current Status
 - Phase 1-4 complete (dashboard, RAG, tools, router, cloud client, split workload, budget, voice, training)
 - Phase 5 complete (telemetry prep — all 11 issues implemented, verified 50/50, debugged)
 - Phase 8 complete (advanced intelligence & resource optimization — 10 features)
+- Phase 9 complete (learning & self-improvement — 10 features)
 - Dashboard UI polish: DONE (tactical redesign deployed)
 - Qwen model migration: DONE (14B primary, 3B sim/default)
 - Emergency backup system: DONE (e3n-nemo + e3n as last resort)
@@ -804,6 +929,16 @@ E3N_DATA_PATH=C:\e3n\data
 - Hierarchical memory: DONE (hot/warm/cold tiers, SQLite cold storage with zlib compression, background compaction)
 - Streaming async ingest: DONE (queue-based batching, non-blocking /ingest, backpressure at 500 items, metrics endpoint)
 - S3 nightly backup: DONE (scripts/backup_s3.py, Task Scheduler setup, incremental MD5, restore, 30-day retention)
+- Reasoning trace memory: DONE (SQLite persistence, embedding similarity retrieval, [PRIOR REASONING] injection, 30-day prune, max 500 traces)
+- Response quality scoring: DONE (quality.py, 6-signal heuristic scorer, SQLite persistence, drives smart capture + routing feedback + gap detection)
+- Tool relevance filtering: DONE (filter_tools() in definitions.py, domain-specific tool sets, Tier 1 cap at 6, ~1000 token savings)
+- Confidence-aware reasoning: DONE (HIGH/MEDIUM/LOW protocol in ReAct, CLARIFY stream event, confidence stored in traces)
+- Adaptive routing feedback: DONE (SQLite routing_feedback table, quality-driven tier adjustments, 10-min cache, feeds into distillation)
+- Smart auto-capture: DONE (quality-tiered capture, hash dedup over 200 queries, negative examples for DPO)
+- Iterative distillation pipeline: DONE (identify_weak_domains, distill_targeted, run_improvement_cycle, /training/weaknesses + /training/improve endpoints)
+- Cross-domain reasoning transfer: DONE (classify_adapter_domains multi-domain, cross-domain trace retrieval, dynamic TIES merge weighting)
+- Conversation-aware smart history: DONE (_get_smart_history, tiered compression — full/compressed/summary, token-budget-driven)
+- Knowledge gap detection: DONE (SQLite knowledge_gaps table, gap logging from low quality/ReAct max iter/RAG zero results, /knowledge/gaps endpoints)
 - Future (separate projects): Telemetry API for LMU
 
 ## Build Phases
@@ -817,6 +952,7 @@ E3N_DATA_PATH=C:\e3n\data
 | 6 | DONE | Self-management — resource self-manager, circuit breaker, self-diagnostic tools (4), auto-recovery watchdog, VRAM lifecycle management |
 | 7 | DONE | Adapter surgery — modular domain LoRA (racing/engineering/personality/reasoning), selective layer freezing, TIES merge, adapter registry + versioning, eval/promotion/rollback, computation delegation tools, knowledge distillation |
 | 8 | DONE | Advanced intelligence & resource optimization — OS process priority, dynamic GPU layer offloading (Tier AB), predictive VRAM management, semantic deduplication, ReAct reasoning loop, dynamic quantization tiers, iterative RAG, Mixture-of-LoRA routing, hierarchical memory (hot/warm/cold), streaming async ingest pipeline |
+| 9 | DONE | Learning & self-improvement — reasoning trace memory, response quality scoring, tool relevance filtering, confidence-aware reasoning, adaptive routing feedback, smart auto-capture (quality-tiered + DPO negatives), iterative distillation pipeline, cross-domain reasoning transfer, conversation-aware smart history, knowledge gap detection |
 | — | SEPARATE PROJECT | Telemetry API (LMU race engineer) — connects to E3N via /ingest |
 
 ## Known Issues
