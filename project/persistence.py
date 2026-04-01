@@ -374,6 +374,15 @@ def save_knowledge_gap(query_text: str, domain: str, quality_score: float, gap_t
         conn.commit()
 
 
+def count_unresolved_knowledge_gaps() -> int:
+    """Return number of unresolved knowledge gap rows (for daily training report)."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM knowledge_gaps WHERE resolved = 0"
+        ).fetchone()
+    return int(row[0]) if row else 0
+
+
 def get_unresolved_gaps(limit: int = 50) -> list[dict]:
     """Get unresolved knowledge gaps."""
     with _connect() as conn:

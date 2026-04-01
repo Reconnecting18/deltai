@@ -3102,14 +3102,10 @@ def run_daily_cycle(
     # ── Phase 5: Knowledge gap review ──
     gap_summary = {"status": "ok"}
     try:
-        from persistence import get_db
-        db = get_db()
-        cursor = db.execute(
-            "SELECT COUNT(*) as cnt FROM knowledge_gaps WHERE resolved=0"
-        )
-        row = cursor.fetchone()
-        gap_summary["unresolved_gaps"] = row["cnt"] if row else 0
-        db.close()
+        from persistence import count_unresolved_knowledge_gaps, init_db  # noqa: PLC0415
+
+        init_db()
+        gap_summary["unresolved_gaps"] = count_unresolved_knowledge_gaps()
     except Exception as e:
         gap_summary["status"] = "error"
         gap_summary["error"] = str(e)
