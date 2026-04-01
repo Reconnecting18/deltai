@@ -1177,19 +1177,60 @@ def _cb_failure():
 
 # ── LIFESPAN ───────────────────────────────────────────────────────────
 
+async def _rag_bootstrap() -> None:
+    """Initial knowledge ingestion + file watcher (can take a long time)."""
+    if not RAG_AVAILABLE:
+        return
+    try:
+        results = await asyncio.to_thread(ingest_all)
+        ingested = [r for r in results if r["status"] == "ok"]
+        if ingested:
+            logger.info(f"Initial ingestion: {len(ingested)} file(s)")
+        start_watcher()
+        logger.info("File watcher started")
+    except Exception as e:
+        logger.error(f"RAG startup failed: {e}")
+
+
+async def _post_startup_cloud_and_models() -> None:
+    """
+    Cloud + Ollama model registry checks (can be slow when Ollama is down).
+    Runs after the server is accepting HTTP so Electron waitForBackend succeeds.
+    """
+    t0 = _time.monotonic()
+    try:
+        cloud = await is_cloud_available()
+        logger.info(f"Cloud available: {cloud}")
+        logger.info(f"GPU utilization: {get_gpu_utilization()}%")
+
+        primary_models = [
+            ("PRIMARY", os.getenv("E3N_STRONG_MODEL", "e3n-qwen14b")),
+            ("PRIMARY", os.getenv("E3N_MODEL", "e3n-qwen3b")),
+        ]
+        backup_models = [
+            ("BACKUP", os.getenv("E3N_BACKUP_STRONG_MODEL", "e3n-nemo")),
+            ("BACKUP", os.getenv("E3N_BACKUP_MODEL", "e3n")),
+        ]
+        for role, model in primary_models + backup_models:
+            if not model.strip():
+                continue
+            exists = await check_model_exists(model)
+            if exists:
+                logger.info(f"Model check: {model} ({role}) — OK")
+            elif role == "PRIMARY":
+                logger.error(f"Model check: {model} ({role}) — MISSING (system degraded)")
+            else:
+                logger.warning(f"Model check: {model} ({role}) — MISSING (emergency generator unavailable)")
+    finally:
+        elapsed_ms = int((_time.monotonic() - t0) * 1000)
+        logger.debug(f"Deferred cloud/model checks finished in {elapsed_ms}ms")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ── Startup ──
-    if RAG_AVAILABLE:
-        try:
-            results = ingest_all()
-            ingested = [r for r in results if r["status"] == "ok"]
-            if ingested:
-                logger.info(f"Initial ingestion: {len(ingested)} file(s)")
-            start_watcher()
-            logger.info("File watcher started")
-        except Exception as e:
-            logger.error(f"RAG startup failed: {e}")
+    t_life = _time.monotonic()
+
+    rag_bootstrap_task = asyncio.create_task(_rag_bootstrap()) if RAG_AVAILABLE else None
 
     # ── Persistence ──
     try:
@@ -1201,29 +1242,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Persistence startup failed: {e}")
 
-    cloud = await is_cloud_available()
-    logger.info(f"Cloud available: {cloud}")
-    logger.info(f"GPU utilization: {get_gpu_utilization()}%")
-
-    # ── Model existence checks ──
-    primary_models = [
-        ("PRIMARY", os.getenv("E3N_STRONG_MODEL", "e3n-qwen14b")),
-        ("PRIMARY", os.getenv("E3N_MODEL", "e3n-qwen3b")),
-    ]
-    backup_models = [
-        ("BACKUP", os.getenv("E3N_BACKUP_STRONG_MODEL", "e3n-nemo")),
-        ("BACKUP", os.getenv("E3N_BACKUP_MODEL", "e3n")),
-    ]
-    for role, model in primary_models + backup_models:
-        if not model.strip():
-            continue
-        exists = await check_model_exists(model)
-        if exists:
-            logger.info(f"Model check: {model} ({role}) — OK")
-        elif role == "PRIMARY":
-            logger.error(f"Model check: {model} ({role}) — MISSING (system degraded)")
-        else:
-            logger.warning(f"Model check: {model} ({role}) — MISSING (emergency generator unavailable)")
+    post_startup_task = asyncio.create_task(_post_startup_cloud_and_models())
 
     # ── Start background tasks ──
     health_task = asyncio.create_task(_backup_health_loop())
@@ -1231,9 +1250,25 @@ async def lifespan(app: FastAPI):
     self_heal_task = asyncio.create_task(_ai_self_heal_loop())
     ingest_task = asyncio.create_task(_ingest_pipeline_worker())
 
+    pre_yield_ms = int((_time.monotonic() - t_life) * 1000)
+    logger.debug(f"Lifespan reached yield (pre-yield startup {pre_yield_ms}ms)")
+
     yield
 
     # ── Shutdown ──
+    post_startup_task.cancel()
+    try:
+        await post_startup_task
+    except asyncio.CancelledError:
+        pass
+
+    if rag_bootstrap_task:
+        rag_bootstrap_task.cancel()
+        try:
+            await rag_bootstrap_task
+        except asyncio.CancelledError:
+            pass
+
     for task in (health_task, resource_task, self_heal_task, ingest_task):
         task.cancel()
         try:
