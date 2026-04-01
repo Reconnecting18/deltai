@@ -2956,8 +2956,8 @@ def run_daily_cycle(
     try:
         from router import is_sim_running, _get_vram_info
         guards["sim_running"] = is_sim_running()
-        vram_info = _get_vram_info()
-        guards["vram_free_mb"] = vram_info.get("free_mb", 0)
+        vram_info = _get_vram_info()  # returns (used_mb, total_mb, free_mb)
+        guards["vram_free_mb"] = vram_info[2]
         guards["vram_ok"] = guards["vram_free_mb"] >= _DAILY_TRAIN_MIN_VRAM_MB
     except Exception as e:
         guards["vram_ok"] = False

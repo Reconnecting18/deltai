@@ -169,7 +169,7 @@ def _print_report(report_path: str):
         print(f"\n[Web Collection] — status={web_status}")
         print(f"  Written: {web.get('total_written', 0)}, Skipped: {web.get('total_skipped', 0)}, Errors: {web.get('total_errors', 0)}")
         for src, r in web.get("sources", {}).items():
-            extra = f" [offset→{r.get('offset_end', '?')}]" if src == "wikipedia" else ""
+            extra = f" [offset->{r.get('offset_end', '?')}]" if src == "wikipedia" else ""
             print(f"  {src}: written={r.get('written', 0)}, status={r.get('status', '?')}{extra}")
 
     weak = phases.get("weakness_analysis", {}).get("weak_domains", [])
