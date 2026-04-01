@@ -174,6 +174,15 @@ REACT_ALLOW_CLARIFY=true        # Allow ReAct to ask clarifying questions
 SMART_CAPTURE_ENABLED=true      # Quality-tiered capture with dedup
 SMART_HISTORY_ENABLED=true      # Intelligent context window compression
 KNOWLEDGE_GAP_DETECTION=true    # Log unanswered queries as knowledge gaps
+
+# Phase 10 — Continuous Intelligence
+DAILY_TRAIN_ENABLED=true        # Run daily training cycle at 2 AM
+DAILY_TRAIN_MIN_VRAM_MB=7000    # Min free VRAM to proceed with training
+DAILY_TRAIN_AUTO_PROMOTE=false  # Auto-promote better adapters after eval
+DAILY_TRAIN_AUTO_MERGE=false    # Auto-TIES merge after promotion
+SESSION_SYNTHESIS_ENABLED=true  # Synthesize session knowledge at session end
+SESSION_SYNTHESIS_MODEL=local14b # Model for synthesis (local14b or local3b)
+DPO_ENABLED=false               # DPO training (enable when negatives accumulate)
 ```
 
 ---
@@ -338,8 +347,10 @@ Last-resort failover chain if the primary model fails:
 │   ├── knowledge\                Drop files here for RAG ingestion
 │   └── training\                 Datasets, adapters, GGUF exports, eval results
 ├── scripts\
-│   ├── backup_s3.py              S3 backup — full/incremental/restore
-│   └── setup_backup_task.ps1     Windows Task Scheduler registration
+│   ├── backup_s3.py                  S3 backup — full/incremental/restore
+│   ├── setup_backup_task.ps1         Task Scheduler — 3 AM S3 backup
+│   ├── daily_training.py             Daily autonomous training orchestrator (2 AM)
+│   └── setup_daily_training_task.ps1 Task Scheduler — 2 AM training cycle
 └── tools\
     └── llama.cpp\                GGUF conversion toolchain (gitignored unless cloned)
 ```
@@ -429,6 +440,7 @@ Last-resort failover chain if the primary model fails:
 | 7 | **Complete** | Adapter surgery — modular domain LoRA, TIES merge, computation tools, distillation |
 | 8 | **Complete** | Advanced intelligence — ReAct reasoning, iterative RAG, dynamic quant/offload, hierarchical memory, async ingest, MoLoRA, predictive VRAM, process priority |
 | 9 | **Complete** | Progressive intelligence — reasoning trace memory, quality scoring, tool filtering, confidence protocol, adaptive routing, smart capture, iterative distillation, cross-domain transfer, smart history, knowledge gaps |
+| 10 | **Complete** | Continuous intelligence — daily autonomous training (2 AM scheduler), telemetry + audio adapter domains (6 total), DPO training, session knowledge synthesis, 5 new training datasets, CoT Protocol 7 |
 | — | **Separate** | Telemetry API for Le Mans Ultimate — connects to E3N via /ingest |
 
 ---
@@ -515,6 +527,58 @@ This restores all files to `C:\e3n\data\` — ChromaDB, SQLite, knowledge base, 
 | `E3N_S3_REGION` | `us-east-1` | AWS region |
 | `E3N_S3_RETENTION` | `30` | Days to keep old backups (0 = forever) |
 | `E3N_DATA_PATH` | `C:\e3n\data` | Path to data directory |
+
+---
+
+## Daily Autonomous Training
+
+E3N improves itself every night without human intervention via a scheduled training cycle.
+
+### Setup (run as Administrator)
+
+```powershell
+# Register daily training task at 2:00 AM (before the 3 AM S3 backup)
+powershell -ExecutionPolicy Bypass -File C:\e3n\scripts\setup_daily_training_task.ps1
+```
+
+### How It Works
+
+| Phase | Description |
+|-------|-------------|
+| Guards | Sim not running, VRAM ≥ 7GB, no active session |
+| Weakness Analysis | Identifies domains with avg quality < 0.6 from routing feedback |
+| Targeted Distillation | 14B teacher generates examples for up to 2 weak domains |
+| Curriculum | Daily topic rotation (Mon=telemetry, Tue=strategy, Wed=engineering, Thu=simulations, Fri=audio, Sat=cross-domain, Sun=personality) |
+| QLoRA Training | Trains one domain adapter on blended new + existing data |
+| Gap Review | Counts unresolved knowledge gaps |
+| Report | JSON report written to `data/training/daily_reports/YYYY-MM-DD.json` |
+
+### Manual Usage
+
+```powershell
+# Dry run — all phases, no actual training
+python scripts/daily_training.py --dry-run
+
+# Force a specific day's curriculum (0=Mon, 1=Tue...)
+python scripts/daily_training.py --day 0
+
+# Skip QLoRA, distillation + report only
+python scripts/daily_training.py --no-train
+
+# View last daily report
+python scripts/daily_training.py --report-only
+```
+
+### Adapter Domains (6 total)
+
+| Domain | Purpose | LoRA Rank | Freeze Depth |
+|--------|---------|-----------|--------------|
+| Racing | Tire strategy, lap analysis, driving technique | r=16 | 18/36 (50%) |
+| Engineering | Physics, FEA/CFD, thermodynamics, statics | r=16 | 12/36 (33%) |
+| Personality | E3N voice, response style | r=8 | 24/36 (67%) |
+| Reasoning | Chain-of-thought, multi-step analysis | r=32 | 8/36 (22%) |
+| **Telemetry** | Multi-sensor correlation, anomaly detection, degradation curves | r=16 | 14/36 (39%) |
+| **Audio** | Engine knock, bearing noise, brake squeal, turbo surge diagnosis | r=16 | 16/36 (44%) |
 
 ---
 

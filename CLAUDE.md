@@ -102,7 +102,7 @@ E3N does NOT directly process telemetry, UDP packets, or game data. Instead:
 | `project/watcher.py` | Watchdog file watcher for knowledge dir |
 | `project/anthropic_client.py` | Anthropic API streaming with tool use, split_mode, telemetry_mode prompt injection, conversation history support (dormant — no API key) |
 | `project/persistence.py` | SQLite backing store for conversation history (session-aware), cloud budget, session history export, reasoning traces, quality scores, routing feedback, knowledge gaps (WAL mode, short-lived connections) |
-| `project/training.py` (~2400 lines) | Training pipeline: dataset CRUD, export (alpaca/sharegpt/chatml), QLoRA fine-tuning + GGUF export + Ollama registration, adapter surgery (registry, domain training, selective layer freezing, TIES merge, eval/promotion/rollback), knowledge distillation, iterative distillation (weakness identification + targeted improvement), few-shot fallback, A/B eval, smart auto-capture (quality-tiered, dedup, negative examples) |
+| `project/training.py` (~3200 lines) | Training pipeline: dataset CRUD, export (alpaca/sharegpt/chatml), QLoRA fine-tuning + GGUF export + Ollama registration, adapter surgery (registry, 6 domain slots — racing/engineering/personality/reasoning/telemetry/audio, selective layer freezing, TIES merge, eval/promotion/rollback), knowledge distillation, iterative distillation, DPO training (trl.DPOTrainer), session knowledge synthesis, daily training cycle orchestrator (run_daily_cycle), few-shot fallback, A/B eval, smart auto-capture (quality-tiered, dedup, negative examples) |
 | `project/voice/` (~1780 lines) | Voice package: STT (faster-whisper), TTS (Piper/edge-tts), RVC voice conversion, playback, post-processing, voice config |
 | `project/tools/executor.py` (~1270 lines) | Tool execution with type coercion, safety checks, tool retry on error, computation delegation (calculate, summarize_data, lookup_reference), self-diagnostics (7 subsystem deep checks), manage_ollama_models (status/unload/preload with sim guard), repair_subsystem (4 allowlisted repairs), resource_status, manage_adapters, conditional telemetry tools |
 | `project/tools/definitions.py` (~420 lines) | 7 core + 3 computation + 4 diagnostic + 1 adapter + 4 conditional telemetry tool JSON schemas, `filter_tools()` domain-aware tool relevance filtering |
@@ -116,6 +116,9 @@ E3N does NOT directly process telemetry, UDP packets, or game data. Instead:
 | `tools/llama.cpp/` | GGUF conversion toolchain — `convert_hf_to_gguf.py` + `build/bin/Release/llama-quantize.exe` |
 | `scripts/backup_s3.py` | S3 nightly backup — full backup, incremental (MD5 skip), restore, retention cleanup |
 | `scripts/setup_backup_task.ps1` | Windows Task Scheduler registration for nightly backup at 3 AM |
+| `scripts/daily_training.py` | Daily autonomous training orchestrator — guard checks, weakness analysis, targeted distillation, QLoRA, memory consolidation, report. Standalone (no FastAPI needed). |
+| `scripts/setup_daily_training_task.ps1` | Windows Task Scheduler registration for daily training at 2 AM (before S3 backup) |
+| `project/training_build.py` | Dataset builder — 13 curated datasets: anti-hallucination, engineering, race engineering, data interpretation, personality, reasoning, MechE, simulations, telemetry analysis, audio analysis, engineering simulations, advanced strategy, CoT reasoning |
 
 ## How to Start
 ```powershell
@@ -402,6 +405,9 @@ Dataset management, QLoRA fine-tuning, and progressive model improvement.
 - **Export formats:** Alpaca, ShareGPT, ChatML — ready for external training tools
 - **Smart auto-capture:** `smart_auto_capture()` replaces basic `auto_capture()`. Quality-tiered: score >= 0.8 always captured, 0.6-0.8 at 50% probability, < 0.3 stored as negative example in `{dataset}-negative` for DPO training. Hash-based deduplication (recent 200 queries).
 - **Iterative distillation:** `identify_weak_domains()` finds domains with avg quality < 0.6. `distill_targeted()` pulls worst queries for teacher data generation. `run_improvement_cycle()` orchestrates full loop: identify weaknesses → distill targeted data → (train → eval → promote).
+- **DPO training:** `start_dpo_training()` uses `trl.DPOTrainer` to align on positive/negative example pairs. Runs after SFT. Needs matched pairs (same query, different quality responses).
+- **Session knowledge synthesis:** `synthesize_session_knowledge()` — after session ends, teacher generates 200-400 word knowledge article from session turns. Returned for permanent RAG ingestion.
+- **Daily cycle:** `run_daily_cycle()` — full autonomous improvement loop: guard checks → weakness analysis → targeted distillation → blend + train → gap review → report to `data/training/daily_reports/`.
 - **Background execution:** Training runs in a background thread, status trackable via `/training/status` (includes loss, step progress, trainable params)
 - **Progressive loop:** Use E3N → smart auto-capture → accumulate dataset → trigger LoRA → deploy fine-tuned model → repeat
 - **Endpoints:**
@@ -432,18 +438,28 @@ LORA_QUANT_METHOD=Q4_K_M
 LLAMA_CPP_PATH=C:\e3n\tools\llama.cpp
 SMART_CAPTURE_ENABLED=true
 CAPTURE_DEDUP_THRESHOLD=0.15
+# Phase 10 — Continuous intelligence
+DAILY_TRAIN_ENABLED=true
+DAILY_TRAIN_MIN_VRAM_MB=7000
+DAILY_TRAIN_AUTO_PROMOTE=false
+DAILY_TRAIN_AUTO_MERGE=false
+SESSION_SYNTHESIS_ENABLED=true
+SESSION_SYNTHESIS_MODEL=local14b
+DPO_ENABLED=false
 ```
 
 ## Adapter Surgery (Augmentation Slots)
 Modular LoRA adapters: train, version, evaluate, and merge domain-specific "augmentations" independently.
 
-### Four Augmentation Slots
+### Six Augmentation Slots
 | Domain | LoRA Rank | Freeze Depth | Purpose |
 |--------|-----------|-------------|---------|
 | Racing | r=16 | 18/36 layers (50%) | Tire strategy, telemetry, driving technique |
-| Engineering | r=16 | 12/36 layers (33%) | Physics, calculus, statics, thermo |
+| Engineering | r=16 | 12/36 layers (33%) | Physics, calculus, statics, thermo, FEA/CFD |
 | Personality | r=8 | 24/36 layers (67%) | E3N voice, response style |
-| Reasoning | r=32 | 8/36 layers (22%) | Chain-of-thought, analysis |
+| Reasoning | r=32 | 8/36 layers (22%) | Chain-of-thought, analysis, structured CoT |
+| Telemetry | r=16 | 14/36 layers (39%) | Multi-sensor correlation, anomaly detection, degradation curves |
+| Audio | r=16 | 16/36 layers (44%) | Engine knock, mechanical signatures, real-time audio diagnostics |
 
 ### How It Works
 1. **Domain training:** `start_domain_training(domain)` trains a LoRA adapter with selective layer freezing — bottom layers frozen (universal knowledge), top layers trained (domain-specific)
@@ -473,6 +489,92 @@ ADAPTER_MERGE_METHOD=ties
 ADAPTER_MERGE_DENSITY=0.5
 ADAPTER_AUTO_MERGE=false
 ADAPTER_AUTO_PROMOTE=false
+```
+
+## Daily Autonomous Training
+Scheduled daily self-improvement cycle. Runs at 2:00 AM via Windows Task Scheduler (before the 3 AM S3 backup, so new adapters are included in backup). Standalone — does not require the FastAPI server to be running.
+
+- **Script:** `scripts/daily_training.py` — standalone orchestrator
+- **Scheduler:** `scripts/setup_daily_training_task.ps1` — registers Task Scheduler job
+- **Log:** `data/training/daily_training.log`
+- **Reports:** `data/training/daily_reports/YYYY-MM-DD.json`
+
+**Phases:**
+1. Guard checks: sim not running, VRAM ≥ `DAILY_TRAIN_MIN_VRAM_MB`, no active session, no training already running
+2. Weakness analysis: calls `identify_weak_domains()` — domains with avg quality < 0.6
+3. Targeted distillation: teacher (14B) generates examples for up to 2 weak domains
+4. Curriculum: daily topic rotating by weekday (Mon=telemetry, Tue=strategy, Wed=engineering, Thu=simulations, Fri=audio, Sat=cross-domain, Sun=personality/retention)
+5. QLoRA domain adapter training: blends curriculum datasets + distillation, trains one domain adapter
+6. Knowledge gap review: counts unresolved gaps, surfaces patterns
+7. Report: writes structured JSON report to `daily_reports/`
+
+**Weekly curriculum:**
+| Day | Primary | Secondary |
+|-----|---------|-----------|
+| Mon | Telemetry analysis | Audio analysis |
+| Tue | Race strategy advanced | Race engineering |
+| Wed | Engineering + MechE | — |
+| Thu | Engineering simulations | CoT reasoning |
+| Fri | Audio analysis | Telemetry analysis |
+| Sat | General reasoning | Data interpretation |
+| Sun | Personality calibration | Retention baseline |
+
+**CLI usage:**
+```powershell
+# Dry run (no actual training, just reports)
+python scripts/daily_training.py --dry-run
+
+# Force Monday curriculum
+python scripts/daily_training.py --day 0
+
+# Skip QLoRA, distillation only
+python scripts/daily_training.py --no-train
+
+# View last report
+python scripts/daily_training.py --report-only
+```
+
+**Config (.env):**
+```
+DAILY_TRAIN_ENABLED=true
+DAILY_TRAIN_MIN_VRAM_MB=7000
+DAILY_TRAIN_AUTO_PROMOTE=false
+DAILY_TRAIN_AUTO_MERGE=false
+```
+
+## DPO Training
+Direct Preference Optimization using positive/negative example pairs.
+
+- **Function:** `start_dpo_training()` in `training.py`
+- **Uses:** `trl.DPOTrainer` (same trl dependency already installed)
+- **Input:** positive dataset + `{dataset}-negative` dataset (accumulated by smart_auto_capture)
+- **Preference pairs:** matched by input text — same query, different quality responses
+- **Minimum:** 10 matched pairs required
+- **LoRA config:** r=8 (lighter than SFT) for preference tuning
+- **Endpoint:** Same `/training/start` with `mode=dpo` (or direct function call)
+- **Best used:** After SFT base is trained, to further align response quality
+- **Status:** Functional, disabled by default until negative datasets accumulate (needs ~50+ pairs)
+
+**Config (.env):**
+```
+DPO_ENABLED=false
+```
+
+## Session End Knowledge Synthesis
+After a racing/work session ends, synthesizes key learnings into a durable knowledge article.
+
+- **Function:** `synthesize_session_knowledge(session_id, session_turns)` in `training.py`
+- **Trigger:** Called from `POST /session/end` handler in `main.py` (requires integration)
+- **Teacher:** 14B local model (or 3B if VRAM constrained) synthesizes last 30 turns
+- **Output:** 200-400 word knowledge article with structured headings
+- **Storage:** Returned to caller for ingestion as permanent (TTL=0) RAG entry
+- **Source tag:** `session-synthesis:{session_id}` — searchable in future sessions
+- **Value:** Turns race sessions into durable, searchable knowledge, not just ephemeral chat logs
+
+**Config (.env):**
+```
+SESSION_SYNTHESIS_ENABLED=true
+SESSION_SYNTHESIS_MODEL=local14b
 ```
 
 ## Symbolic Math Engine (solve_math)
@@ -953,6 +1055,16 @@ Multi-domain query support that leverages adapters and reasoning traces across d
 - Cross-domain reasoning transfer: DONE (classify_adapter_domains multi-domain, cross-domain trace retrieval, dynamic TIES merge weighting)
 - Conversation-aware smart history: DONE (_get_smart_history, tiered compression — full/compressed/summary, token-budget-driven)
 - Knowledge gap detection: DONE (SQLite knowledge_gaps table, gap logging from low quality/ReAct max iter/RAG zero results, /knowledge/gaps endpoints)
+- Phase 10 complete (continuous intelligence — daily training scheduler, telemetry/audio adapters, DPO, session synthesis, 5 new datasets, CoT modelfile protocol)
+- Daily autonomous training: DONE (scripts/daily_training.py, Task Scheduler at 2 AM, rotating weekly curriculum)
+- Telemetry adapter domain: DONE (r=16, 14/36 layers, ADAPTER_DOMAINS expanded to 6)
+- Audio adapter domain: DONE (r=16, 16/36 layers, engine knock/bearing/brake acoustic signatures)
+- DPO training: DONE (start_dpo_training() via trl.DPOTrainer, consumes smart_auto_capture negatives)
+- Session knowledge synthesis: DONE (synthesize_session_knowledge(), 14B teacher, permanent RAG ingest)
+- New datasets (5): DONE (e3n-telemetry-analysis, e3n-audio-analysis, e3n-eng-simulations, e3n-strategy-advanced, e3n-cot-reasoning)
+- Modelfile Protocol 7: DONE (structured CoT THINK/REASON/FINAL for complex problems)
+- Modelfile telemetry/audio domains: DONE (E3N-qwen14b.modelfile updated with sensor correlation + acoustic diagnosis)
+- Router domain patterns: DONE (telemetry + audio pattern sets in ADAPTER_DOMAIN_PATTERNS)
 - Future (separate projects): Telemetry API for LMU
 
 ## Build Phases
@@ -967,6 +1079,7 @@ Multi-domain query support that leverages adapters and reasoning traces across d
 | 7 | DONE | Adapter surgery — modular domain LoRA (racing/engineering/personality/reasoning), selective layer freezing, TIES merge, adapter registry + versioning, eval/promotion/rollback, computation delegation tools, knowledge distillation |
 | 8 | DONE | Advanced intelligence & resource optimization — OS process priority, dynamic GPU layer offloading (Tier AB), predictive VRAM management, semantic deduplication, ReAct reasoning loop, dynamic quantization tiers, iterative RAG, Mixture-of-LoRA routing, hierarchical memory (hot/warm/cold), streaming async ingest pipeline |
 | 9 | DONE | Learning & self-improvement — reasoning trace memory, response quality scoring, tool relevance filtering, confidence-aware reasoning, adaptive routing feedback, smart auto-capture (quality-tiered + DPO negatives), iterative distillation pipeline, cross-domain reasoning transfer, conversation-aware smart history, knowledge gap detection |
+| 10 | DONE | Continuous intelligence — daily autonomous training scheduler (2 AM Task Scheduler), telemetry + audio adapter domain slots (6 total), DPO training (trl.DPOTrainer), session end knowledge synthesis, 5 new training datasets, CoT Protocol 7 in modelfile, router domain patterns for telemetry + audio |
 | — | SEPARATE PROJECT | Telemetry API (LMU race engineer) — connects to E3N via /ingest |
 
 ## Known Issues

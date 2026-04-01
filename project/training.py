@@ -66,7 +66,7 @@ OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
 REGISTRY_PATH = os.path.join(TRAINING_PATH, "adapter_registry.json")
 
-ADAPTER_DOMAINS = ["racing", "engineering", "personality", "reasoning"]
+ADAPTER_DOMAINS = ["racing", "engineering", "personality", "reasoning", "telemetry", "audio"]
 
 DATASET_DOMAIN_MAP = {
     "e3n-racing": "racing",
@@ -74,9 +74,20 @@ DATASET_DOMAIN_MAP = {
     "e3n-simulations": "racing",
     "e3n-engineering": "engineering",
     "e3n-meche": "engineering",
+    "e3n-eng-simulations": "engineering",
     "e3n-personality": "personality",
     "e3n-reasoning": "reasoning",
     "e3n-data-context": "reasoning",
+    "e3n-cot-reasoning": "reasoning",
+    "e3n-telemetry-analysis": "telemetry",
+    "e3n-strategy-advanced": "telemetry",
+    "e3n-audio-analysis": "audio",
+    # Daily-generated distillation datasets
+    "distill-telemetry-targeted": "telemetry",
+    "distill-audio-targeted": "audio",
+    "distill-racing-targeted": "racing",
+    "distill-engineering-targeted": "engineering",
+    "distill-reasoning-targeted": "reasoning",
 }
 
 # Per-domain training configs — different domains need different tuning
@@ -85,6 +96,8 @@ DOMAIN_LORA_CONFIGS = {
     "engineering": {"r": 16, "alpha": 32, "epochs": 4, "lr": 1e-4},
     "personality": {"r": 8,  "alpha": 16, "epochs": 5, "lr": 3e-4},
     "reasoning":   {"r": 32, "alpha": 64, "epochs": 3, "lr": 1e-4},
+    "telemetry":   {"r": 16, "alpha": 32, "epochs": 4, "lr": 1e-4},
+    "audio":       {"r": 16, "alpha": 32, "epochs": 4, "lr": 1e-4},
 }
 
 # Layer freezing depth per domain (Qwen2.5-3B has 36 layers)
@@ -94,6 +107,8 @@ DOMAIN_FREEZE_LAYERS = {
     "engineering": 12,  # 33% — technical reasoning needs more trainable layers
     "personality": 24,  # 67% — style is surface-level, needs fewer layers
     "reasoning": 8,     # 22% — deep reasoning needs most of the network
+    "telemetry": 14,    # 39% — pattern recognition needs middle + upper layers
+    "audio": 16,        # 44% — new signal pattern learning, upper layers critical
 }
 
 ADAPTER_MERGE_METHOD = os.getenv("ADAPTER_MERGE_METHOD", "ties")
@@ -2505,7 +2520,7 @@ def identify_weak_domains(min_samples: int = 20) -> list[dict]:
     except ImportError:
         return []
 
-    domains = ["racing", "engineering", "reasoning", "general"]
+    domains = ["racing", "engineering", "reasoning", "telemetry", "audio", "general"]
     weak = []
 
     for domain in domains:
@@ -2606,3 +2621,490 @@ def run_improvement_cycle(domain: str) -> dict:
         "distillation": result,
         "next_steps": "Run domain training with the targeted dataset, then eval and promote.",
     }
+
+
+# ── DPO TRAINING ─────────────────────────────────────────────────────────
+# Direct Preference Optimization using positive/negative example pairs.
+# Consumes {dataset}-negative datasets accumulated by smart_auto_capture.
+
+def start_dpo_training(
+    positive_dataset: str,
+    negative_dataset: str = None,
+    output_model: str = None,
+    base_model: str = None,
+) -> dict:
+    """
+    Start DPO (Direct Preference Optimization) training using positive/negative pairs.
+    Uses trl.DPOTrainer to improve preference alignment.
+
+    positive_dataset: dataset with good examples (score >= 0.6)
+    negative_dataset: dataset with bad examples (default: {positive_dataset}-negative)
+    output_model: Ollama model name for the result
+    base_model: HuggingFace base model (default: HF_BASE_MODEL env var)
+
+    Requires same deps as LoRA: transformers, peft, trl, bitsandbytes.
+    """
+    with _training_lock:
+        if _training_state["running"]:
+            return {"status": "error", "reason": "Training already in progress"}
+
+    if negative_dataset is None:
+        negative_dataset = f"{positive_dataset}-negative"
+
+    pos_path = _dataset_path(positive_dataset)
+    neg_path = _dataset_path(negative_dataset)
+
+    if not os.path.exists(pos_path):
+        return {"status": "error", "reason": f"Positive dataset not found: {positive_dataset}"}
+    if not os.path.exists(neg_path):
+        return {"status": "error", "reason": f"Negative dataset not found: {negative_dataset}"}
+
+    effective_base = base_model or HF_BASE_MODEL
+    effective_output = output_model or f"e3n-qwen3b-dpo-{positive_dataset}"
+
+    _training_cancel_flag.clear()
+    _update_state(
+        running=True, status="starting DPO training", progress=0,
+        dataset=positive_dataset, model=effective_output, mode="dpo",
+        error=None, loss=None, completed=None,
+    )
+
+    def _run_dpo():
+        try:
+            _dpo_train_impl(positive_dataset, negative_dataset, effective_base, effective_output)
+        except Exception as e:
+            logger.error(f"DPO training failed: {e}", exc_info=True)
+            _update_state(running=False, status="failed", error=str(e))
+
+    t = threading.Thread(target=_run_dpo, daemon=True)
+    t.start()
+    return {
+        "status": "ok",
+        "message": f"DPO training started: {effective_output} (pos={positive_dataset}, neg={negative_dataset})",
+        "mode": "dpo",
+        "output_model": effective_output,
+    }
+
+
+def _dpo_train_impl(
+    positive_dataset: str,
+    negative_dataset: str,
+    base_model: str,
+    output_model: str,
+) -> None:
+    """Internal DPO training implementation. Runs in background thread."""
+    try:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+        from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+        from trl import DPOTrainer, DPOConfig
+        from datasets import Dataset as HFDataset
+    except ImportError as e:
+        _update_state(running=False, status="failed",
+                      error=f"DPO deps missing: {e}. Install: pip install trl transformers peft bitsandbytes")
+        return
+
+    _update_state(progress=5, status="loading positive/negative datasets")
+    pos_result = get_dataset(positive_dataset)
+    neg_result = get_dataset(negative_dataset)
+
+    if pos_result.get("status") != "ok" or neg_result.get("status") != "ok":
+        _update_state(running=False, status="failed", error="Could not load datasets")
+        return
+
+    pos_examples = pos_result.get("examples", [])
+    neg_examples = neg_result.get("examples", [])
+
+    if not pos_examples or not neg_examples:
+        _update_state(running=False, status="failed", error="Empty dataset(s) for DPO")
+        return
+
+    # Build preference pairs: match by input text
+    pos_by_input = {ex.get("input", ""): ex.get("output", "") for ex in pos_examples}
+    neg_by_input = {ex.get("input", ""): ex.get("output", "") for ex in neg_examples}
+
+    pairs = []
+    for inp, chosen in pos_by_input.items():
+        rejected = neg_by_input.get(inp)
+        if rejected and chosen != rejected:
+            pairs.append({"prompt": inp, "chosen": chosen, "rejected": rejected})
+
+    if len(pairs) < 10:
+        _update_state(running=False, status="failed",
+                      error=f"Too few preference pairs ({len(pairs)}). Need at least 10 matched examples.")
+        return
+
+    _update_state(progress=10, status=f"building {len(pairs)} preference pairs")
+
+    hf_data = HFDataset.from_list(pairs)
+    train_size = max(1, int(len(hf_data) * 0.9))
+    train_ds = hf_data.select(range(train_size))
+    eval_ds = hf_data.select(range(train_size, len(hf_data))) if len(hf_data) > train_size else train_ds
+
+    _update_state(progress=15, status="loading base model (4-bit)")
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16,
+    )
+    model = AutoModelForCausalLM.from_pretrained(
+        base_model,
+        quantization_config=bnb_config,
+        device_map="auto",
+        trust_remote_code=True,
+    )
+    tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    _update_state(progress=20, status="applying LoRA for DPO")
+    model = prepare_model_for_kbit_training(model)
+    lora_cfg = LoraConfig(r=8, lora_alpha=16, lora_dropout=0.05,
+                          target_modules=["q_proj", "v_proj"], bias="none",
+                          task_type="CAUSAL_LM")
+    model = get_peft_model(model, lora_cfg)
+
+    adapter_dir = os.path.join(ADAPTERS_PATH, output_model)
+    os.makedirs(adapter_dir, exist_ok=True)
+
+    dpo_args = DPOConfig(
+        output_dir=adapter_dir,
+        num_train_epochs=2,
+        per_device_train_batch_size=1,
+        gradient_accumulation_steps=4,
+        learning_rate=5e-5,
+        bf16=True,
+        logging_steps=1,
+        save_strategy="epoch",
+        report_to="none",
+        beta=0.1,
+        max_length=512,
+        max_prompt_length=256,
+    )
+
+    _update_state(progress=30, status="DPO training")
+    trainer = DPOTrainer(
+        model=model,
+        args=dpo_args,
+        train_dataset=train_ds,
+        eval_dataset=eval_ds,
+        tokenizer=tokenizer,
+    )
+    trainer.train()
+
+    _update_state(progress=85, status="saving DPO adapter")
+    model.save_pretrained(adapter_dir)
+    tokenizer.save_pretrained(adapter_dir)
+
+    del model, trainer
+    import gc
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    _update_state(running=False, progress=100, status="DPO training complete",
+                  completed=int(time.time()), error=None)
+    logger.info(f"DPO training complete: {output_model} ({len(pairs)} pairs)")
+
+
+# ── SESSION KNOWLEDGE SYNTHESIS ───────────────────────────────────────────
+# At session end, synthesize key learnings into a durable knowledge article.
+
+SESSION_SYNTHESIS_ENABLED = os.getenv("SESSION_SYNTHESIS_ENABLED", "true").lower() in ("true", "1", "yes")
+SESSION_SYNTHESIS_MODEL = os.getenv("SESSION_SYNTHESIS_MODEL", "local14b")
+
+
+def synthesize_session_knowledge(
+    session_id: str,
+    session_turns: list[dict],
+    teacher: str = None,
+) -> dict:
+    """
+    After a racing/work session ends, distill key learnings into a knowledge article.
+
+    session_turns: list of {"role": str, "content": str} pairs from the session
+    teacher: "local14b" or "local3b" (default: SESSION_SYNTHESIS_MODEL env var)
+
+    Returns {"status": "ok", "knowledge_text": str, "session_id": str, "words": int}
+    The caller is responsible for ingesting the returned knowledge_text into ChromaDB.
+    """
+    if not SESSION_SYNTHESIS_ENABLED:
+        return {"status": "skipped", "reason": "SESSION_SYNTHESIS_ENABLED=false"}
+
+    if not session_turns:
+        return {"status": "skipped", "reason": "no session turns provided"}
+
+    effective_teacher = teacher or SESSION_SYNTHESIS_MODEL
+    model_name = os.getenv("E3N_STRONG_MODEL", "e3n-qwen14b") if effective_teacher == "local14b" \
+        else os.getenv("E3N_MODEL", "e3n-qwen3b")
+
+    # Build session transcript (trimmed to avoid token overflow)
+    transcript_lines = []
+    for turn in session_turns[-30:]:
+        role = turn.get("role", "user")
+        content = (turn.get("content") or "")[:600]
+        transcript_lines.append(f"{role.upper()}: {content}")
+    transcript = "\n".join(transcript_lines)
+
+    synthesis_prompt = (
+        "You are E3N's knowledge synthesis module. Analyze the following session transcript "
+        "and write a concise knowledge article (200-400 words) capturing:\n"
+        "1. Key decisions made and their rationale\n"
+        "2. Technical findings or setup discoveries\n"
+        "3. Strategy patterns that worked or failed\n"
+        "4. Any engineering or physics insights discussed\n"
+        "5. Action items or lessons for future sessions\n\n"
+        "Format as a structured article with clear headings. Be specific — include numbers, "
+        "lap times, temperatures, or setup values where mentioned.\n\n"
+        f"SESSION TRANSCRIPT:\n{transcript}\n\nKNOWLEDGE ARTICLE:"
+    )
+
+    try:
+        resp = httpx.post(
+            f"{OLLAMA_URL}/api/chat",
+            json={
+                "model": model_name,
+                "messages": [{"role": "user", "content": synthesis_prompt}],
+                "stream": False,
+                "options": {"num_predict": 600, "temperature": 0.3},
+            },
+            timeout=120,
+        )
+        resp.raise_for_status()
+        knowledge_text = resp.json().get("message", {}).get("content", "").strip()
+    except Exception as e:
+        return {"status": "error", "reason": f"Synthesis model call failed: {e}"}
+
+    if not knowledge_text or len(knowledge_text) < 100:
+        return {"status": "error", "reason": "Synthesis returned insufficient content"}
+
+    words = len(knowledge_text.split())
+    logger.info(f"Session synthesis complete: session={session_id}, words={words}, model={model_name}")
+    return {
+        "status": "ok",
+        "knowledge_text": knowledge_text,
+        "session_id": session_id,
+        "words": words,
+        "model": model_name,
+    }
+
+
+# ── DAILY TRAINING CYCLE ──────────────────────────────────────────────────
+# Orchestrates the full daily self-improvement loop.
+
+# Weekly curriculum map: weekday (0=Mon) -> list of (dataset_name, topic_label)
+_DAILY_CURRICULUM = {
+    0: [("e3n-telemetry-analysis", "telemetry"), ("e3n-audio-analysis", "audio")],
+    1: [("e3n-strategy-advanced", "telemetry"), ("e3n-race-engineering", "racing")],
+    2: [("e3n-engineering", "engineering"), ("e3n-meche", "engineering")],
+    3: [("e3n-eng-simulations", "engineering"), ("e3n-cot-reasoning", "reasoning")],
+    4: [("e3n-audio-analysis", "audio"), ("e3n-telemetry-analysis", "telemetry")],
+    5: [("e3n-reasoning", "reasoning"), ("e3n-data-context", "reasoning")],
+    6: [("e3n-personality", "personality"), ("e3n-anti-hallucination", "reasoning")],
+}
+
+_DAILY_TRAIN_MIN_VRAM_MB = int(os.getenv("DAILY_TRAIN_MIN_VRAM_MB", "7000"))
+_DAILY_TRAIN_AUTO_PROMOTE = os.getenv("DAILY_TRAIN_AUTO_PROMOTE", "false").lower() in ("true", "1")
+_DAILY_TRAIN_AUTO_MERGE = os.getenv("DAILY_TRAIN_AUTO_MERGE", "false").lower() in ("true", "1")
+
+
+def run_daily_cycle(
+    force_day_override: int = None,
+    dry_run: bool = False,
+    auto_train: bool = True,
+    auto_merge: bool = None,
+    auto_promote: bool = None,
+) -> dict:
+    """
+    Full daily training cycle. Safe to call from the 2 AM scheduler.
+
+    Phases:
+    0. Guard checks (sim running, VRAM available, training already running)
+    1. Weakness analysis — find domains with avg quality < 0.6
+    2. Targeted distillation — teacher generates examples for weak domains (max 2)
+    3. Curriculum generation — daily topic datasets via teacher
+    4. Blend + QLoRA domain adapter training (if auto_train=True)
+    5. Eval + optional auto-promote
+    6. Memory consolidation report
+
+    Returns structured report dict.
+    """
+    import datetime
+
+    report = {
+        "date": datetime.datetime.now().isoformat(),
+        "dry_run": dry_run,
+        "phases": {},
+        "status": "ok",
+        "errors": [],
+    }
+
+    effective_auto_merge = _DAILY_TRAIN_AUTO_MERGE if auto_merge is None else auto_merge
+    effective_auto_promote = _DAILY_TRAIN_AUTO_PROMOTE if auto_promote is None else auto_promote
+
+    # ── Phase 0: Guard checks ──
+    guards = {}
+    try:
+        from router import is_sim_running, _get_vram_info
+        guards["sim_running"] = is_sim_running()
+        vram_info = _get_vram_info()
+        guards["vram_free_mb"] = vram_info.get("free_mb", 0)
+        guards["vram_ok"] = guards["vram_free_mb"] >= _DAILY_TRAIN_MIN_VRAM_MB
+    except Exception as e:
+        guards["vram_ok"] = False
+        guards["guard_error"] = str(e)
+        report["errors"].append(f"Guard check error: {e}")
+
+    with _training_lock:
+        guards["training_running"] = _training_state.get("running", False)
+
+    report["phases"]["guards"] = guards
+
+    if guards.get("sim_running"):
+        report["status"] = "skipped"
+        report["skip_reason"] = "Sim is running — daily training deferred"
+        logger.info("Daily cycle skipped: sim is running")
+        return report
+
+    if guards.get("training_running"):
+        report["status"] = "skipped"
+        report["skip_reason"] = "Training already in progress"
+        return report
+
+    if not guards.get("vram_ok", False) and not dry_run:
+        report["status"] = "skipped"
+        report["skip_reason"] = (
+            f"Insufficient VRAM ({guards.get('vram_free_mb', 0)}MB < "
+            f"{_DAILY_TRAIN_MIN_VRAM_MB}MB required)"
+        )
+        logger.info(f"Daily cycle skipped: {report['skip_reason']}")
+        return report
+
+    # ── Phase 1: Weakness analysis ──
+    weak_domains = identify_weak_domains(min_samples=15)
+    report["phases"]["weakness_analysis"] = {
+        "weak_domains": [{"domain": w["domain"], "avg_score": w["avg_score"],
+                          "samples": w["sample_count"]} for w in weak_domains]
+    }
+    logger.info(f"Daily cycle: weak domains = {[w['domain'] for w in weak_domains]}")
+
+    # ── Phase 2: Targeted distillation (max 2 weak domains) ──
+    distill_results = []
+    for weak in weak_domains[:2]:
+        domain = weak["domain"]
+        queries = [q.get("query", "") for q in weak.get("worst_queries", []) if q.get("query")]
+        if not queries:
+            continue
+        if dry_run:
+            distill_results.append({"domain": domain, "status": "dry_run", "queries": len(queries)})
+            continue
+        teacher_result = generate_teacher_data(
+            queries=queries[:15],
+            teacher="local14b",
+            dataset_name=f"distill-{domain}-targeted",
+            category=f"distill-{domain}",
+        )
+        distill_results.append({
+            "domain": domain,
+            "generated": teacher_result.get("generated", 0),
+            "filtered": teacher_result.get("filtered", 0),
+            "status": teacher_result.get("status", "unknown"),
+        })
+    report["phases"]["targeted_distillation"] = distill_results
+
+    # ── Phase 3: Daily curriculum ──
+    weekday = force_day_override if force_day_override is not None else datetime.datetime.now().weekday()
+    curriculum = _DAILY_CURRICULUM.get(weekday, _DAILY_CURRICULUM[0])
+    curriculum_results = []
+    for ds_name, domain in curriculum:
+        ds_result = get_dataset(ds_name)
+        count = len(ds_result.get("examples", [])) if ds_result.get("status") == "ok" else 0
+        curriculum_results.append({"dataset": ds_name, "domain": domain, "examples": count})
+    report["phases"]["curriculum"] = {
+        "weekday": weekday,
+        "datasets": curriculum_results,
+    }
+
+    # ── Phase 4: Domain training ──
+    # Determine which domain to train today based on weekday
+    train_domain_map = {0: "telemetry", 1: "racing", 2: "engineering", 3: "reasoning",
+                        4: "audio", 5: "reasoning", 6: "personality"}
+    train_domain = train_domain_map.get(weekday, "reasoning")
+
+    # Gather datasets for this domain
+    domain_datasets = [ds for ds, d in DATASET_DOMAIN_MAP.items() if d == train_domain]
+    domain_examples = sum(
+        len((get_dataset(ds) or {}).get("examples", []))
+        for ds in domain_datasets
+        if os.path.exists(_dataset_path(ds))
+    )
+
+    training_result = {"domain": train_domain, "status": "skipped", "reason": ""}
+
+    if not auto_train:
+        training_result["reason"] = "auto_train=False"
+    elif domain_examples < 20:
+        training_result["reason"] = f"Insufficient examples ({domain_examples} < 20)"
+    elif dry_run:
+        training_result["status"] = "dry_run"
+        training_result["examples"] = domain_examples
+    else:
+        # Blend domain datasets for training
+        blend_name = f"daily-blend-{train_domain}-{datetime.datetime.now().strftime('%Y%m%d')}"
+        sources = [{"dataset": ds, "weight": 1.0}
+                   for ds in domain_datasets if os.path.exists(_dataset_path(ds))]
+        if sources:
+            blend_result = blend_datasets(blend_name, sources)
+            if blend_result.get("status") == "ok":
+                output_name = f"e3n-qwen3b-daily-{train_domain}"
+                train_result = start_training(
+                    dataset_name=blend_name,
+                    output_model=output_name,
+                    mode="lora",
+                    domain=train_domain,
+                    adapter_only=True,
+                )
+                training_result.update({
+                    "status": train_result.get("status", "unknown"),
+                    "domain": train_domain,
+                    "blend": blend_result.get("total", 0),
+                    "output": output_name,
+                })
+
+    report["phases"]["training"] = training_result
+
+    # ── Phase 5: Knowledge gap review ──
+    gap_summary = {"status": "ok"}
+    try:
+        from persistence import get_db
+        db = get_db()
+        cursor = db.execute(
+            "SELECT COUNT(*) as cnt FROM knowledge_gaps WHERE resolved=0"
+        )
+        row = cursor.fetchone()
+        gap_summary["unresolved_gaps"] = row["cnt"] if row else 0
+        db.close()
+    except Exception as e:
+        gap_summary["status"] = "error"
+        gap_summary["error"] = str(e)
+    report["phases"]["knowledge_gaps"] = gap_summary
+
+    logger.info(f"Daily cycle complete: {report['status']} — "
+                f"weak={len(weak_domains)}, distilled={len(distill_results)}, "
+                f"train_domain={train_domain}, dry_run={dry_run}")
+
+    # Write report to disk
+    try:
+        reports_dir = os.path.join(TRAINING_PATH, "daily_reports")
+        os.makedirs(reports_dir, exist_ok=True)
+        report_file = os.path.join(
+            reports_dir,
+            f"{datetime.datetime.now().strftime('%Y-%m-%d')}.json"
+        )
+        with open(report_file, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+        report["report_file"] = report_file
+    except Exception as e:
+        report["errors"].append(f"Report write failed: {e}")
+
+    return report

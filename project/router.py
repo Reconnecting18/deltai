@@ -513,6 +513,27 @@ ADAPTER_DOMAIN_PATTERNS = {
         r"\b(summarize|synthesize|critique|assess|review)\b",
         r"\b(what\s+are\s+the\s+implications|how\s+does\s+this\s+affect)\b",
     ],
+    "telemetry": [
+        r"\b(telemetry|sensor\s*data|data\s*feed|live\s*data|ingest)\b",
+        r"\b(degradation\s*curve|wear\s*rate|thermal\s*gradient|temp\s*spread)\b",
+        r"\b(anomaly|outlier|spike|abnormal|deviation|drift)\b",
+        r"\b(multi.sensor|cross.sensor|correlation|co.relate)\b",
+        r"\b(lap.over.lap|stint\s*analysis|session\s*data|data\s*debrief)\b",
+        r"\b(fuel\s*consumption\s*model|wear\s*model|predict|projection)\b",
+        r"\b(threshold|alarm|limit\s*exceeded|red\s*line|critical\s*value)\b",
+    ],
+    "audio": [
+        r"\b(knock|engine\s*knock|pinging|detonation)\b",
+        r"\b(sound|noise|audio|acoustic|listen|hear)\b",
+        r"\b(squeal|squeak|rattle|vibration|resonance|hum)\b",
+        r"\b(turbo\s*surge|compressor\s*surge|flutter|boost\s*flutter)\b",
+        r"\b(gear\s*grind|shift\s*sound|gear\s*crunch)\b",
+        r"\b(bearing|wheel\s*bearing|bearing\s*noise)\b",
+        r"\b(exhaust\s*note|engine\s*note|misfire\s*sound|pop|backfire)\b",
+        r"\b(brake\s*squeal|brake\s*noise|pad\s*squeal)\b",
+        r"\b(creaking|clunking|clicking|ticking)\b",
+        r"\b(FFT|spectral|frequency|Hz|waveform|signal\s*analysis)\b",
+    ],
     # "personality" is always-on (blended into base), not query-triggered
 }
 

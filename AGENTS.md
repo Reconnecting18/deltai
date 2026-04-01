@@ -55,6 +55,26 @@ python tests/verify_resource_mgmt.py
 
 When you touch distillation-related code, also run `python tests/verify_distill.py` (see [CLAUDE.md](CLAUDE.md) Key Files for the full test list).
 
+### Phase 10 — Daily Training Verification
+
+After changing `training.py`, `router.py`, or anything in the training pipeline:
+
+```powershell
+# Verify new adapter domains are registered
+python -c "from training import ADAPTER_DOMAINS; print(ADAPTER_DOMAINS)"
+# Expected: ['racing', 'engineering', 'personality', 'reasoning', 'telemetry', 'audio']
+
+# Verify router domain patterns include telemetry + audio
+python -c "from router import ADAPTER_DOMAIN_PATTERNS; print(list(ADAPTER_DOMAIN_PATTERNS.keys()))"
+# Expected: ['racing', 'engineering', 'reasoning', 'telemetry', 'audio']
+
+# Dry-run the daily training cycle (no server required)
+python scripts/daily_training.py --dry-run
+
+# View the report
+python scripts/daily_training.py --report-only
+```
+
 ## Cursor-specific
 
 - **Project rules:** [`.cursor/rules/`](.cursor/rules/) (short `.mdc` files). Keep them actionable; put narrative detail in `CLAUDE.md`, not in rules.
