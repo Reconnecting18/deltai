@@ -1,0 +1,47 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "E3N: Backend uvicorn (Windows venv)",
+      "type": "shell",
+      "command": "${workspaceFolder}/project/venv/Scripts/python.exe -m uvicorn main:app --reload --host 127.0.0.1 --port 8000",
+      "options": {
+        "cwd": "${workspaceFolder}/project"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "group": "build"
+    },
+    {
+      "label": "E3N: Backend uvicorn (Unix venv)",
+      "type": "shell",
+      "command": "${workspaceFolder}/project/venv/bin/python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000",
+      "options": {
+        "cwd": "${workspaceFolder}/project"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "group": "build"
+    },
+    {
+      "label": "E3N: Electron npm start",
+      "type": "shell",
+      "command": "npm start",
+      "options": {
+        "cwd": "${workspaceFolder}/app"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "group": "build"
+    }
+  ]
+}

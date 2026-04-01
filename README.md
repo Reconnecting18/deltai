@@ -74,6 +74,23 @@ E3N does **not** process telemetry, UDP packets, or game data directly. External
 
 ---
 
+## AI-assisted development
+
+This repo is set up for **Cursor** and **Claude Code** (and any tool that reads markdown context):
+
+| Artifact | Role |
+|----------|------|
+| [AGENTS.md](AGENTS.md) | Short onboarding for agents (boundaries, paths, verify commands); entry point for Cursor |
+| [CLAUDE.md](CLAUDE.md) | Full architecture, stream protocol, file map, status, and workflow |
+| [`.cursor/rules/`](.cursor/rules/) | Small Cursor rules (`.mdc`) — scope, UI, and backend test reminders |
+| [`.vscode/launch.json`](.vscode/launch.json) | Debug/run FastAPI (debugpy) and Electron from the **workspace folder** (Cursor / VS Code) |
+| [`.vscode/tasks.json`](.vscode/tasks.json) | Shell tasks for uvicorn and `npm start` (Windows and Unix venv paths) |
+| [`.claude/launch.json`](.claude/launch.json) | Claude Code launch definitions using `${workspaceFolder}` (venv path targets **Windows** `Scripts\python.exe`; use the “python on PATH” entry or edit paths on Linux/macOS) |
+
+When you change behavior that affects onboarding or verification, update **AGENTS.md** and **CLAUDE.md** as needed. Contributor expectations: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+---
+
 ## Quick Start
 
 ### Prerequisites
@@ -282,7 +299,14 @@ Last-resort failover chain if the primary model fails:
 ## Project Structure
 
 ```
-C:\e3n\
+<repo-root>\
+├── AGENTS.md                     Short context for Cursor / agents
+├── CLAUDE.md                     Full project context for AI sessions
+├── CONTRIBUTING.md               How to file issues and PRs
+├── .cursor\rules\                Cursor project rules (.mdc)
+├── .github\ISSUE_TEMPLATE\       GitHub issue forms
+├── .vscode\                      launch.json + tasks.json (workspace-relative)
+├── .claude\                      Claude Code launch config
 ├── app\                          Electron desktop app
 │   └── main.js                   Frameless window + IPC
 ├── project\                      FastAPI backend
@@ -303,7 +327,8 @@ C:\e3n\
 │   ├── tests/
 │   │   ├── verify_full.py        Core system tests
 │   │   ├── verify_stress.py      Stress simulation tests
-│   │   └── verify_resource_mgmt.py  Resource management tests
+│   │   ├── verify_resource_mgmt.py  Resource management tests
+│   │   └── verify_distill.py     Distillation pipeline tests
 │   └── .env                      Configuration (not committed)
 ├── modelfiles\                   Ollama modelfiles (identical prompts, different FROM)
 ├── data\
@@ -315,9 +340,8 @@ C:\e3n\
 ├── scripts\
 │   ├── backup_s3.py              S3 backup — full/incremental/restore
 │   └── setup_backup_task.ps1     Windows Task Scheduler registration
-├── tools\
-│   └── llama.cpp\                GGUF conversion toolchain
-└── CLAUDE.md                     Full project context for AI sessions
+└── tools\
+    └── llama.cpp\                GGUF conversion toolchain (gitignored unless cloned)
 ```
 
 ---
@@ -496,13 +520,27 @@ This restores all files to `C:\e3n\data\` — ChromaDB, SQLite, knowledge base, 
 
 ## Verification
 
+**From a git clone** (replace `<repo-root>` with your checkout path):
+
 ```powershell
-cd C:\e3n\project
+cd <repo-root>\project
 .\venv\Scripts\activate
 python tests/verify_full.py          # Core system tests
 python tests/verify_stress.py        # Stress simulation tests
 python tests/verify_resource_mgmt.py # Resource management tests
 ```
+
+**Author layout** (`C:\e3n`):
+
+```powershell
+cd C:\e3n\project
+.\venv\Scripts\activate
+python tests/verify_full.py
+python tests/verify_stress.py
+python tests/verify_resource_mgmt.py
+```
+
+For distillation-related changes, also run `python tests/verify_distill.py` (see [CLAUDE.md](CLAUDE.md)).
 
 ---
 

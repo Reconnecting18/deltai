@@ -1,0 +1,24 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "E3N FastAPI (uvicorn)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["main:app", "--reload", "--host", "127.0.0.1", "--port", "8000"],
+      "cwd": "${workspaceFolder}/project",
+      "jinja": true,
+      "justMyCode": true
+    },
+    {
+      "name": "E3N Electron (npm start)",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "start"],
+      "cwd": "${workspaceFolder}/app",
+      "console": "integratedTerminal"
+    }
+  ]
+}

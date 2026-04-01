@@ -1,5 +1,13 @@
 # E3N — Project Context
 
+**Paths:** This file and others may use `C:\e3n\` as the canonical layout on the primary machine. **Clones and other machines should use paths relative to the git repository root** (e.g. `project/main.py`, not an absolute drive letter).
+
+## Agent tooling (Cursor vs Claude Code)
+
+- **Cursor:** Start from [AGENTS.md](AGENTS.md) and [`.cursor/rules/`](.cursor/rules/) for short, enforced conventions. Use this file (`CLAUDE.md`) for full architecture, endpoints, protocol, and status.
+- **Claude Code:** [`.claude/launch.json`](.claude/launch.json) can launch app processes; paths there may need editing for your machine—[`.vscode/launch.json`](.vscode/launch.json) is the portable option for VS Code / Cursor.
+- **Shared:** `CLAUDE.md` is the deep context for any assistant; keep it current when you change behavior.
+
 ## What This Is
 E3N is a local AI system (the "brain") running on Windows 11. Named after E3N from COD: Infinite Warfare. Personality blends E3N (dry wit, loyal) and BT-7274 (precise, protocol-driven). Operator: Ethan, 17, incoming MechE student, sim racer (Le Mans Ultimate).
 
@@ -86,6 +94,7 @@ E3N does NOT directly process telemetry, UDP packets, or game data. Instead:
 ## Key Files
 | File | Purpose |
 |------|---------|
+| `AGENTS.md` | Short agent onboarding (Cursor); points here for full context |
 | `project/main.py` (~2500 lines) | FastAPI app — chat (3 paths: local, cloud, split), ReAct reasoning loop (confidence-aware, trace memory), conversation-aware smart history, conversation history, stats, health, budget, memory, ingest (async pipeline), batch ingest, session mode, WebSocket alerts, backup, training, voice endpoints, resource self-manager loop (predictive VRAM, process priority, thermal, cold compaction), circuit breaker, resource status endpoint, cold memory + ingest pipeline endpoints, knowledge gap endpoints |
 | `project/router.py` | Smart routing: consolidated VRAM detection (_get_vram_info), sim detection, tier classification (A/AB/B/C), dynamic GPU layer offloading (_calc_num_gpu), dynamic quantization tier selection, split workload detection, cloud budget enforcement + persistence, emergency backup chain, session mode (GPU protection), telemetry query classification, Mixture-of-LoRA adapter routing (resolve_adapter_model), adaptive routing feedback (quality-driven tier adjustments), multi-domain classification |
 | `project/quality.py` | Response quality scoring: 6-signal heuristic scorer (length_appropriateness, tool_success_rate, specificity, no_error_indicators, structural_match, no_repeat), SQLite persistence, drives smart capture + routing feedback + gap detection |
@@ -171,10 +180,14 @@ After completing any feature, bug fix, or significant change, you MUST do ALL of
 - Write a clear commit message following the existing convention: `feat:`, `fix:`, `refactor:`, `docs:`.
 - Include `Closes #N` for any issues being closed.
 - Push to `origin main`.
-- The commit message must end with:
+- **Optional:** If the work was assisted by Claude, you may end the commit message with:
   ```
   Co-Authored-By: Claude <co-author> <noreply@anthropic.com>
   ```
+  Other tools or human-only commits do not need this trailer.
+
+### 5. AGENTS.md (Cursor and short onboarding)
+- If onboarding steps, verification commands, or the E3N boundary description in [AGENTS.md](AGENTS.md) are affected, update that file so Cursor agents stay aligned with this document.
 
 ### Example Workflow
 ```
@@ -182,10 +195,11 @@ After completing any feature, bug fix, or significant change, you MUST do ALL of
 2. gh issue create --title "feat: ..." --body "..."   (if no issue exists)
 3. Edit CLAUDE.md — update all relevant sections
 4. Edit README.md — update user-facing docs
-5. git add <files>
-6. git commit -m "feat: ... Closes #N ..."
-7. git push origin main
-8. gh issue close N --comment "Implemented in ..."
+5. Edit AGENTS.md — if onboarding or verification steps changed
+6. git add <files>
+7. git commit -m "feat: ... Closes #N ..."
+8. git push origin main
+9. gh issue close N --comment "Implemented in ..."
 ```
 
 This ensures the repo, docs, and project board stay in sync across sessions.
