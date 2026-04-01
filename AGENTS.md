@@ -75,6 +75,32 @@ python scripts/daily_training.py --dry-run
 python scripts/daily_training.py --report-only
 ```
 
+### Phase 11 — Web Collector Verification
+
+After changing `collector.py` or any web collection source:
+
+```powershell
+# Verify new web-collected datasets are in DATASET_DOMAIN_MAP
+python -c "from training import DATASET_DOMAIN_MAP; web = [k for k in DATASET_DOMAIN_MAP if 'general' in k or 'arxiv' in k or 'openf1' in k or 'science' in k or 'motorsport' in k]; print(web)"
+# Expected: ['e3n-general-knowledge', 'e3n-science-knowledge', 'e3n-arxiv-papers', 'e3n-openf1-strategy', 'e3n-web-motorsport']
+
+# Verify fetch_url is registered in the tool executor
+python -c "from tools.executor import EXECUTORS; print('fetch_url' in EXECUTORS)"
+# Expected: True
+
+# Dry-run the full collector (no writes)
+python scripts/collect_training_data.py --dry-run --report
+
+# Run a single source dry-run
+python scripts/collect_training_data.py --source arxiv --dry-run
+
+# Dry-run training cycle with collection phase
+python scripts/daily_training.py --dry-run --collect
+
+# Collect-only (no training, uses .env source flags)
+python scripts/daily_training.py --collect-only --dry-run
+```
+
 ## Cursor-specific
 
 - **Project rules:** [`.cursor/rules/`](.cursor/rules/) (short `.mdc` files). Keep them actionable; put narrative detail in `CLAUDE.md`, not in rules.

@@ -350,7 +350,8 @@ Last-resort failover chain if the primary model fails:
 │   ├── backup_s3.py                  S3 backup — full/incremental/restore
 │   ├── setup_backup_task.ps1         Task Scheduler — 3 AM S3 backup
 │   ├── daily_training.py             Daily autonomous training orchestrator (2 AM)
-│   └── setup_daily_training_task.ps1 Task Scheduler — 2 AM training cycle
+│   ├── setup_daily_training_task.ps1 Task Scheduler — 2 AM training cycle
+│   └── collect_training_data.py      Web data collector (Wikipedia, arXiv, OpenF1)
 └── tools\
     └── llama.cpp\                GGUF conversion toolchain (gitignored unless cloned)
 ```
@@ -441,6 +442,7 @@ Last-resort failover chain if the primary model fails:
 | 8 | **Complete** | Advanced intelligence — ReAct reasoning, iterative RAG, dynamic quant/offload, hierarchical memory, async ingest, MoLoRA, predictive VRAM, process priority |
 | 9 | **Complete** | Progressive intelligence — reasoning trace memory, quality scoring, tool filtering, confidence protocol, adaptive routing, smart capture, iterative distillation, cross-domain transfer, smart history, knowledge gaps |
 | 10 | **Complete** | Continuous intelligence — daily autonomous training (2 AM scheduler), telemetry + audio adapter domains (6 total), DPO training, session knowledge synthesis, 5 new training datasets, CoT Protocol 7 |
+| 11 | **Complete** | Web training data collector — Wikipedia (6.7M articles, HF streaming), arXiv papers, OpenF1 race strategy, Semantic Scholar, motorsport web scraping. Phase 0.5 in nightly cycle. `fetch_url` chat tool. |
 | — | **Separate** | Telemetry API for Le Mans Ultimate — connects to E3N via /ingest |
 
 ---
@@ -546,6 +548,7 @@ powershell -ExecutionPolicy Bypass -File C:\e3n\scripts\setup_daily_training_tas
 | Phase | Description |
 |-------|-------------|
 | Guards | Sim not running, VRAM ≥ 7GB, no active session |
+| Web Collection | Wikipedia HF streaming (2000 articles), arXiv, OpenF1, Semantic Scholar, motorsport web |
 | Weakness Analysis | Identifies domains with avg quality < 0.6 from routing feedback |
 | Targeted Distillation | 14B teacher generates examples for up to 2 weak domains |
 | Curriculum | Daily topic rotation (Mon=telemetry, Tue=strategy, Wed=engineering, Thu=simulations, Fri=audio, Sat=cross-domain, Sun=personality) |
@@ -567,6 +570,17 @@ python scripts/daily_training.py --no-train
 
 # View last daily report
 python scripts/daily_training.py --report-only
+
+# Force-run web data collection before training
+python scripts/daily_training.py --collect
+
+# Run web data collection only (no training)
+python scripts/daily_training.py --collect-only
+
+# Run the standalone collector directly
+python scripts/collect_training_data.py --dry-run
+python scripts/collect_training_data.py --source wikipedia --batch 5000
+python scripts/collect_training_data.py --source arxiv --report
 ```
 
 ### Adapter Domains (6 total)

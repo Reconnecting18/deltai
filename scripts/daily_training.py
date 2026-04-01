@@ -24,6 +24,8 @@ Usage:
   --no-train        Skip QLoRA training phase (distillation only)
   --verbose         Extra logging
   --report-only     Print last report and exit
+  --collect         Force-enable web collection phase before training
+  --collect-only    Run web data collection only, skip all training
 
 Configuration (.env):
   DAILY_TRAIN_ENABLED=true
@@ -31,6 +33,9 @@ Configuration (.env):
   DAILY_TRAIN_AUTO_PROMOTE=false
   DAILY_TRAIN_AUTO_MERGE=false
   SESSION_SYNTHESIS_ENABLED=true
+  WEB_COLLECT_ENABLED=true
+  WEB_COLLECT_WIKIPEDIA_BATCH=2000
+  WEB_COLLECT_MAX_PER_SOURCE=200
 """
 
 import sys
@@ -158,6 +163,15 @@ def _print_report(report_path: str):
     print(f"  Sim running: {guards.get('sim_running', '?')}")
     print(f"  VRAM OK: {guards.get('vram_ok', '?')}")
 
+    web = phases.get("web_collection", {})
+    web_status = web.get("status", "disabled")
+    if web_status != "disabled":
+        print(f"\n[Web Collection] — status={web_status}")
+        print(f"  Written: {web.get('total_written', 0)}, Skipped: {web.get('total_skipped', 0)}, Errors: {web.get('total_errors', 0)}")
+        for src, r in web.get("sources", {}).items():
+            extra = f" [offset→{r.get('offset_end', '?')}]" if src == "wikipedia" else ""
+            print(f"  {src}: written={r.get('written', 0)}, status={r.get('status', '?')}{extra}")
+
     weak = phases.get("weakness_analysis", {}).get("weak_domains", [])
     print(f"\n[Weakness Analysis] — {len(weak)} weak domain(s)")
     for w in weak:
@@ -222,6 +236,10 @@ Examples:
                         help="Enable debug logging")
     parser.add_argument("--report-only", action="store_true",
                         help="Print last report and exit")
+    parser.add_argument("--collect", action="store_true",
+                        help="Run web data collection phase before training (default: controlled by WEB_COLLECT_ENABLED in .env)")
+    parser.add_argument("--collect-only", action="store_true",
+                        help="Run web data collection only, skip all training phases")
     args = parser.parse_args()
 
     if args.verbose:
@@ -241,13 +259,43 @@ Examples:
         _print_report(report_path)
         return 0
 
+    collect_only = args.collect_only
+    force_collect = args.collect or collect_only
+
     logger.info("=" * 50)
     logger.info("E3N Daily Training Cycle starting")
-    logger.info(f"  Date:     {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    logger.info(f"  Dry run:  {args.dry_run}")
-    logger.info(f"  Day:      {args.day if args.day is not None else 'auto'}")
-    logger.info(f"  Auto train: {not args.no_train}")
+    logger.info(f"  Date:         {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"  Dry run:      {args.dry_run}")
+    logger.info(f"  Day:          {args.day if args.day is not None else 'auto'}")
+    logger.info(f"  Auto train:   {not args.no_train}")
+    logger.info(f"  Collect only: {collect_only}")
     logger.info("=" * 50)
+
+    # ── --collect-only: run just the web collection phase ──────────────────
+    if collect_only:
+        logger.info("--collect-only: running web data collection, skipping training")
+        if _is_sim_running():
+            logger.warning("Sim is running — collection deferred.")
+            return 0
+        try:
+            from collector import run_collection_cycle  # noqa: PLC0415
+        except ImportError as e:
+            logger.error(f"Failed to import collector module: {e}")
+            logger.error(f"Ensure PYTHONPATH includes {_PROJECT_DIR}")
+            return 1
+        start_time = time.time()
+        try:
+            collect_report = run_collection_cycle(dry_run=args.dry_run)
+        except Exception as e:
+            logger.exception(f"Collection failed: {e}")
+            return 1
+        elapsed = round(time.time() - start_time, 1)
+        logger.info(
+            f"Collection complete in {elapsed}s — "
+            f"written={collect_report.get('total_written', 0)}, "
+            f"status={collect_report.get('status', '?')}"
+        )
+        return 0
 
     # Check if daily training is enabled
     if not _check_enabled():
@@ -274,6 +322,10 @@ Examples:
             "Daily training deferred. Unload Ollama models or increase DAILY_TRAIN_MIN_VRAM_MB."
         )
         return 0
+
+    # Force-enable collection if --collect was passed
+    if force_collect:
+        os.environ["WEB_COLLECT_ENABLED"] = "true"
 
     # Import training module (after guards pass, to avoid loading torch early)
     try:

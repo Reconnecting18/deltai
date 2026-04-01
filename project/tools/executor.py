@@ -383,6 +383,70 @@ def web_search(query: str, max_results=5) -> str:
         return f"ERROR: Web search failed: {e}"
 
 
+def fetch_url(url: str, max_chars: int = 8000) -> str:
+    """Fetch a URL and return clean article text. Blocked during active racing sessions."""
+    try:
+        # Session guard: block during active racing
+        try:
+            import sys as _sys
+            if "." not in _sys.path:
+                _sys.path.insert(0, ".")
+            from router import _session_active
+            if _session_active:
+                return "ERROR: fetch_url disabled during active racing sessions (performance protection)"
+        except (ImportError, AttributeError):
+            pass
+
+        url = (url or "").strip()
+        if not url or not url.startswith("http"):
+            return "ERROR: Invalid URL — must start with http:// or https://"
+        if len(url) > 2000:
+            return "ERROR: URL too long"
+
+        max_chars = max(500, min(_coerce_int(max_chars, 8000), 20000))
+
+        try:
+            import trafilatura as _trafilatura  # type: ignore
+            downloaded = _trafilatura.fetch_url(url)
+            if not downloaded:
+                return f"ERROR: Could not download content from {url}"
+            text = _trafilatura.extract(
+                downloaded,
+                include_comments=False,
+                include_tables=False,
+                no_fallback=False,
+            )
+            if not text or not text.strip():
+                return f"ERROR: No extractable text content found at {url}"
+            text = text.strip()[:max_chars]
+            char_note = f" [truncated to {max_chars} chars]" if len(text) == max_chars else ""
+            return f"Content from {url}{char_note}:\n\n{text}"
+        except ImportError:
+            # Fallback: plain httpx fetch + strip HTML tags
+            import re as _re
+            resp = _httpx.get(
+                url,
+                headers={"User-Agent": "E3N/1.0 (local AI assistant)"},
+                timeout=15.0,
+                follow_redirects=True,
+            )
+            if resp.status_code != 200:
+                return f"ERROR: HTTP {resp.status_code} from {url}"
+            html = resp.text
+            text = _re.sub(r"<[^>]+>", " ", html)
+            text = _re.sub(r"&\w+;", " ", text)
+            text = _re.sub(r"\s+", " ", text).strip()
+            if not text:
+                return f"ERROR: No text content found at {url}"
+            text = text[:max_chars]
+            return f"Content from {url} (HTML stripped — install trafilatura for better extraction):\n\n{text}"
+
+    except Exception as e:
+        if "timeout" in str(e).lower() or "timed out" in str(e).lower():
+            return f"ERROR: Request timed out fetching {url}"
+        return f"ERROR: fetch_url failed: {e}"
+
+
 # ── COMPUTATION DELEGATION TOOLS ──────────────────────────────────────
 
 # Sandboxed builtins for calculate tool — math + statistics only, no I/O
@@ -1411,6 +1475,7 @@ EXECUTORS = {
     "search_knowledge": search_knowledge,
     "memory_stats": memory_stats,
     "web_search": web_search,
+    "fetch_url": fetch_url,
     "calculate": calculate,
     "solve_math": solve_math,
     "summarize_data": summarize_data,

@@ -163,6 +163,27 @@ TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_url",
+            "description": "Fetch a URL and return the clean article text. Use after web_search to read the full content of a specific page — specifications, articles, documentation, research papers. Returns extracted readable text, stripping ads and navigation. NOT available during active racing sessions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "Full URL to fetch (must start with http:// or https://)"
+                    },
+                    "max_chars": {
+                        "type": "integer",
+                        "description": "Maximum characters to return. Default 8000, max 20000."
+                    }
+                },
+                "required": ["url"]
+            }
+        }
+    },
 ]
 
 # ── COMPUTATION DELEGATION TOOLS ─────────────────────────────────────
@@ -527,11 +548,12 @@ def filter_tools(tools: list, domain: str | None = None, tier: int = 1,
         # General query: include common tools but skip diagnostics
         relevant_names = {"search_knowledge", "calculate", "solve_math",
                          "lookup_reference", "summarize_data", "read_file",
-                         "get_system_info", "web_search"}
+                         "get_system_info", "web_search", "fetch_url"}
 
-    # Always include web_search for non-system queries
+    # Always include web_search + fetch_url for non-system queries
     if domain != "system":
         relevant_names.add("web_search")
+        relevant_names.add("fetch_url")
 
     # Tier 1 (simple): cap at 6 tools to keep prompt short
     if tier <= 1 and len(relevant_names) > 6:

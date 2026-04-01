@@ -82,6 +82,12 @@ DATASET_DOMAIN_MAP = {
     "e3n-telemetry-analysis": "telemetry",
     "e3n-strategy-advanced": "telemetry",
     "e3n-audio-analysis": "audio",
+    # Web-collected datasets (Phase 11 — daily collector)
+    "e3n-general-knowledge": "reasoning",
+    "e3n-science-knowledge": "engineering",
+    "e3n-arxiv-papers": "engineering",
+    "e3n-openf1-strategy": "racing",
+    "e3n-web-motorsport": "racing",
     # Daily-generated distillation datasets
     "distill-telemetry-targeted": "telemetry",
     "distill-audio-targeted": "audio",
@@ -115,6 +121,9 @@ ADAPTER_MERGE_METHOD = os.getenv("ADAPTER_MERGE_METHOD", "ties")
 ADAPTER_MERGE_DENSITY = float(os.getenv("ADAPTER_MERGE_DENSITY", "0.5"))
 ADAPTER_AUTO_MERGE = os.getenv("ADAPTER_AUTO_MERGE", "false").lower() == "true"
 ADAPTER_AUTO_PROMOTE = os.getenv("ADAPTER_AUTO_PROMOTE", "false").lower() == "true"
+
+# ── WEB COLLECTION CONFIG (Phase 11) ─────────────────────────────────────────
+_WEB_COLLECT_ENABLED = os.getenv("WEB_COLLECT_ENABLED", "true").lower() in ("true", "1", "yes")
 
 
 def _load_registry() -> dict:
@@ -2979,6 +2988,23 @@ def run_daily_cycle(
         )
         logger.info(f"Daily cycle skipped: {report['skip_reason']}")
         return report
+
+    # ── Phase 0.5: Web training data collection ──
+    collect_report: dict = {"status": "disabled"}
+    if _WEB_COLLECT_ENABLED:
+        try:
+            from collector import run_collection_cycle  # noqa: PLC0415
+            collect_report = run_collection_cycle(dry_run=dry_run)
+            logger.info(
+                f"Web collection: written={collect_report.get('total_written', 0)}, "
+                f"skipped={collect_report.get('total_skipped', 0)}, "
+                f"status={collect_report.get('status')}"
+            )
+        except Exception as e:
+            collect_report = {"status": "error", "error": str(e)}
+            report["errors"].append(f"Web collection error: {e}")
+            logger.warning(f"Web collection failed (non-fatal): {e}")
+    report["phases"]["web_collection"] = collect_report
 
     # ── Phase 1: Weakness analysis ──
     weak_domains = identify_weak_domains(min_samples=15)

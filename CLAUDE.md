@@ -116,8 +116,10 @@ E3N does NOT directly process telemetry, UDP packets, or game data. Instead:
 | `tools/llama.cpp/` | GGUF conversion toolchain — `convert_hf_to_gguf.py` + `build/bin/Release/llama-quantize.exe` |
 | `scripts/backup_s3.py` | S3 nightly backup — full backup, incremental (MD5 skip), restore, retention cleanup |
 | `scripts/setup_backup_task.ps1` | Windows Task Scheduler registration for nightly backup at 3 AM |
-| `scripts/daily_training.py` | Daily autonomous training orchestrator — guard checks, weakness analysis, targeted distillation, QLoRA, memory consolidation, report. Standalone (no FastAPI needed). |
+| `scripts/daily_training.py` | Daily autonomous training orchestrator — guard checks, web collection (Phase 0.5), weakness analysis, targeted distillation, QLoRA, memory consolidation, report. Standalone (no FastAPI needed). Flags: `--collect`, `--collect-only`. |
 | `scripts/setup_daily_training_task.ps1` | Windows Task Scheduler registration for daily training at 2 AM (before S3 backup) |
+| `scripts/collect_training_data.py` | Standalone web training data collector — Wikipedia HF streaming, arXiv, OpenF1, Semantic Scholar, motorsport web. Flags: `--source`, `--batch`, `--dry-run`. |
+| `project/collector.py` | Web training data collection logic — Wikipedia (HF datasets streaming, checkpointed offset covering 6.7M articles), arXiv XML API (8 categories), OpenF1 race strategy API, Semantic Scholar paper abstracts, trafilatura + DDG motorsport pages. SHA256 dedup SQLite. run_collection_cycle() invoked as Phase 0.5 of nightly training cycle. |
 | `project/training_build.py` | Dataset builder — 13 curated datasets: anti-hallucination, engineering, race engineering, data interpretation, personality, reasoning, MechE, simulations, telemetry analysis, audio analysis, engineering simulations, advanced strategy, CoT reasoning |
 
 ## How to Start
@@ -446,6 +448,15 @@ DAILY_TRAIN_AUTO_MERGE=false
 SESSION_SYNTHESIS_ENABLED=true
 SESSION_SYNTHESIS_MODEL=local14b
 DPO_ENABLED=false
+# Phase 11 — Web training data collector
+WEB_COLLECT_ENABLED=true
+WEB_COLLECT_WIKIPEDIA=true
+WEB_COLLECT_ARXIV=true
+WEB_COLLECT_OPENF1=true
+WEB_COLLECT_MOTORSPORT=true
+WEB_COLLECT_PAPERS=true
+WEB_COLLECT_WIKIPEDIA_BATCH=2000
+WEB_COLLECT_MAX_PER_SOURCE=200
 ```
 
 ## Adapter Surgery (Augmentation Slots)
@@ -1057,6 +1068,11 @@ Multi-domain query support that leverages adapters and reasoning traces across d
 - Knowledge gap detection: DONE (SQLite knowledge_gaps table, gap logging from low quality/ReAct max iter/RAG zero results, /knowledge/gaps endpoints)
 - Phase 10 complete (continuous intelligence — daily training scheduler, telemetry/audio adapters, DPO, session synthesis, 5 new datasets, CoT modelfile protocol)
 - Daily autonomous training: DONE (scripts/daily_training.py, Task Scheduler at 2 AM, rotating weekly curriculum)
+- Phase 11 complete (web training data collector — Wikipedia HF streaming, arXiv, OpenF1, Semantic Scholar, motorsport web, fetch_url tool)
+- Web data collector: DONE (project/collector.py, scripts/collect_training_data.py, Phase 0.5 in run_daily_cycle)
+- fetch_url tool: DONE (trafilatura + httpx fallback, session guard, registered in CORE_TOOLS)
+- 5 new web-collected datasets: DONE (e3n-general-knowledge, e3n-science-knowledge, e3n-arxiv-papers, e3n-openf1-strategy, e3n-web-motorsport)
+- Wikipedia streaming: DONE (HF datasets, 2000 articles/night default, checkpointed offset, full 6.7M article coverage over ~3350 runs)
 - Telemetry adapter domain: DONE (r=16, 14/36 layers, ADAPTER_DOMAINS expanded to 6)
 - Audio adapter domain: DONE (r=16, 16/36 layers, engine knock/bearing/brake acoustic signatures)
 - DPO training: DONE (start_dpo_training() via trl.DPOTrainer, consumes smart_auto_capture negatives)
@@ -1080,6 +1096,7 @@ Multi-domain query support that leverages adapters and reasoning traces across d
 | 8 | DONE | Advanced intelligence & resource optimization — OS process priority, dynamic GPU layer offloading (Tier AB), predictive VRAM management, semantic deduplication, ReAct reasoning loop, dynamic quantization tiers, iterative RAG, Mixture-of-LoRA routing, hierarchical memory (hot/warm/cold), streaming async ingest pipeline |
 | 9 | DONE | Learning & self-improvement — reasoning trace memory, response quality scoring, tool relevance filtering, confidence-aware reasoning, adaptive routing feedback, smart auto-capture (quality-tiered + DPO negatives), iterative distillation pipeline, cross-domain reasoning transfer, conversation-aware smart history, knowledge gap detection |
 | 10 | DONE | Continuous intelligence — daily autonomous training scheduler (2 AM Task Scheduler), telemetry + audio adapter domain slots (6 total), DPO training (trl.DPOTrainer), session end knowledge synthesis, 5 new training datasets, CoT Protocol 7 in modelfile, router domain patterns for telemetry + audio |
+| 11 | DONE | Web training data collector — Wikipedia HF datasets streaming (6.7M articles, checkpointed), arXiv XML API (8 categories), OpenF1 race strategy API, Semantic Scholar papers, trafilatura web scraping. Phase 0.5 in nightly cycle. fetch_url chat tool. 5 new web datasets. |
 | — | SEPARATE PROJECT | Telemetry API (LMU race engineer) — connects to E3N via /ingest |
 
 ## Known Issues
