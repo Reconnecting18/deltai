@@ -2989,6 +2989,18 @@ def run_daily_cycle(
         logger.info(f"Daily cycle skipped: {report['skip_reason']}")
         return report
 
+    # Ensure SQLite schema (routing_feedback, knowledge_gaps, etc.) exists before any phase
+    # that queries persistence — init was previously only in phase 5, which ran too late.
+    try:
+        from persistence import init_db  # noqa: PLC0415
+
+        init_db()
+    except Exception as e:
+        report["status"] = "error"
+        report["errors"].append(f"Persistence init failed: {e}")
+        logger.exception("Daily cycle: persistence init failed")
+        return report
+
     # ── Phase 0.5: Web training data collection ──
     collect_report: dict = {"status": "disabled"}
     if _WEB_COLLECT_ENABLED:
@@ -3102,9 +3114,8 @@ def run_daily_cycle(
     # ── Phase 5: Knowledge gap review ──
     gap_summary = {"status": "ok"}
     try:
-        from persistence import count_unresolved_knowledge_gaps, init_db  # noqa: PLC0415
+        from persistence import count_unresolved_knowledge_gaps  # noqa: PLC0415
 
-        init_db()
         gap_summary["unresolved_gaps"] = count_unresolved_knowledge_gaps()
     except Exception as e:
         gap_summary["status"] = "error"
