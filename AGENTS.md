@@ -113,5 +113,6 @@ When you change user-visible behavior, configuration, or architecture:
 1. Update [CLAUDE.md](CLAUDE.md) (sections that apply).
 2. Update [README.md](README.md) if contributors or users need to know.
 3. Keep [AGENTS.md](AGENTS.md) accurate if onboarding steps or boundaries shift.
+4. If you change RAG, ingest, training capture, modelfiles, or adapter flows, align [docs/local-model-workflow.md](docs/local-model-workflow.md) so the operator cadence stays accurate.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for issues and PR expectations.

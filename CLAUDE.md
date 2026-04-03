@@ -95,6 +95,7 @@ E3N does NOT directly process telemetry, UDP packets, or game data. Instead:
 | File | Purpose |
 |------|---------|
 | `AGENTS.md` | Short agent onboarding (Cursor); points here for full context |
+| `docs/local-model-workflow.md` | Operator workflow: RAG/ingest, modelfiles + `.env`, domain adaptation (capture, weaknesses, adapters, daily script) |
 | `project/main.py` (~2500 lines) | FastAPI app — chat (3 paths: local, cloud, split), ReAct reasoning loop (confidence-aware, trace memory), conversation-aware smart history, conversation history, stats, health, budget, memory, ingest (async pipeline), batch ingest, session mode, WebSocket alerts, backup, training, voice endpoints, resource self-manager loop (predictive VRAM, process priority, thermal, cold compaction), circuit breaker, resource status endpoint, cold memory + ingest pipeline endpoints, knowledge gap endpoints |
 | `project/router.py` | Smart routing: consolidated VRAM detection (_get_vram_info), sim detection, tier classification (A/AB/B/C), dynamic GPU layer offloading (_calc_num_gpu), dynamic quantization tier selection, split workload detection, cloud budget enforcement + persistence, emergency backup chain, session mode (GPU protection), telemetry query classification, Mixture-of-LoRA adapter routing (resolve_adapter_model), adaptive routing feedback (quality-driven tier adjustments), multi-domain classification |
 | `project/quality.py` | Response quality scoring: 6-signal heuristic scorer (length_appropriateness, tool_success_rate, specificity, no_error_indicators, structural_match, no_repeat), SQLite persistence, drives smart capture + routing feedback + gap detection |
@@ -1003,6 +1004,15 @@ Multi-domain query support that leverages adapters and reasoning traces across d
 - **Multi-domain classification:** `classify_adapter_domains()` returns ALL matching domains sorted by relevance score (not just the primary). `classify_adapter_domain()` wraps it for backward compatibility (returns primary only).
 - **Cross-domain traces:** ReAct loop retrieves reasoning traces from all relevant domains for multi-domain queries (e.g., a racing + engineering question pulls traces from both)
 - **Dynamic TIES merge weighting:** Adapter merge weights adjusted based on actual query distribution — domains that are queried more frequently get higher merge weight in production GGUF builds
+
+## Local Qwen improvement workflow (operator)
+
+Repeatable cadence for improving **local** models without changing architecture inside Ollama. Full step-by-step guide: **[docs/local-model-workflow.md](docs/local-model-workflow.md)**.
+
+- **RAG + ingest:** Curate `KNOWLEDGE_PATH` (watcher + `ingest_file` / startup `ingest_all`); push live summaries via `POST /ingest` and `POST /ingest/batch`; drain `GET /knowledge/gaps` after adding knowledge; tune `RAR_ENABLED`, `DEDUP_THRESHOLD`, and ingest pipeline env as needed.
+- **Behavior / reliability:** Edit synced [modelfiles/](modelfiles/) and run `ollama create`; adjust `project/.env` for ReAct, reasoning traces, smart capture thresholds, smart history, and session/telemetry behavior.
+- **Domain adaptation:** `smart_auto_capture` → `e3n-auto` (+ negatives); `GET /training/weaknesses` and `POST /training/improve/{domain}`; adapter train/eval/promote/merge via `/adapters/*`; optional [scripts/daily_training.py](scripts/daily_training.py) for scheduled cycles.
+- **Quick prereq check:** From repo root with `project` venv active: `python scripts/check_local_workflow_prereqs.py` (paths, imports, Ollama reachability; `KNOWLEDGE_PATH` must exist).
 
 ## Current Status
 - Phase 1-4 complete (dashboard, RAG, tools, router, cloud client, split workload, budget, voice, training)

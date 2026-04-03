@@ -86,6 +86,7 @@ This repo is set up for **Cursor** and **Claude Code** (and any tool that reads 
 | [`.vscode/launch.json`](.vscode/launch.json) | Debug/run FastAPI (debugpy) and Electron from the **workspace folder** (Cursor / VS Code) |
 | [`.vscode/tasks.json`](.vscode/tasks.json) | Shell tasks for uvicorn and `npm start` (Windows and Unix venv paths) |
 | [`.claude/launch.json`](.claude/launch.json) | Claude Code launch definitions using `${workspaceFolder}` (venv path targets **Windows** `Scripts\python.exe`; use the “python on PATH” entry or edit paths on Linux/macOS) |
+| [docs/local-model-workflow.md](docs/local-model-workflow.md) | **Improving local Qwen:** RAG/ingest cadence, modelfiles + `.env`, training/adapters, worked examples |
 
 When you change behavior that affects onboarding or verification, update **AGENTS.md** and **CLAUDE.md** as needed. Contributor expectations: [CONTRIBUTING.md](CONTRIBUTING.md).
 

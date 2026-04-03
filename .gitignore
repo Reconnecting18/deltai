@@ -35,7 +35,8 @@ npm-debug.log*
 engine/
 
 # Docs / reports (generated, not source)
-docs/
+docs/**
+!docs/local-model-workflow.md
 reports/
 E3N_PROJECT_HANDOFF.md
 
