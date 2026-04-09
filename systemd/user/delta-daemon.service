@@ -1,23 +1,25 @@
 [Unit]
 Description=DELTA Local AI Daemon
-After=network-online.target
-Wants=network-online.target
+After=network.target
 
 [Service]
-Type=simple
-WorkingDirectory=%h/.local/share/delta
+Type=exec
+WorkingDirectory=%h
 Environment=PYTHONUNBUFFERED=1
-Environment=DELTA_DATA_DIR=%h/.local/share/delta
-Environment=DELTA_DAEMON_SOCKET=%t/delta-daemon.sock
-Environment=DELTA_IPC_SOCKET=%t/delta-ipc.sock
+Environment=DELTA_DATA_DIR=%h/.local/state/delta
+Environment=DELTA_SQLITE_PATH=%h/.local/state/delta/delta.db
+Environment=DELTA_DAEMON_SOCKET=%t/delta/daemon.sock
+Environment=DELTA_IPC_SOCKET=%t/delta/ipc.sock
 ExecStart=/usr/bin/env delta-daemon
 Restart=on-failure
 RestartSec=2
+RuntimeDirectory=delta
+RuntimeDirectoryMode=0700
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=%h/.local/share/delta %t
+ReadWritePaths=%h/.local/state/delta %t/delta
 
 [Install]
 WantedBy=default.target

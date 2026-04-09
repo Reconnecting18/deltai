@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from pathlib import Path
 from typing import Any
 
 
@@ -22,9 +23,12 @@ class IPCServer:
 
     async def start(self) -> None:
         """Create and start the Unix socket server."""
+        socket_parent = Path(self.socket_path).parent
+        socket_parent.mkdir(parents=True, exist_ok=True)
         if os.path.exists(self.socket_path):
             os.remove(self.socket_path)
         self._server = await asyncio.start_unix_server(self._handle_client, path=self.socket_path)
+        os.chmod(self.socket_path, 0o600)
 
     async def stop(self) -> None:
         """Stop server and remove the socket file."""

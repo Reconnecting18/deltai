@@ -11,6 +11,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def _runtime_dir() -> Path:
+    """Return a Linux-friendly runtime directory for Unix sockets."""
+    xdg_runtime = os.getenv("XDG_RUNTIME_DIR", "").strip()
+    if xdg_runtime:
+        return Path(xdg_runtime)
+    return Path("/tmp")
+
+
 @dataclass(frozen=True)
 class Settings:
     """Strongly-typed DELTA runtime settings."""
@@ -33,12 +41,13 @@ def load_settings() -> Settings:
     """Load settings from environment variables with sensible defaults."""
     data_dir = Path(os.getenv("DELTA_DATA_DIR", str(Path.home() / ".local/share/delta")))
     sqlite_path = Path(os.getenv("DELTA_SQLITE_PATH", str(data_dir / "delta.db")))
+    runtime_dir = _runtime_dir() / "delta"
 
     return Settings(
         daemon_host=os.getenv("DELTA_DAEMON_HOST", "127.0.0.1"),
         daemon_port=int(os.getenv("DELTA_DAEMON_PORT", "8787")),
-        daemon_socket_path=os.getenv("DELTA_DAEMON_SOCKET", "/tmp/delta-daemon.sock"),
-        ipc_socket_path=os.getenv("DELTA_IPC_SOCKET", "/tmp/delta-ipc.sock"),
+        daemon_socket_path=os.getenv("DELTA_DAEMON_SOCKET", str(runtime_dir / "daemon.sock")),
+        ipc_socket_path=os.getenv("DELTA_IPC_SOCKET", str(runtime_dir / "ipc.sock")),
         data_dir=data_dir,
         sqlite_path=sqlite_path,
         ollama_url=os.getenv("OLLAMA_URL", "http://127.0.0.1:11434"),

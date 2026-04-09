@@ -13,6 +13,8 @@ def test_settings_defaults() -> None:
     settings = load_settings()
     assert settings.ollama_fast_model
     assert settings.sqlite_path.name == "delta.db"
+    assert settings.daemon_socket_path.endswith("daemon.sock")
+    assert settings.ipc_socket_path.endswith("ipc.sock")
 
 
 def test_intent_classification_shell() -> None:
