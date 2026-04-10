@@ -91,21 +91,40 @@ def _pick_best_quant(model_tiers: list, vram_free: int) -> tuple[str, str] | Non
 
 _nvml_initialized = False
 
-def _ensure_nvml():
+def _load_pynvml():
+    """Return pynvml module if available, otherwise None.
+
+    On CPU-only systems or minimal Python builds without NVML bindings,
+    routing falls back to VRAM=0 behavior (Tier C / CPU).
+    """
+    try:
+        import pynvml  # type: ignore
+
+        return pynvml
+    except Exception:
+        return None
+
+
+def _ensure_nvml(pynvml_module) -> bool:
     global _nvml_initialized
     if not _nvml_initialized:
-        import pynvml
-        pynvml.nvmlInit()
-        _nvml_initialized = True
+        try:
+            pynvml_module.nvmlInit()
+            _nvml_initialized = True
+        except Exception:
+            return False
+    return True
 
 
 def get_gpu_utilization() -> int:
     """Returns GPU utilization percentage (0-100), or 0 if unavailable."""
+    pynvml_module = _load_pynvml()
+    if not pynvml_module or not _ensure_nvml(pynvml_module):
+        return 0
+
     try:
-        import pynvml
-        _ensure_nvml()
-        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-        util = pynvml.nvmlDeviceGetUtilizationRates(handle)
+        handle = pynvml_module.nvmlDeviceGetHandleByIndex(0)
+        util = pynvml_module.nvmlDeviceGetUtilizationRates(handle)
         return util.gpu
     except Exception:
         return 0
@@ -113,11 +132,13 @@ def get_gpu_utilization() -> int:
 
 def _get_vram_info() -> tuple[int, int, int]:
     """Returns (used_mb, total_mb, free_mb) in a single pynvml call, or (0,0,0) if unavailable."""
+    pynvml_module = _load_pynvml()
+    if not pynvml_module or not _ensure_nvml(pynvml_module):
+        return 0, 0, 0
+
     try:
-        import pynvml
-        _ensure_nvml()
-        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-        mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+        handle = pynvml_module.nvmlDeviceGetHandleByIndex(0)
+        mem = pynvml_module.nvmlDeviceGetMemoryInfo(handle)
         used = round(mem.used / 1e6)
         total = round(mem.total / 1e6)
         return used, total, max(0, total - used)
