@@ -31,14 +31,17 @@ It is the open, user-controlled Linux answer to Copilot+Windows — built around
 
 ```bash
 # Backend
-cd project
+cd deltai
 python -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
+pip install -e .[dev]
 uvicorn main:app --reload --host 127.0.0.1 --port 8000
 
 # Desktop shell (optional)
 cd app && npm install && npm start
 ```
+
+The main package metadata now includes ChromaDB, so `pip install .` covers
+runtime installs and `pip install -e .[dev]` covers local development.
 
 Or as a systemd user service:
 ```bash
