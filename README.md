@@ -107,11 +107,14 @@ git clone https://github.com/Reconnecting18/deltai
 cd deltai
 
 # Backend
-cd project
+cd deltai
 python -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -e .[dev]
 ```
+
+The core package metadata now includes ChromaDB, so a standard `pip install .`
+is enough for runtime installs. Use `pip install -e .[dev]` when developing.
 
 ### 2. Pull a model
 

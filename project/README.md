@@ -17,6 +17,11 @@ deltai is the AI brain — reasoning, memory, tool execution, and model routing.
 
 ## Quick Start
 
+If you need to install dependencies into a virtual environment, run
+`python -m pip install -e .[dev]` from the repository root. ChromaDB is
+declared in `pyproject.toml`, so it is included with the standard package
+install.
+
 ```powershell
 # Terminal 1 — Backend
 cd ~/deltai/project
