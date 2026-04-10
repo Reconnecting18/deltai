@@ -12,6 +12,9 @@ def test_fastapi_app_name() -> None:
 def test_settings_defaults() -> None:
     settings = load_settings()
     assert settings.ollama_fast_model
+    assert str(settings.data_dir).endswith(".local/share/deltai")
+    assert str(settings.config_dir).endswith(".config/deltai")
+    assert str(settings.cache_dir).endswith(".cache/deltai")
     assert settings.sqlite_path.name == "delta.db"
     assert settings.daemon_socket_path.endswith("daemon.sock")
     assert settings.ipc_socket_path.endswith("ipc.sock")

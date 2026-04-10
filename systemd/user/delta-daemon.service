@@ -6,20 +6,22 @@ After=network.target
 Type=exec
 WorkingDirectory=%h
 Environment=PYTHONUNBUFFERED=1
-Environment=DELTA_DATA_DIR=%h/.local/state/delta
-Environment=DELTA_SQLITE_PATH=%h/.local/state/delta/delta.db
-Environment=DELTA_DAEMON_SOCKET=%t/delta/daemon.sock
-Environment=DELTA_IPC_SOCKET=%t/delta/ipc.sock
+Environment=DELTA_DATA_DIR=%h/.local/share/deltai
+Environment=DELTA_CONFIG_DIR=%h/.config/deltai
+Environment=DELTA_CACHE_DIR=%h/.cache/deltai
+Environment=DELTA_SQLITE_PATH=%h/.local/share/deltai/delta.db
+Environment=DELTA_DAEMON_SOCKET=%t/deltai/daemon.sock
+Environment=DELTA_IPC_SOCKET=%t/deltai/ipc.sock
 ExecStart=/usr/bin/env delta-daemon
 Restart=on-failure
 RestartSec=2
-RuntimeDirectory=delta
+RuntimeDirectory=deltai
 RuntimeDirectoryMode=0700
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=%h/.local/state/delta %t/delta
+ReadWritePaths=%h/.local/share/deltai %h/.config/deltai %h/.cache/deltai %t/deltai
 
 [Install]
 WantedBy=default.target

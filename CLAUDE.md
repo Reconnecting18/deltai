@@ -236,7 +236,7 @@ DPO_ENABLED=false
 ## Development Rules
 
 - **Linux paths only** — no Windows-style `C:\...` paths anywhere in code.
-- **User space only** — never require root, never write outside the project tree or `$XDG_DATA_HOME`.
+- **User space only** — never require root, never write outside the project tree or XDG app dirs (`$XDG_DATA_HOME/deltai`, `$XDG_CONFIG_HOME/deltai`, `$XDG_CACHE_HOME/deltai`).
 - **systemd user service** — deltai runs as a user service (`systemctl --user`), not system.
 - **Single-file frontend** — all of `static/index.html` in one file (HTML + CSS + JS).
 - **Shell tool** — use `run_shell` (bash/sh), not `run_powershell`.

@@ -197,6 +197,12 @@ VRAM_TIER_AB_MIN_MB=5000         # Threshold for partial GPU offload
 WARM_TO_COLD_AGE_SEC=86400       # Age before moving to cold storage (24h)
 INGEST_QUEUE_MAX=500             # Max queued ingest items before 429
 
+# ── Linux runtime paths (XDG-compliant defaults) ────────────────────────────
+DELTA_DATA_DIR=~/.local/share/deltai
+DELTA_CONFIG_DIR=~/.config/deltai
+DELTA_CACHE_DIR=~/.cache/deltai
+DELTA_SQLITE_PATH=~/.local/share/deltai/delta.db
+
 # ── Training (optional) ──────────────────────────────────────────────────────
 HF_BASE_MODEL=Qwen/Qwen2.5-3B-Instruct
 DAILY_TRAIN_ENABLED=false        # Autonomous nightly fine-tuning cycle
