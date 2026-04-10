@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from delta.config import Settings, load_settings
 from delta.ipc.unix_socket import IPCServer
 from delta.orchestrator.core import Orchestrator
+from delta.platform.dbus_integration import DBusIntegration
 from delta.storage.db import ensure_database
 
 
@@ -39,12 +40,16 @@ async def lifespan(app: FastAPI):
     """Initialize and tear down long-lived daemon components."""
     settings: Settings = load_settings()
     ensure_database(settings.sqlite_path)
+    dbus = DBusIntegration()
+    dbus_probe = dbus.probe()
 
     orchestrator = Orchestrator(settings=settings)
     ipc_server = IPCServer(socket_path=settings.ipc_socket_path, orchestrator=orchestrator)
     await ipc_server.start()
 
     app.state.settings = settings
+    app.state.dbus = dbus
+    app.state.dbus_probe = dbus_probe
     app.state.orchestrator = orchestrator
     app.state.ipc_server = ipc_server
     try:

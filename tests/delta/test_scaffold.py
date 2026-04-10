@@ -3,6 +3,7 @@
 from delta.config import load_settings
 from delta.daemon.app import app
 from delta.orchestrator.intents import classify_intent
+from delta.platform.dbus_integration import DBusIntegration
 
 
 def test_fastapi_app_name() -> None:
@@ -22,3 +23,10 @@ def test_settings_defaults() -> None:
 
 def test_intent_classification_shell() -> None:
     assert classify_intent("run this shell command") == "shell"
+
+
+def test_dbus_probe_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("DELTA_DBUS_ENABLED", "false")
+    probe = DBusIntegration().probe()
+    assert probe.enabled is False
+    assert probe.available is False

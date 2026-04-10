@@ -293,7 +293,7 @@ deltai is in early development. The core FastAPI backend, routing engine, RAG me
 
 - [ ] Rearchitecting for Linux (paths, service model, tool names)
 - [ ] systemd user service integration
-- [ ] Linux-appropriate tool set (`run_shell` instead of `run_powershell`, D-Bus probe, etc.)
+- [ ] Linux-appropriate tool set (`run_shell` instead of `run_powershell`, etc.)
 - [ ] Plugin API design (tool registration from external services)
 - [ ] General-purpose task automation (not domain-specific)
 - [ ] Documentation and onboarding for Linux users
