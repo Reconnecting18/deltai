@@ -12,8 +12,6 @@ import uvicorn
 
 from delta.config import load_settings
 
-
-
 def main() -> None:
     """Start uvicorn bound to a Unix socket for local IPC-style HTTP access."""
     settings = load_settings()

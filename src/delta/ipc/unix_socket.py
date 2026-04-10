@@ -55,7 +55,12 @@ class IPCServer:
             writer.write((json.dumps(result) + "\n").encode("utf-8"))
             await writer.drain()
         except Exception as exc:
-            writer.write((json.dumps({"status": "error", "output": str(exc), "agent": "none"}) + "\n").encode("utf-8"))
+            error_payload = {
+                "status": "error",
+                "output": str(exc),
+                "agent": "none",
+            }
+            writer.write((json.dumps(error_payload) + "\n").encode("utf-8"))
             await writer.drain()
         finally:
             writer.close()
