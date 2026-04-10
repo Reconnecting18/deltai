@@ -37,7 +37,7 @@ logger = logging.getLogger("deltai.collector")
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 
-TRAINING_PATH = os.getenv("TRAINING_PATH", r"~/deltai/data\training")
+TRAINING_PATH = os.path.expanduser(os.getenv("TRAINING_PATH", "~/.local/share/deltai/training"))
 DATASETS_PATH = os.path.join(TRAINING_PATH, "datasets")
 CHECKPOINTS_PATH = os.path.join(TRAINING_PATH, "collect_checkpoints")
 

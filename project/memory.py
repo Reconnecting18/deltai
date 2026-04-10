@@ -18,8 +18,8 @@ logger = logging.getLogger("deltai.memory")
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 EMBED_MODEL = os.getenv("DELTAI_EMBED_MODEL", "nomic-embed-text")
-CHROMADB_PATH = os.getenv("CHROMADB_PATH", r"~/deltai/data\chromadb")
-KNOWLEDGE_PATH = os.getenv("KNOWLEDGE_PATH", r"~/deltai/data\knowledge")
+CHROMADB_PATH = os.getenv("CHROMADB_PATH", "~/.local/share/deltai/chromadb")
+KNOWLEDGE_PATH = os.getenv("KNOWLEDGE_PATH", "~/.local/share/deltai/knowledge")
 
 # ── CHUNKING ────────────────────────────────────────────────────────────
 

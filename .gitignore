@@ -12,7 +12,7 @@ fix.py
 app/node_modules/
 app/.cache/
 
-# Ollama models — too large, stored at C:\Users\ethan\.ollama\
+# Ollama models — too large, typically stored in ~/.ollama/
 # Do NOT commit model weights
 
 # Data / memory stores

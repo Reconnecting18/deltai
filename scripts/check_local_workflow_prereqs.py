@@ -53,8 +53,8 @@ def main() -> int:
 
     all_ok = True
 
-    knowledge = os.getenv("KNOWLEDGE_PATH", r"~/deltai/data\knowledge")
-    chroma = os.getenv("CHROMADB_PATH", r"~/deltai/data\chromadb")
+    knowledge = os.path.expanduser(os.getenv("KNOWLEDGE_PATH", "~/.local/share/deltai/knowledge"))
+    chroma = os.path.expanduser(os.getenv("CHROMADB_PATH", "~/.local/share/deltai/chromadb"))
     ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
 
     all_ok &= _check(

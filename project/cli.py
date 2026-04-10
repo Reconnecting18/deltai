@@ -5,8 +5,8 @@ Connects to the deltai FastAPI backend via HTTP. Zero backend imports.
 Usage:
     python cli.py [--host HOST] [--port PORT] [--no-banner]
 
-Or via launcher:
-    ~/deltai/e3n.bat
+Or directly:
+    python cli.py
 """
 
 import asyncio

@@ -2,9 +2,8 @@
 deltai Daily Autonomous Training Scheduler
 Orchestrates the full daily self-improvement cycle for deltai's Qwen models.
 
-Designed to run at 2:00 AM via Windows Task Scheduler (registered by
-scripts/setup_daily_training_task.ps1). Runs offline — does not require
-the FastAPI server to be running.
+Designed to run at 2:00 AM via a Linux scheduler (systemd user timer or cron).
+Runs offline — does not require the FastAPI server to be running.
 
 Phases:
   0. Guard checks (sim, session, VRAM, existing training)

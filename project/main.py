@@ -3104,7 +3104,7 @@ async def api_voice_presets_list():
         return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
     from voice.voice_config import VoiceConfig
     import os
-    preset_dir = r"~/deltai/data\voice\presets"
+    preset_dir = os.path.expanduser("~/.local/share/deltai/voice/presets")
     presets = []
     if os.path.isdir(preset_dir):
         for f in os.listdir(preset_dir):
@@ -3272,7 +3272,7 @@ def stats():
         "used_gb": round(ram.used / 1e9, 1),
         "percent": ram.percent,
     }
-    disk = psutil.disk_usage("C:\\")
+    disk = psutil.disk_usage("/")
     result["disk"] = {
         "total_gb": round(disk.total / 1e9, 1),
         "used_gb": round(disk.used / 1e9, 1),
@@ -3325,7 +3325,7 @@ def stats():
         try:
             total = sum(
                 os.path.getsize(os.path.join(dp, f))
-                for dp, dn, fn in os.walk(os.getenv("CHROMADB_PATH", "~/deltai/data\\chromadb"))
+                for dp, dn, fn in os.walk(os.path.expanduser(os.getenv("CHROMADB_PATH", "~/.local/share/deltai/chromadb")))
                 for f in fn
             )
             result["memory_mb"] = round(total / 1e6, 1)

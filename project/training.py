@@ -4,7 +4,7 @@ Handles creation, storage, and export of fine-tuning datasets.
 Supports two training modes:
   - "fewshot": Bakes examples into system prompt via Ollama (always available)
   - "lora": Real QLoRA fine-tuning via transformers/peft/trl (requires GPU + deps)
-Training data stored as JSONL files in ~/deltai/data\\training\\datasets\\.
+Training data stored as JSONL files in ~/.local/share/deltai/training/datasets/.
 """
 
 import os
@@ -21,7 +21,7 @@ import httpx
 
 logger = logging.getLogger("deltai.training")
 
-TRAINING_PATH = os.getenv("TRAINING_PATH", r"~/deltai/data\training")
+TRAINING_PATH = os.path.expanduser(os.getenv("TRAINING_PATH", "~/.local/share/deltai/training"))
 DATASETS_PATH = os.path.join(TRAINING_PATH, "datasets")
 ADAPTERS_PATH = os.path.join(TRAINING_PATH, "adapters")
 EXPORTS_PATH = os.path.join(TRAINING_PATH, "exports")

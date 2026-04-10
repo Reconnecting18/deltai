@@ -20,7 +20,7 @@ Low-quality turns feed **knowledge gaps** and **negative capture**; fixing knowl
 
 ### A.1 Knowledge files (`KNOWLEDGE_PATH`)
 
-- **Location:** `KNOWLEDGE_PATH` (default `~/deltai/data\knowledge` on the primary machine).
+- **Location:** `KNOWLEDGE_PATH` (default `~/.local/share/deltai/knowledge`).
 - **Watcher:** On FastAPI startup, `ingest_all` runs once, then [project/watcher.py](../project/watcher.py) watches the directory recursively (debounce ~1s per file).
 - **Supported extensions** (from [project/memory.py](../project/memory.py)): `.txt`, `.md`, `.py`, `.js`, `.ts`, `.html`, `.css`, `.json`, `.yaml`, `.yml`, `.toml`, `.ini`, `.cfg`, `.csv`, `.log`, `.bat`, `.ps1`, `.sh`, `.c`, `.cpp`, `.h`, `.rs`, `.go`, `.java`.
 - **Limits:** Max **5 MB** per file; empty files skipped; unchanged files skipped via `file_hash`.
@@ -125,7 +125,7 @@ After each turn, [project/main.py](../project/main.py) calls `smart_auto_capture
 ### C.3 Nightly / unattended cycle
 
 - **Script:** [scripts/daily_training.py](../scripts/daily_training.py) — dry-run: `python scripts/daily_training.py --dry-run`
-- **Scheduler:** [scripts/setup_daily_training_task.ps1](../scripts/setup_daily_training_task.ps1) (Windows).
+- **Scheduler:** systemd user timer or cron (Linux).
 
 ### C.4 Adapter surgery (domain LoRA slots)
 
