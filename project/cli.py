@@ -1,12 +1,12 @@
 """
-E3N Terminal — standalone CLI client.
-Connects to the E3N FastAPI backend via HTTP. Zero backend imports.
+deltai Terminal — standalone CLI client.
+Connects to the deltai FastAPI backend via HTTP. Zero backend imports.
 
 Usage:
     python cli.py [--host HOST] [--port PORT] [--no-banner]
 
 Or via launcher:
-    C:\\e3n\\e3n.bat
+    ~/deltai/e3n.bat
 """
 
 import asyncio
@@ -39,11 +39,11 @@ CONNECT_TIMEOUT = 3.0
 STREAM_TIMEOUT = 120.0
 
 # ── THEME ──────────────────────────────────────────────────────────────
-# Matches E3N dashboard palette: militaristic, muted, tactical
+# Matches deltai dashboard palette: militaristic, muted, tactical
 
-E3N_THEME = Theme({
-    "e3n":       "#5a8a7a bold",
-    "e3n.bright": "bold white",
+DELTAI_THEME = Theme({
+    "deltai":       "#5a8a7a bold",
+    "deltai.bright": "bold white",
     "accent":    "#5a8a7a",
     "cmd":       "#5a8a7a",
     "meta":      "#445060 italic",
@@ -56,7 +56,7 @@ E3N_THEME = Theme({
     "heading":   "#5a8a7a bold",
 })
 
-console = Console(theme=E3N_THEME, highlight=False, force_terminal=True)
+console = Console(theme=DELTAI_THEME, highlight=False, force_terminal=True)
 
 # ── ASCII BANNER ───────────────────────────────────────────────────────
 
@@ -96,7 +96,7 @@ _N_ART = (
     f"{_B*3}{_LH}   {_B*3}{_LH}",
     f"{_UH*3}{_QUL}   {_UH*3}{_QUL}",
 )
-_E3N_LINES = tuple(f"{_E_ART[i]}{_GAP}{_3_ART[i]}{_GAP}{_N_ART[i]}" for i in range(6))
+_DELTAI_LINES = tuple(f"{_E_ART[i]}{_GAP}{_3_ART[i]}{_GAP}{_N_ART[i]}" for i in range(6))
 
 def _style_art(art: str, is_shadow: bool = False) -> str:
     """Color letter body chars as accent, shadow chars (▌▀▘) as dim."""
@@ -130,7 +130,7 @@ def _build_banner() -> str:
     lines.append("")
     lines.append(border)
     lines.append(empty)
-    for i, art_line in enumerate(_E3N_LINES):
+    for i, art_line in enumerate(_DELTAI_LINES):
         right = ""
         if i == 2:
             right = _TITLE
@@ -332,9 +332,9 @@ async def stream_chat(client: httpx.AsyncClient, message: str):
                     chunk = ev.get("c", "")
                     if chunk:
                         if not response_started:
-                            # Print E3N prompt prefix before first text
+                            # Print deltai prompt prefix before first text
                             console.print()
-                            console.print("  [e3n]E3N>[/] ", end="")
+                            console.print("  [e3n]deltai>[/] ", end="")
                             response_started = True
                         # Print chunk live (raw, no markup interpretation)
                         console.out(chunk, end="", highlight=False)
@@ -377,7 +377,7 @@ async def stream_chat(client: httpx.AsyncClient, message: str):
                     console.print(f"  [warn]SESSION {state}: {sid}[/]")
 
     except httpx.ConnectError:
-        console.print("\n  [danger]ERROR: Cannot reach E3N backend. Is it running?[/]\n")
+        console.print("\n  [danger]ERROR: Cannot reach deltai backend. Is it running?[/]\n")
     except httpx.ReadTimeout:
         console.print("\n  [warn]Response timed out after {STREAM_TIMEOUT}s[/]\n")
     except KeyboardInterrupt:
@@ -392,12 +392,12 @@ async def stream_chat(client: httpx.AsyncClient, message: str):
 async def cmd_help(client, args):
     """Show available commands."""
     table = Table(
-        title="E3N TERMINAL COMMANDS",
+        title="deltai TERMINAL COMMANDS",
         box=box.SIMPLE_HEAVY,
         border_style="accent",
         title_style="heading",
         show_header=True,
-        header_style="e3n",
+        header_style="deltai",
     )
     table.add_column("Command", style="cmd", min_width=18)
     table.add_column("Description", style="text")
@@ -417,7 +417,7 @@ async def cmd_help(client, args):
         ("/cls",            "Clear terminal screen"),
         ("/quit, /exit",    "Exit the terminal"),
         ("",                ""),
-        ("[dim](any text)[/]",  "[dim]Chat with E3N directly[/]"),
+        ("[dim](any text)[/]",  "[dim]Chat with deltai directly[/]"),
     ]
     for cmd, desc in cmds:
         table.add_row(cmd, desc)
@@ -470,7 +470,7 @@ async def cmd_stats(client, args):
         border_style="accent",
         title_style="heading",
     )
-    table.add_column("Component", style="e3n", min_width=14)
+    table.add_column("Component", style="deltai", min_width=14)
     table.add_column("Value", style="text", min_width=30)
 
     cpu = stats.get("cpu", {})
@@ -554,7 +554,7 @@ async def cmd_resources(client, args):
         border_style="accent",
         title_style="heading",
     )
-    table.add_column("Component", style="e3n", min_width=18)
+    table.add_column("Component", style="deltai", min_width=18)
     table.add_column("Value", style="text")
 
     rm = data.get("resource_manager", {})
@@ -620,9 +620,9 @@ async def cmd_history(client, args):
         console.print()
         for pair in history[-3:]:
             user_msg = pair.get("user", "")[:60]
-            e3n_msg = pair.get("assistant", "")[:60]
+            deltai_msg = pair.get("assistant", "")[:60]
             console.print(f"  [dim]>[/]    [text]{user_msg}{'...' if len(pair.get('user', '')) > 60 else ''}[/]")
-            console.print(f"  [e3n]E3N>[/] [text]{e3n_msg}{'...' if len(pair.get('assistant', '')) > 60 else ''}[/]")
+            console.print(f"  [e3n]deltai>[/] [text]{deltai_msg}{'...' if len(pair.get('assistant', '')) > 60 else ''}[/]")
             console.print()
     console.print()
 
@@ -705,7 +705,7 @@ async def cmd_events(client, args):
         border_style="accent",
         title_style="heading",
     )
-    table.add_column("Type", style="e3n", min_width=20)
+    table.add_column("Type", style="deltai", min_width=20)
     table.add_column("Data", style="text", max_width=50)
     table.add_column("Time", style="dim", min_width=10)
 
@@ -748,7 +748,7 @@ async def dispatch_command(client: httpx.AsyncClient, raw: str) -> bool:
     args = parts[1:] if len(parts) > 1 else []
 
     if cmd in ("/quit", "/exit"):
-        console.print("  [dim]E3N terminal closed.[/]")
+        console.print("  [dim]deltai terminal closed.[/]")
         return "exit"
 
     if cmd == "/cls":
@@ -782,7 +782,7 @@ async def repl(client: httpx.AsyncClient):
         try:
             # Prompt
             try:
-                raw = console.input("[e3n]E3N >[/] ")
+                raw = console.input("[e3n]deltai >[/] ")
             except EOFError:
                 break
 
@@ -810,7 +810,7 @@ async def repl(client: httpx.AsyncClient):
             ctrl_c_count += 1
             console.print()
             if ctrl_c_count >= 2:
-                console.print("  [dim]E3N terminal closed.[/]")
+                console.print("  [dim]deltai terminal closed.[/]")
                 break
             console.print("  [dim]Press Ctrl+C again to exit, or type /quit[/]")
 
@@ -846,7 +846,7 @@ async def main():
         print_banner()
 
     # Connect
-    console.print(f"  [dim]Connecting to E3N backend at {base_url}...[/]")
+    console.print(f"  [dim]Connecting to deltai backend at {base_url}...[/]")
 
     async with httpx.AsyncClient(base_url=base_url) as client:
         health = await check_connection(client)
@@ -854,9 +854,9 @@ async def main():
         if health is None:
             console.print()
             console.print(Panel(
-                f"Cannot reach E3N backend at {base_url}\n\n"
+                f"Cannot reach deltai backend at {base_url}\n\n"
                 "Start the backend first:\n"
-                "  cd C:\\e3n\\project\n"
+                "  cd ~/deltai/project\n"
                 "  .\\venv\\Scripts\\activate\n"
                 "  uvicorn main:app --port 8000",
                 border_style="danger",

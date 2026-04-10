@@ -1,14 +1,14 @@
 """
-RVC v2 training pipeline for E3N custom voice.
+RVC v2 training pipeline for deltai custom voice.
 
 Workflow:
     1. prepare_dataset() — Clean, split, resample training audio
     2. train() — Run RVC training (unloads Ollama, uses full GPU)
     3. export_model() — Extract lightweight inference model
 
-Training audio should be placed in C:\\e3n\\data\\voice\\training_audio\\
+Training audio should be placed in ~/deltai/data\\voice\\training_audio\\
 as mono WAV files (44100Hz preferred, any sample rate accepted).
-Target: 15-40 minutes total, 60% E3N dialogue / 40% BT-7274 dialogue.
+Target: 15-40 minutes total, 60% deltai dialogue / 40% BT-7274 dialogue.
 """
 
 import logging
@@ -25,7 +25,7 @@ import numpy as np
 
 from .voice_config import VoiceConfig, DEFAULT_CONFIG
 
-logger = logging.getLogger("e3n.voice.train")
+logger = logging.getLogger("deltai.voice.train")
 
 # ── Training State ─────────────────────────────────────────────────────
 
@@ -83,9 +83,9 @@ def prepare_dataset(
 
     Args:
         audio_dir: Directory containing raw WAV files.
-                   Default: C:\\e3n\\data\\voice\\training_audio\\
+                   Default: ~/deltai/data\\voice\\training_audio\\
         output_dir: Where to save processed segments.
-                    Default: C:\\e3n\\data\\voice\\training_processed\\
+                    Default: ~/deltai/data\\voice\\training_processed\\
         config: Voice configuration.
 
     Returns:
@@ -321,7 +321,7 @@ def _do_train(dataset_dir: str, output_name: str, config: VoiceConfig) -> None:
         "rvc-python is not yet compatible with Python 3.14. "
         "Train using the RVC WebUI (https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI) "
         "and place the exported .pth + .index files in "
-        f"C:\\e3n\\data\\voice\\models\\{output_name}\\"
+        f"~/deltai/data\\voice\\models\\{output_name}\\"
     )
     logger.warning(_training_state.error)
 
@@ -380,7 +380,7 @@ def export_model(
         export = {
             "weight": {},
             "config": ckpt.get("config", []),
-            "info": f"E3N voice model exported from {latest.name}",
+            "info": f"deltai voice model exported from {latest.name}",
         }
 
         model_state = ckpt.get("model", ckpt.get("weight", {}))

@@ -1,6 +1,6 @@
 """
-E3N Daily Autonomous Training Scheduler
-Orchestrates the full daily self-improvement cycle for E3N's Qwen models.
+deltai Daily Autonomous Training Scheduler
+Orchestrates the full daily self-improvement cycle for deltai's Qwen models.
 
 Designed to run at 2:00 AM via Windows Task Scheduler (registered by
 scripts/setup_daily_training_task.ps1). Runs offline — does not require
@@ -66,7 +66,7 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout),
     ],
 )
-logger = logging.getLogger("e3n.daily_training")
+logger = logging.getLogger("deltai.daily_training")
 
 
 def _load_env():
@@ -127,10 +127,10 @@ def _is_sim_running() -> bool:
 
 
 def _check_session_active() -> bool:
-    """Check if a racing session is active via E3N API."""
+    """Check if a racing session is active via deltai API."""
     try:
         import httpx
-        base_url = os.getenv("E3N_API_URL", "http://localhost:8000")
+        base_url = os.getenv("DELTAI_API_URL", "http://localhost:8000")
         resp = httpx.get(f"{base_url}/session/status", timeout=3)
         if resp.status_code == 200:
             return resp.json().get("active", False)
@@ -215,7 +215,7 @@ def _print_report(report_path: str):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="E3N Daily Autonomous Training Cycle",
+        description="deltai Daily Autonomous Training Cycle",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -263,7 +263,7 @@ Examples:
     force_collect = args.collect or collect_only
 
     logger.info("=" * 50)
-    logger.info("E3N Daily Training Cycle starting")
+    logger.info("deltai Daily Training Cycle starting")
     logger.info(f"  Date:         {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"  Dry run:      {args.dry_run}")
     logger.info(f"  Day:          {args.day if args.day is not None else 'auto'}")

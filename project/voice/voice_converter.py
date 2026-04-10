@@ -23,7 +23,7 @@ import numpy as np
 
 from .voice_config import VoiceConfig, DEFAULT_CONFIG
 
-logger = logging.getLogger("e3n.voice.rvc")
+logger = logging.getLogger("deltai.voice.rvc")
 
 # Minimum free VRAM (MB) to load RVC on GPU
 _MIN_VRAM_MB = 2500
@@ -381,10 +381,10 @@ And produces the target voice audio. The model architecture is complex
 (~40M parameters, residual blocks, NSF synthesis).
 
 For Phase 2 completion, the user needs to:
-1. Extract game dialogue audio (E3N + BT-7274)
+1. Extract game dialogue audio (deltai + BT-7274)
 2. Train an RVC model using the RVC WebUI or rvc-python
 3. Export the trained .pth + .index files
-4. Place them in C:\\e3n\\data\\voice\\models\\e3n_voice\\
+4. Place them in ~/deltai/data\\voice\\models\\deltai_voice\\
 
 The voice_converter.py will then load and use these files for inference.
 The current implementation handles model loading, f0 extraction, and the

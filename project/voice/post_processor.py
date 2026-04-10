@@ -1,5 +1,5 @@
 """
-Post-processing effects chain for E3N's electronic voice character.
+Post-processing effects chain for deltai's electronic voice character.
 
 All effects use numpy/scipy. Pedalboard is optional (not used here).
 Every parameter is read from VoiceConfig — zero magic numbers.
@@ -23,7 +23,7 @@ import numpy as np
 
 from .voice_config import VoiceConfig, DEFAULT_CONFIG
 
-logger = logging.getLogger("e3n.voice.postprocess")
+logger = logging.getLogger("deltai.voice.postprocess")
 
 # Check for scipy availability
 try:

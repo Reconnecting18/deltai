@@ -1,5 +1,5 @@
 """
-E3N Response Quality Scoring Engine
+deltai Response Quality Scoring Engine
 
 Heuristic-based quality scorer for chat responses. Produces a 0.0-1.0 score
 from 6 weighted signals. Used to drive smart auto-capture, adaptive routing
@@ -11,7 +11,7 @@ No LLM calls — all signals are computed from string analysis and metadata.
 import re
 import logging
 
-logger = logging.getLogger("e3n.quality")
+logger = logging.getLogger("deltai.quality")
 
 # ── Signal Weights ───────────────────────────────────────────────────────
 # Must sum to 1.0
@@ -196,7 +196,7 @@ def score_response(user_msg: str, assistant_msg: str, metadata: dict | None = No
 
     Args:
         user_msg: The user's query
-        assistant_msg: E3N's response
+        assistant_msg: deltai's response
         metadata: Optional dict with:
             - tool_calls: list of tool names called
             - tool_results: list of {"name": str, "success": bool}

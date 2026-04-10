@@ -5,14 +5,14 @@ const http = require('http')
 const fs = require('fs')
 const os = require('os')
 
-const E3N_PROJECT = 'C:\\e3n\\project'
-const E3N_PYTHON  = path.join(E3N_PROJECT, 'venv', 'Scripts', 'python.exe')
+const DELTAI_PROJECT = '~/deltai/project'
+const DELTAI_PYTHON  = path.join(DELTAI_PROJECT, 'venv', 'Scripts', 'python.exe')
 const PORT        = 8000
 const URL         = `http://127.0.0.1:${PORT}`
 const REPO_ROOT   = path.resolve(__dirname, '..')
-/** Always use %TEMP% so logs exist even if C:\\e3n is read-only or app lives elsewhere. */
-const BACKEND_LOG = path.join(os.tmpdir(), 'e3n-backend-live.log')
-const BOOT_LOG    = path.join(os.tmpdir(), 'e3n-boot.log')
+/** Always use %TEMP% so logs exist even if ~/deltai is read-only or app lives elsewhere. */
+const BACKEND_LOG = path.join(os.tmpdir(), 'deltai-backend-live.log')
+const BOOT_LOG    = path.join(os.tmpdir(), 'deltai-boot.log')
 
 let backendProcess = null
 let mainWindow     = null
@@ -30,7 +30,7 @@ function appendBoot (msg, data) {
     fs.appendFileSync(BOOT_LOG, line, 'utf8')
   } catch (e) {
     try {
-      process.stderr.write(`[E3N] boot log failed: ${e}\n`)
+      process.stderr.write(`[deltai] boot log failed: ${e}\n`)
     } catch (_) {}
   }
 }
@@ -51,35 +51,35 @@ function appendBackendChunk (chunk) {
   } catch (e) {
     appendBoot('backend log write failed', { err: String(e) })
   }
-  mirrorToRepo('e3n-backend-live.log', s)
+  mirrorToRepo('deltai-backend-live.log', s)
 }
 
 function startBackend () {
-  const pyOk = fs.existsSync(E3N_PYTHON)
-  const projOk = fs.existsSync(E3N_PROJECT)
+  const pyOk = fs.existsSync(DELTAI_PYTHON)
+  const projOk = fs.existsSync(DELTAI_PROJECT)
   if (!pyOk) {
-    throw new Error(`Python not found at ${E3N_PYTHON} — create the venv in project (see README).`)
+    throw new Error(`Python not found at ${DELTAI_PYTHON} — create the venv in project (see README).`)
   }
   if (!projOk) {
-    throw new Error(`E3N project folder not found: ${E3N_PROJECT}`)
+    throw new Error(`deltai project folder not found: ${DELTAI_PROJECT}`)
   }
-  backendProcess = spawn(E3N_PYTHON, [
+  backendProcess = spawn(DELTAI_PYTHON, [
     '-m', 'uvicorn', 'main:app',
     '--host', '127.0.0.1',
     '--port', String(PORT),
     '--log-level', 'warning',
-  ], { cwd: E3N_PROJECT, windowsHide: true })
+  ], { cwd: DELTAI_PROJECT, windowsHide: true })
 
   backendProcess.on('error', (err) => {
-    console.error('[E3N backend] spawn error:', err.message)
+    console.error('[deltai backend] spawn error:', err.message)
   })
   backendProcess.on('exit', (code, signal) => {
-    console.error('[E3N backend] process exited', { code, signal })
+    console.error('[deltai backend] process exited', { code, signal })
   })
   const pipe = (buf, label) => {
     appendBackendChunk(`[${label}] ${buf}`)
     const s = buf.toString().trim()
-    if (s) console.error(`[E3N backend ${label}]`, s)
+    if (s) console.error(`[deltai backend ${label}]`, s)
   }
   if (backendProcess.stderr) backendProcess.stderr.on('data', (d) => pipe(d, 'stderr'))
   if (backendProcess.stdout) backendProcess.stdout.on('data', (d) => pipe(d, 'stdout'))
@@ -123,7 +123,7 @@ function createWindow() {
     height: 900,
     minWidth: 1000,
     minHeight: 700,
-    title: 'E3N',
+    title: 'deltai',
     transparent: true,
     backgroundColor: '#00000000',
     frame: false,
@@ -159,7 +159,7 @@ function createWindow() {
 process.on('uncaughtException', (err) => {
   appendBoot('uncaughtException', { err: String(err && err.stack || err) })
   try {
-    dialog.showErrorBox('E3N — uncaught error', `${err && err.message || err}\n\n${logPathsHint()}`)
+    dialog.showErrorBox('deltai — uncaught error', `${err && err.message || err}\n\n${logPathsHint()}`)
   } catch (_) {}
 })
 
@@ -178,7 +178,7 @@ app.whenReady().then(async () => {
   try {
     startBackend()
   } catch (e) {
-    dialog.showErrorBox('E3N — backend not started', `${e.message || e}\n\n${logPathsHint()}`)
+    dialog.showErrorBox('deltai — backend not started', `${e.message || e}\n\n${logPathsHint()}`)
     app.quit()
     return
   }
@@ -187,12 +187,12 @@ app.whenReady().then(async () => {
     createWindow()
   } catch (e) {
     const tail = backendLogBuf.trim().slice(-1200) || '(no backend output captured)'
-    console.error('[E3N]', e.message || e)
-    console.error('Hint: Ensure Python venv exists at', E3N_PYTHON, 'and project at', E3N_PROJECT)
+    console.error('[deltai]', e.message || e)
+    console.error('Hint: Ensure Python venv exists at', DELTAI_PYTHON, 'and project at', DELTAI_PROJECT)
     console.error('Backend log tail:\n', tail)
     dialog.showErrorBox(
-      'E3N — API did not become ready',
-      `${e.message || e}\n\nPython: ${E3N_PYTHON}\nProject: ${E3N_PROJECT}\n\nLast backend output:\n${tail}\n\n${logPathsHint()}`,
+      'deltai — API did not become ready',
+      `${e.message || e}\n\nPython: ${DELTAI_PYTHON}\nProject: ${DELTAI_PROJECT}\n\nLast backend output:\n${tail}\n\n${logPathsHint()}`,
     )
     app.quit()
   }

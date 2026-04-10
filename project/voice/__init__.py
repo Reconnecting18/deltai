@@ -1,5 +1,5 @@
 """
-E3N Voice Module — TTS -> RVC -> PostProcess -> Playback pipeline.
+deltai Voice Module — TTS -> RVC -> PostProcess -> Playback pipeline.
 
 Usage:
     from voice import speak
@@ -29,7 +29,7 @@ from .voice_converter import VoiceConverter
 from .post_processor import PostProcessor
 from .playback import Playback
 
-logger = logging.getLogger("e3n.voice")
+logger = logging.getLogger("deltai.voice")
 
 __all__ = [
     "speak",

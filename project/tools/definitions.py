@@ -1,5 +1,5 @@
 """
-E3N Tool Definitions — JSON schemas for Ollama tool calling.
+deltai Tool Definitions — JSON schemas for Ollama tool calling.
 llama3.1 uses these to decide when and how to invoke tools.
 """
 
@@ -14,7 +14,7 @@ TOOLS = [
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Absolute path to the file (e.g., C:\\e3n\\project\\main.py)"
+                        "description": "Absolute path to the file (e.g., ~/deltai/project\\main.py)"
                     },
                     "max_lines": {
                         "type": "integer",
@@ -113,7 +113,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_knowledge",
-            "description": "Search E3N's knowledge base (ChromaDB vector store) for information from ingested documents. Use when the operator asks about topics that might be in their knowledge files, references past notes, or asks you to recall something from their documents. Files in C:\\e3n\\data\\knowledge\\ are auto-ingested.",
+            "description": "Search deltai's knowledge base (ChromaDB vector store) for information from ingested documents. Use when the operator asks about topics that might be in their knowledge files, references past notes, or asks you to recall something from their documents. Files in ~/deltai/data\\knowledge\\ are auto-ingested.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -134,7 +134,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "memory_stats",
-            "description": "Get stats about E3N's knowledge base: number of chunks, files ingested, disk usage. Use when the operator asks about memory status or what's been ingested.",
+            "description": "Get stats about deltai's knowledge base: number of chunks, files ingested, disk usage. Use when the operator asks about memory status or what's been ingested.",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -289,7 +289,7 @@ DIAGNOSTIC_TOOLS = [
         "type": "function",
         "function": {
             "name": "self_diagnostics",
-            "description": "Run E3N self-diagnostics. With no arguments, checks all subsystems (Ollama, ChromaDB, GPU/VRAM, voice, watcher, backup models, critical paths). With a subsystem specified, runs a deep check with fix suggestions. Use when something seems broken, slow, or after tool failures.",
+            "description": "Run deltai self-diagnostics. With no arguments, checks all subsystems (Ollama, ChromaDB, GPU/VRAM, voice, watcher, backup models, critical paths). With a subsystem specified, runs a deep check with fix suggestions. Use when something seems broken, slow, or after tool failures.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -316,7 +316,7 @@ DIAGNOSTIC_TOOLS = [
                     },
                     "model": {
                         "type": "string",
-                        "description": "Model name for unload/preload (e.g., 'e3n-qwen14b'). Required for unload/preload."
+                        "description": "Model name for unload/preload (e.g., 'deltai-qwen14b'). Required for unload/preload."
                     }
                 },
                 "required": ["action"]
@@ -327,7 +327,7 @@ DIAGNOSTIC_TOOLS = [
         "type": "function",
         "function": {
             "name": "repair_subsystem",
-            "description": "Attempt a safe repair on an E3N subsystem. Available repairs: 'restart_watcher' (restart file watcher), 'clear_vram' (unload all models from VRAM), 'reindex_knowledge' (re-ingest all knowledge files), 'check_ollama' (verify/start Ollama). Use after self_diagnostics identifies an issue.",
+            "description": "Attempt a safe repair on an deltai subsystem. Available repairs: 'restart_watcher' (restart file watcher), 'clear_vram' (unload all models from VRAM), 'reindex_knowledge' (re-ingest all knowledge files), 'check_ollama' (verify/start Ollama). Use after self_diagnostics identifies an issue.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -346,7 +346,7 @@ DIAGNOSTIC_TOOLS.append({
     "type": "function",
     "function": {
         "name": "resource_status",
-        "description": "Get E3N resource self-manager status: current VRAM pressure and tier, loaded models, circuit breaker state, auto-recovery actions taken, sim/session detection. Use to understand system resource health and recent automatic interventions.",
+        "description": "Get deltai resource self-manager status: current VRAM pressure and tier, loaded models, circuit breaker state, auto-recovery actions taken, sim/session detection. Use to understand system resource health and recent automatic interventions.",
         "parameters": {
             "type": "object",
             "properties": {},
@@ -364,7 +364,7 @@ ADAPTER_TOOLS = [
         "type": "function",
         "function": {
             "name": "manage_adapters",
-            "description": "Manage E3N's augmentation slot adapters: list trained adapters and their domains, train new domain-specific adapters (racing, engineering, personality, reasoning), merge adapters into production models via TIES, promote/rollback adapters, or check active adapter map.",
+            "description": "Manage deltai's augmentation slot adapters: list trained adapters and their domains, train new domain-specific adapters (racing, engineering, personality, reasoning), merge adapters into production models via TIES, promote/rollback adapters, or check active adapter map.",
             "parameters": {
                 "type": "object",
                 "properties": {

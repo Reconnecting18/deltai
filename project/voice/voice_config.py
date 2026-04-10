@@ -2,7 +2,7 @@
 Voice pipeline configuration — every tunable parameter lives here.
 
 Zero magic numbers in processing code. All effects read from VoiceConfig.
-Presets stored as JSON in C:\\e3n\\data\\voice\\presets\\.
+Presets stored as JSON in ~/deltai/data\\voice\\presets\\.
 """
 
 from dataclasses import dataclass, field, asdict
@@ -11,10 +11,10 @@ from typing import Optional
 import json
 import logging
 
-logger = logging.getLogger("e3n.voice.config")
+logger = logging.getLogger("deltai.voice.config")
 
-PRESETS_DIR = Path(r"C:\e3n\data\voice\presets")
-VOICE_DATA_DIR = Path(r"C:\e3n\data\voice")
+PRESETS_DIR = Path(r"~/deltai/data\voice\presets")
+VOICE_DATA_DIR = Path(r"~/deltai/data\voice")
 
 
 @dataclass
@@ -31,7 +31,7 @@ class RVCSettings:
     """RVC voice conversion settings."""
     enabled: bool = False
     model_dir: str = str(VOICE_DATA_DIR / "models")
-    model_name: str = "e3n_voice"
+    model_name: str = "deltai_voice"
     index_path: Optional[str] = None
     f0_method: str = "dio"          # dio (fast), harvest (quality), rmvpe (best, needs model)
     f0_up_key: int = 0              # Pitch shift in semitones (0 = no shift)

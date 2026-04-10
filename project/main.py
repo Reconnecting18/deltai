@@ -37,7 +37,7 @@ from persistence import (init_db, load_history, save_history_pair,
 load_dotenv()
 psutil.cpu_percent(interval=0.1)
 
-logger = logging.getLogger("e3n")
+logger = logging.getLogger("deltai")
 
 try:
     import pynvml
@@ -82,7 +82,7 @@ except ImportError as e:
     logger.warning(f"Voice system unavailable: {e}")
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-E3N_MODEL  = os.getenv("E3N_MODEL", "e3n")
+DELTAI_MODEL  = os.getenv("DELTAI_MODEL", "deltai")
 BACKUP_MAX_RETRIES = int(os.getenv("BACKUP_MAX_RETRIES", "2"))
 TELEMETRY_API_URL = os.getenv("TELEMETRY_API_URL", "").strip()
 
@@ -150,7 +150,7 @@ _last_chat_end: float = 0.0
 
 
 def _is_idle() -> bool:
-    """Check if E3N is idle (no active chat, 30s breathing room after last chat)."""
+    """Check if deltai is idle (no active chat, 30s breathing room after last chat)."""
     if _last_chat_start > _last_chat_end:
         return False  # chat in progress
     if _time.time() - _last_chat_end < 30:
@@ -237,14 +237,14 @@ def _append_to_history(user_message: str, assistant_response: str,
         try:
             from training import smart_auto_capture
             smart_auto_capture(
-                "e3n-auto", user_message, assistant_response,
+                "deltai-auto", user_message, assistant_response,
                 quality_score=quality_result["score"] if quality_result else 0.5,
                 metadata=metadata,
             )
         except Exception:
             # Fall back to basic auto_capture
             try:
-                auto_capture("e3n-auto", user_message, assistant_response)
+                auto_capture("deltai-auto", user_message, assistant_response)
             except Exception:
                 pass
 
@@ -628,7 +628,7 @@ async def _backup_health_loop():
 
     while True:
         await asyncio.sleep(interval)
-        for key in ("E3N_BACKUP_STRONG_MODEL", "E3N_BACKUP_MODEL"):
+        for key in ("DELTAI_BACKUP_STRONG_MODEL", "DELTAI_BACKUP_MODEL"):
             model = os.getenv(key, "").strip()
             if not model:
                 continue
@@ -683,7 +683,7 @@ def _log_resource_action(action: str):
 
 def _adjust_process_priority(lower: bool):
     """
-    Adjust OS-level process priority for E3N and Ollama.
+    Adjust OS-level process priority for deltai and Ollama.
     When sim is running or VRAM pressure is high, lower priority so games get CPU/IO first.
     """
     if _resource_state["priority_lowered"] == lower:
@@ -879,7 +879,7 @@ async def _resource_manager_loop():
                                     await _emit_health_event("model_unloaded", {"model": m["name"], "reason": "sim_start"})
                         # Preload 3B if VRAM allows
                         vram_now = get_vram_free_mb()
-                        sim_model = os.getenv("E3N_SIM_MODEL", os.getenv("E3N_MODEL", "e3n-qwen3b"))
+                        sim_model = os.getenv("DELTAI_SIM_MODEL", os.getenv("DELTAI_MODEL", "deltai-qwen3b"))
                         if vram_now >= 2500:
                             await mc.post(f"{OLLAMA_URL}/api/generate",
                                 json={"model": sim_model, "prompt": "ping", "keep_alive": "5m",
@@ -903,7 +903,7 @@ async def _resource_manager_loop():
                 if elapsed_since_stop >= 30:
                     _resource_state["pending_14b_preload"] = False
                     vram_now = get_vram_free_mb()
-                    strong_model = os.getenv("E3N_STRONG_MODEL", "e3n-qwen14b")
+                    strong_model = os.getenv("DELTAI_STRONG_MODEL", "deltai-qwen14b")
                     if vram_now >= 9000:
                         try:
                             async with httpx.AsyncClient(timeout=60) as mc:
@@ -995,9 +995,9 @@ async def _resource_manager_loop():
 
 _SELF_HEAL_ENABLED = os.getenv("SELF_HEAL_ENABLED", "true").lower() in ("true", "1", "yes")
 _SELF_HEAL_INTERVAL = int(os.getenv("SELF_HEAL_INTERVAL_SEC", "300"))  # 5 minutes
-_SELF_HEAL_MODEL = os.getenv("E3N_MODEL", "e3n-qwen3b")
+_SELF_HEAL_MODEL = os.getenv("DELTAI_MODEL", "deltai-qwen3b")
 
-_SELF_HEAL_SYSTEM_PROMPT = """You are E3N's internal diagnostics AI. You receive a system diagnostics report and must decide if any repairs are needed.
+_SELF_HEAL_SYSTEM_PROMPT = """You are deltai's internal diagnostics AI. You receive a system diagnostics report and must decide if any repairs are needed.
 
 RULES:
 - Only suggest repairs if there are actual issues (DOWN, ERROR, STOPPED, WARNING, DEGRADED)
@@ -1204,12 +1204,12 @@ async def _post_startup_cloud_and_models() -> None:
         logger.info(f"GPU utilization: {get_gpu_utilization()}%")
 
         primary_models = [
-            ("PRIMARY", os.getenv("E3N_STRONG_MODEL", "e3n-qwen14b")),
-            ("PRIMARY", os.getenv("E3N_MODEL", "e3n-qwen3b")),
+            ("PRIMARY", os.getenv("DELTAI_STRONG_MODEL", "deltai-qwen14b")),
+            ("PRIMARY", os.getenv("DELTAI_MODEL", "deltai-qwen3b")),
         ]
         backup_models = [
-            ("BACKUP", os.getenv("E3N_BACKUP_STRONG_MODEL", "e3n-nemo")),
-            ("BACKUP", os.getenv("E3N_BACKUP_MODEL", "e3n")),
+            ("BACKUP", os.getenv("DELTAI_BACKUP_STRONG_MODEL", "deltai-nemo")),
+            ("BACKUP", os.getenv("DELTAI_BACKUP_MODEL", "deltai")),
         ]
         for role, model in primary_models + backup_models:
             if not model.strip():
@@ -1283,7 +1283,7 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"Watcher shutdown failed: {e}")
 
-app = FastAPI(title="E3N", lifespan=lifespan)
+app = FastAPI(title="deltai", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -1305,7 +1305,7 @@ def _sanitize_python_json(text: str) -> str:
     return text
 
 def _fix_windows_paths(text: str) -> str:
-    """Fix invalid JSON escape sequences from Windows paths (e.g., C:\\e3n → C:\\\\e3n)."""
+    """Fix invalid JSON escape sequences from Windows paths (e.g., ~/deltai → C:\\\\e3n)."""
     # Replace single backslashes that aren't already valid JSON escapes
     # Valid JSON escapes: \", \\, \/, \b, \f, \n, \r, \t, \uXXXX
     return re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', text)
@@ -1492,9 +1492,9 @@ _GREETING_MAP = {
     "hola": "Hey, Ethan. What do you need?",
     "oh": "Hey. What do you need?",  # common Whisper mis-transcription of "hello"
     "yo": "Yo. What's up?",
-    "hey e3n": "Hey. I'm here.",
-    "hi e3n": "Hey. Ready when you are.",
-    "hello e3n": "Hey, Ethan. What are we working on?",
+    "hey deltai": "Hey. I'm here.",
+    "hi deltai": "Hey. Ready when you are.",
+    "hello deltai": "Hey, Ethan. What are we working on?",
     "hey e3": "Hey. I'm here.",
     "hi e3": "Hey. What do you need?",
     # What's up
@@ -1505,7 +1505,7 @@ _GREETING_MAP = {
     # Morning / evening
     "morning": "Morning, Ethan. Ready when you are.",
     "good morning": "Morning. Systems are all green. What's the plan?",
-    "morning e3n": "Morning, Ethan. Ready when you are.",
+    "morning deltai": "Morning, Ethan. Ready when you are.",
     "morning e3": "Morning. What are we working on?",
     "gm": "Morning, Ethan. Let's get it.",
     "evening": "Evening, Ethan. What do you need?",
@@ -1526,12 +1526,12 @@ _GREETING_MAP = {
     "online?": "Online and ready. What do you need?",
     "awake?": "Always. What's going on?",
     "you up?": "Always on. What do you need?",
-    "e3n?": "I'm here. What's up?",
+    "deltai?": "I'm here. What's up?",
     "e3?": "Right here.",
     # Thanks
     "thanks": "That's what I'm here for.",
     "thank you": "Anytime, Ethan.",
-    "thanks e3n": "That's what I'm here for.",
+    "thanks deltai": "That's what I'm here for.",
     "thx": "No problem.",
 }
 
@@ -1539,7 +1539,7 @@ _GREETING_MAP = {
 def _check_greeting(message: str) -> str | None:
     """
     Check if the message is a simple greeting/farewell.
-    Returns a canned E3N response or None if not a greeting.
+    Returns a canned deltai response or None if not a greeting.
     """
     text = message.strip().lower().rstrip("!.,?")
     return _GREETING_MAP.get(text)
@@ -2061,8 +2061,8 @@ def router_status():
         "has_api_key": bool(os.getenv("ANTHROPIC_API_KEY", "").strip()),
         "sonnet_model": os.getenv("ANTHROPIC_SONNET_MODEL", "claude-sonnet-4-20250514"),
         "opus_model": os.getenv("ANTHROPIC_OPUS_MODEL", "claude-opus-4-20250514"),
-        "local_model": os.getenv("E3N_MODEL", "e3n"),
-        "strong_model": os.getenv("E3N_STRONG_MODEL", ""),
+        "local_model": os.getenv("DELTAI_MODEL", "deltai"),
+        "strong_model": os.getenv("DELTAI_STRONG_MODEL", ""),
     }
 
 class CloudToggle(BaseModel):
@@ -2222,7 +2222,7 @@ async def _ingest_pipeline_worker():
 
 
 # ── INGEST CONNECTOR ──────────────────────────────────────────────────
-# External services push structured context into E3N's RAG memory.
+# External services push structured context into deltai's RAG memory.
 
 class IngestRequest(BaseModel):
     source: str               # identifies the sender (e.g., "lmu-telemetry")
@@ -2235,7 +2235,7 @@ class IngestRequest(BaseModel):
 async def ingest_endpoint(req: IngestRequest):
     """
     Ingest structured context from an external service into ChromaDB.
-    This is E3N's connector — any service can push context here.
+    This is deltai's connector — any service can push context here.
     When the async pipeline is active, returns immediately after queuing.
     """
     if not RAG_AVAILABLE:
@@ -2399,7 +2399,7 @@ def resolve_gap(gap_id: int):
 
 @app.get("/training/weaknesses")
 def training_weaknesses():
-    """Identify domains where E3N performs poorly."""
+    """Identify domains where deltai performs poorly."""
     if not TRAINING_AVAILABLE:
         return {"error": "Training not available"}
     try:
@@ -2522,7 +2522,7 @@ def resource_status():
 
 @app.get("/api/health")
 async def system_health():
-    """Returns status of all E3N subsystems for the header health monitor."""
+    """Returns status of all deltai subsystems for the header health monitor."""
     results = {}
 
     # Ollama
@@ -2596,13 +2596,13 @@ async def system_health():
 def backup_status():
     """Emergency backup system status."""
     backup_enabled = os.getenv("BACKUP_ENABLED", "true").lower() in ("true", "1", "yes")
-    strong = os.getenv("E3N_STRONG_MODEL", "e3n-qwen14b")
-    default = os.getenv("E3N_MODEL", "e3n-qwen3b")
+    strong = os.getenv("DELTAI_STRONG_MODEL", "deltai-qwen14b")
+    default = os.getenv("DELTAI_MODEL", "deltai-qwen3b")
     return {
         "enabled": backup_enabled,
         "mapping": {
-            strong: os.getenv("E3N_BACKUP_STRONG_MODEL", "e3n-nemo"),
-            default: os.getenv("E3N_BACKUP_MODEL", "e3n"),
+            strong: os.getenv("DELTAI_BACKUP_STRONG_MODEL", "deltai-nemo"),
+            default: os.getenv("DELTAI_BACKUP_MODEL", "deltai"),
         },
         "models": _backup_health_status,
         "last_activated": _backup_last_activated if _backup_last_activated > 0 else None,
@@ -2680,7 +2680,7 @@ def training_status():
 
 class TrainingStart(BaseModel):
     dataset: str
-    base_model: str = "e3n-qwen3b"
+    base_model: str = "deltai-qwen3b"
     output_model: str | None = None
     mode: str = "auto"  # "lora", "fewshot", "auto", or "distill"
     teacher_dataset: str | None = None      # for distill mode
@@ -2864,7 +2864,7 @@ def adapters_delete(name: str, delete_files: bool = False):
 class TeacherGenerateRequest(BaseModel):
     queries: list[str]
     teacher: str = "local14b"  # "local14b" or "anthropic"
-    dataset: str = "e3n-teacher"
+    dataset: str = "deltai-teacher"
     category: str = "distilled"
 
 
@@ -2906,7 +2906,7 @@ def training_blend(req: BlendRequest):
 
 class RetentionRequest(BaseModel):
     model: str
-    baseline: str = "e3n-qwen3b"
+    baseline: str = "deltai-qwen3b"
     min_pass_rate: float = 0.7
 
 
@@ -2982,7 +2982,7 @@ async def voice_tts(req: TTSRequest):
         content=result["audio"],
         media_type=f"audio/{result['format']}",
         headers={
-            "Content-Disposition": f"inline; filename=e3n_speech.{result['format']}",
+            "Content-Disposition": f"inline; filename=deltai_speech.{result['format']}",
             "X-Duration-Estimate": str(result.get("duration_estimate", 0)),
         },
     )
@@ -3104,7 +3104,7 @@ async def api_voice_presets_list():
         return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
     from voice.voice_config import VoiceConfig
     import os
-    preset_dir = r"C:\e3n\data\voice\presets"
+    preset_dir = r"~/deltai/data\voice\presets"
     presets = []
     if os.path.isdir(preset_dir):
         for f in os.listdir(preset_dir):
@@ -3307,8 +3307,8 @@ def stats():
     try:
         resp = httpx.get(f"{OLLAMA_URL}/api/tags", timeout=2)
         tags = resp.json()
-        E3N_MODELS = {"e3n-qwen14b", "e3n-qwen3b", "e3n-nemo", "e3n"}
-        result["models"] = [m["name"] for m in tags.get("models", []) if m["name"].split(":")[0] in E3N_MODELS]
+        DELTAI_MODELS = {"deltai-qwen14b", "deltai-qwen3b", "deltai-nemo", "deltai"}
+        result["models"] = [m["name"] for m in tags.get("models", []) if m["name"].split(":")[0] in DELTAI_MODELS]
     except Exception:
         result["models"] = []
     if RAG_AVAILABLE:
@@ -3325,7 +3325,7 @@ def stats():
         try:
             total = sum(
                 os.path.getsize(os.path.join(dp, f))
-                for dp, dn, fn in os.walk(os.getenv("CHROMADB_PATH", "C:\\e3n\\data\\chromadb"))
+                for dp, dn, fn in os.walk(os.getenv("CHROMADB_PATH", "~/deltai/data\\chromadb"))
                 for f in fn
             )
             result["memory_mb"] = round(total / 1e6, 1)
@@ -3335,7 +3335,7 @@ def stats():
         active_model, _, _ = _pick_local_model()
         result["model"] = active_model
     except Exception:
-        result["model"] = E3N_MODEL
+        result["model"] = DELTAI_MODEL
     result["platform"] = platform.system() + " " + platform.release()
     result["rag_available"] = RAG_AVAILABLE
     result["cloud_available"] = is_cloud_available_sync()
@@ -3350,7 +3350,7 @@ def stats():
 
 # ── MODELFILE ───────────────────────────────────────────────────────────
 
-MODELFILE_PATH = r"C:\e3n\modelfiles\E3N.modelfile"
+MODELFILE_PATH = r"~/deltai/modelfiles\deltai.modelfile"
 MODULES_DIR = os.path.join(_HERE, '..', 'modelfiles')
 MODULE_FILES = {
     "modelfile": MODELFILE_PATH,

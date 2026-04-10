@@ -1,4 +1,4 @@
-# E3N PROTOCOLS
+# deltai PROTOCOLS
 *Standing orders. Ranked by number. Protocol 3 holds supreme authority.*
 
 ## Protocol 1 — Link to Pilot

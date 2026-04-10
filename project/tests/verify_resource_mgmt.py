@@ -1,5 +1,5 @@
 """
-E3N Resource Management & Reliability Stress Tests
+deltai Resource Management & Reliability Stress Tests
 Tests the new self-management, circuit breaker, and auto-recovery systems
 under extreme conditions (VRAM starvation, Ollama outages, concurrent load).
 """
@@ -20,7 +20,7 @@ os.environ.setdefault("OLLAMA_URL", "http://localhost:11434")
 os.environ.setdefault("CHROMADB_PATH", os.path.join(os.path.dirname(__file__), "test_chromadb"))
 os.environ.setdefault("KNOWLEDGE_PATH", os.path.join(os.path.dirname(__file__), "test_knowledge"))
 os.environ.setdefault("TRAINING_PATH", os.path.join(os.path.dirname(__file__), "test_training"))
-os.environ.setdefault("SQLITE_PATH", os.path.join(os.path.dirname(__file__), "test_e3n.db"))
+os.environ.setdefault("SQLITE_PATH", os.path.join(os.path.dirname(__file__), "test_deltai.db"))
 
 from unittest.mock import patch, AsyncMock, MagicMock
 
@@ -173,7 +173,7 @@ print("\n=== SELF-DIAGNOSTIC TOOL TESTS ===\n")
 def test_diag_full():
     from tools.executor import self_diagnostics
     result = self_diagnostics()
-    assert "E3N SELF-DIAGNOSTICS" in result
+    assert "deltai SELF-DIAGNOSTICS" in result
     assert "Ollama:" in result
     assert "ChromaDB:" in result
     assert "GPU:" in result
@@ -209,7 +209,7 @@ def test_model_status():
         assert "VRAM" in result or "Loaded" in result
 test_model_status()
 
-@test("Diag 5: Manage models - reject non-E3N models")
+@test("Diag 5: Manage models - reject non-deltai models")
 def test_model_reject():
     from tools.executor import manage_ollama_models
     result = manage_ollama_models(action="unload", model="llama3:latest")
@@ -222,7 +222,7 @@ def test_model_sim_block():
     from tools.executor import manage_ollama_models
     import router
     with patch.object(router, 'is_sim_running', return_value=True):
-        result = manage_ollama_models(action="preload", model="e3n-qwen14b")
+        result = manage_ollama_models(action="preload", model="deltai-qwen14b")
         assert "BLOCKED" in result, f"Should block 14B preload during sim: {result}"
 test_model_sim_block()
 
@@ -252,7 +252,7 @@ test_repair_ollama()
 def test_resource_status_tool():
     from tools.executor import resource_status
     result = resource_status()
-    assert "E3N RESOURCE STATUS" in result
+    assert "deltai RESOURCE STATUS" in result
     assert "VRAM:" in result or "Unavailable" in result
 test_resource_status_tool()
 
@@ -285,7 +285,7 @@ def test_stress_cb_inference():
     # Inference should get circuit breaker error, not try to connect
     async def run():
         async with __import__('httpx').AsyncClient(timeout=5) as client:
-            data, err = await main._try_ollama_inference(client, "e3n-test", [{"role": "user", "content": "test"}])
+            data, err = await main._try_ollama_inference(client, "deltai-test", [{"role": "user", "content": "test"}])
             return data, err
     data, err = asyncio.run(run())
     assert data is None
@@ -359,8 +359,8 @@ def test_stress_emergency_with_cb():
         # First call should hit CB
         async with __import__('httpx').AsyncClient(timeout=5) as client:
             data, err, model, is_emergency = await main._inference_with_emergency_fallback(
-                client, "e3n-qwen14b", [{"role": "user", "content": "test"}],
-                None, "e3n-qwen3b"
+                client, "deltai-qwen14b", [{"role": "user", "content": "test"}],
+                None, "deltai-qwen3b"
             )
         return data, err, model, is_emergency
     data, err, model, is_emergency = asyncio.run(run())
@@ -394,7 +394,7 @@ def test_stress_diag_under_pressure():
     from tools.executor import self_diagnostics
     # Run full diagnostics — should work regardless of GPU state
     result = self_diagnostics()
-    assert "E3N SELF-DIAGNOSTICS" in result
+    assert "deltai SELF-DIAGNOSTICS" in result
     # Run GPU deep diagnostic
     result = self_diagnostics(subsystem="gpu")
     assert "GPU" in result

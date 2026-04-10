@@ -1,11 +1,11 @@
 """
-E3N Persistence Layer — SQLite backing for conversation history and cloud budget.
+deltai Persistence Layer — SQLite backing for conversation history and cloud budget.
 
 Provides durable storage so state survives server restarts.
 In-memory data remains the primary source; SQLite is the backing store.
 Reads happen once at startup, writes happen alongside in-memory updates.
 
-DB location: configured via SQLITE_PATH in .env (default: C:\\e3n\\data\\sqlite\\e3n.db)
+DB location: configured via SQLITE_PATH in .env (default: ~/deltai/data\\sqlite\\e3n.db)
 """
 
 import sqlite3
@@ -14,9 +14,9 @@ import time
 import json
 import logging
 
-logger = logging.getLogger("e3n.persistence")
+logger = logging.getLogger("deltai.persistence")
 
-_db_path = os.getenv("SQLITE_PATH", r"C:\e3n\data\sqlite\e3n.db")
+_db_path = os.getenv("SQLITE_PATH", r"~/deltai/data\sqlite\e3n.db")
 
 
 def _connect() -> sqlite3.Connection:
@@ -363,7 +363,7 @@ def get_routing_stats(domain: str, limit: int = 100) -> list[dict]:
 
 
 def save_knowledge_gap(query_text: str, domain: str, quality_score: float, gap_type: str):
-    """Log a knowledge gap when E3N fails to answer well."""
+    """Log a knowledge gap when deltai fails to answer well."""
     now = time.time()
     with _connect() as conn:
         conn.execute(

@@ -14,9 +14,9 @@ assignees: []
 
 <!-- What is in scope for this change? What is explicitly out of scope? -->
 
-## E3N boundary
+## deltai boundary
 
-E3N is the AI brain layer only (routing, RAG, tools, APIs). Game telemetry ingestion belongs in external services that call **`POST /ingest`**, not inside core E3N as raw parsers or UDP listeners. Does this request respect that boundary? (yes / no / unsure)
+deltai is the AI brain layer only (routing, RAG, tools, APIs). Game telemetry ingestion belongs in external services that call **`POST /ingest`**, not inside core deltai as raw parsers or UDP listeners. Does this request respect that boundary? (yes / no / unsure)
 
 ## Acceptance criteria
 

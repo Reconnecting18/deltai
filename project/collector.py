@@ -1,5 +1,5 @@
 """
-E3N Web Training Data Collector
+deltai Web Training Data Collector
 Pulls training examples from Wikipedia, arXiv, OpenF1, Semantic Scholar,
 and motorsport web pages. All content is deduplicated, formatted as
 instruction/output pairs, and saved to domain JSONL datasets for fine-tuning.
@@ -15,11 +15,11 @@ Sources:
   motorsport  — trafilatura + DuckDuckGo (motorsport engineering web articles)
 
 Output datasets:
-  e3n-general-knowledge   → reasoning domain
-  e3n-science-knowledge   → engineering domain
-  e3n-arxiv-papers        → engineering domain
-  e3n-openf1-strategy     → racing domain
-  e3n-web-motorsport      → racing domain
+  deltai-general-knowledge   → reasoning domain
+  deltai-science-knowledge   → engineering domain
+  deltai-arxiv-papers        → engineering domain
+  deltai-openf1-strategy     → racing domain
+  deltai-web-motorsport      → racing domain
 """
 
 import os
@@ -33,11 +33,11 @@ import threading
 
 import httpx
 
-logger = logging.getLogger("e3n.collector")
+logger = logging.getLogger("deltai.collector")
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 
-TRAINING_PATH = os.getenv("TRAINING_PATH", r"C:\e3n\data\training")
+TRAINING_PATH = os.getenv("TRAINING_PATH", r"~/deltai/data\training")
 DATASETS_PATH = os.path.join(TRAINING_PATH, "datasets")
 CHECKPOINTS_PATH = os.path.join(TRAINING_PATH, "collect_checkpoints")
 
@@ -196,8 +196,8 @@ def collect_wikipedia_batch(batch_size: int = 2000, dry_run: bool = False) -> di
     """
     Stream Wikipedia articles via HuggingFace datasets, starting from the
     stored checkpoint offset. Saves instruction/output pairs to:
-      e3n-general-knowledge  (broad topics)
-      e3n-science-knowledge  (science/engineering topics)
+      deltai-general-knowledge  (broad topics)
+      deltai-science-knowledge  (science/engineering topics)
     Returns a stats dict.
     """
     result = {"source": "wikipedia", "written": 0, "skipped": 0, "errors": 0, "offset_start": 0, "offset_end": 0}
@@ -240,7 +240,7 @@ def collect_wikipedia_batch(batch_size: int = 2000, dry_run: bool = False) -> di
                 continue
 
             domain = _detect_wiki_domain(title, text)
-            dataset_name = "e3n-science-knowledge" if domain == "science" else "e3n-general-knowledge"
+            dataset_name = "deltai-science-knowledge" if domain == "science" else "deltai-general-knowledge"
 
             # Use first chunk only for output (keep examples focused)
             chunks = _chunk_text(text, max_tokens=900)
@@ -296,7 +296,7 @@ def collect_arxiv_batch(max_per_cat: int = 25, dry_run: bool = False) -> dict:
     """
     Query the arXiv XML API for recent papers across engineering/physics/math
     categories. Formats abstract as instruction/output pair.
-    Saves to e3n-arxiv-papers (engineering domain).
+    Saves to deltai-arxiv-papers (engineering domain).
     """
     result = {"source": "arxiv", "written": 0, "skipped": 0, "errors": 0}
 
@@ -320,7 +320,7 @@ def collect_arxiv_batch(max_per_cat: int = 25, dry_run: bool = False) -> dict:
                     "sortOrder": "descending",
                 },
                 timeout=30.0,
-                headers={"User-Agent": "E3N/1.0 (training data collector)"},
+                headers={"User-Agent": "deltai/1.0 (training data collector)"},
             )
             if resp.status_code != 200:
                 result["errors"] += 1
@@ -345,7 +345,7 @@ def collect_arxiv_batch(max_per_cat: int = 25, dry_run: bool = False) -> dict:
                 instruction = f"Explain the research paper titled '{title}' and its key contributions."
                 output = f"This paper falls under {cat_desc}. {abstract}"
 
-                if _write_example("e3n-arxiv-papers", instruction, output, f"arxiv-{cat_id}"):
+                if _write_example("deltai-arxiv-papers", instruction, output, f"arxiv-{cat_id}"):
                     result["written"] += 1
                 else:
                     result["skipped"] += 1
@@ -370,7 +370,7 @@ def collect_openf1_batch(seasons: list[int] = None, dry_run: bool = False) -> di
     """
     Fetch race session data from OpenF1 API. Formats pit strategy, stint
     analysis, and race results as instruction/output pairs.
-    Saves to e3n-openf1-strategy (racing domain).
+    Saves to deltai-openf1-strategy (racing domain).
     """
     result = {"source": "openf1", "written": 0, "skipped": 0, "errors": 0}
 
@@ -388,7 +388,7 @@ def collect_openf1_batch(seasons: list[int] = None, dry_run: bool = False) -> di
                 f"{_OPENF1_BASE}/sessions",
                 params={"year": season, "session_type": "Race"},
                 timeout=20.0,
-                headers={"User-Agent": "E3N/1.0 (training data collector)"},
+                headers={"User-Agent": "deltai/1.0 (training data collector)"},
             )
             if resp.status_code != 200:
                 result["errors"] += 1
@@ -454,7 +454,7 @@ def collect_openf1_batch(seasons: list[int] = None, dry_run: bool = False) -> di
                     f"influenced by compound performance and safety car periods."
                 )
 
-                if _write_example("e3n-openf1-strategy", instruction, output, f"openf1-{season}"):
+                if _write_example("deltai-openf1-strategy", instruction, output, f"openf1-{season}"):
                     result["written"] += 1
                 else:
                     result["skipped"] += 1
@@ -491,7 +491,7 @@ _SCHOLAR_QUERIES = [
 def collect_papers_batch(max_per_query: int = 10, dry_run: bool = False) -> dict:
     """
     Query Semantic Scholar for domain-specific paper abstracts.
-    Saves to e3n-arxiv-papers (engineering domain).
+    Saves to deltai-arxiv-papers (engineering domain).
     """
     result = {"source": "semantic_scholar", "written": 0, "skipped": 0, "errors": 0}
 
@@ -510,7 +510,7 @@ def collect_papers_batch(max_per_query: int = 10, dry_run: bool = False) -> dict
                 },
                 timeout=20.0,
                 headers={
-                    "User-Agent": "E3N/1.0 (training data collector)",
+                    "User-Agent": "deltai/1.0 (training data collector)",
                 },
             )
 
@@ -545,7 +545,7 @@ def collect_papers_batch(max_per_query: int = 10, dry_run: bool = False) -> dict
 
                 output = " ".join(output_parts)
 
-                if _write_example("e3n-arxiv-papers", instruction, output, f"scholar-{domain_hint}"):
+                if _write_example("deltai-arxiv-papers", instruction, output, f"scholar-{domain_hint}"):
                     result["written"] += 1
                 else:
                     result["skipped"] += 1
@@ -585,7 +585,7 @@ def _ddg_search_urls(query: str, max_results: int = 3) -> list[str]:
         resp = httpx.get(
             _DDG_LITE,
             params={"q": query, "kl": "us-en"},
-            headers={"User-Agent": "E3N/1.0 (training collector)"},
+            headers={"User-Agent": "deltai/1.0 (training collector)"},
             timeout=10.0,
             follow_redirects=True,
         )
@@ -626,7 +626,7 @@ def _fetch_page_text(url: str, max_chars: int = 4000) -> str:
     except ImportError:
         # Fallback: basic httpx + strip tags
         try:
-            resp = httpx.get(url, timeout=10.0, headers={"User-Agent": "E3N/1.0"}, follow_redirects=True)
+            resp = httpx.get(url, timeout=10.0, headers={"User-Agent": "deltai/1.0"}, follow_redirects=True)
             if resp.status_code != 200:
                 return ""
             text = re.sub(r"<[^>]+>", " ", resp.text)
@@ -642,7 +642,7 @@ def collect_motorsport_batch(max_pages: int = 20, dry_run: bool = False) -> dict
     """
     Search DuckDuckGo for motorsport engineering articles, fetch page content
     with trafilatura, and save as instruction/output pairs.
-    Saves to e3n-web-motorsport (racing domain).
+    Saves to deltai-web-motorsport (racing domain).
     """
     result = {"source": "motorsport_web", "written": 0, "skipped": 0, "errors": 0}
 
@@ -668,7 +668,7 @@ def collect_motorsport_batch(max_pages: int = 20, dry_run: bool = False) -> dict
             instruction = f"What does motorsport engineering research say about: {query}?"
             output = text
 
-            if _write_example("e3n-web-motorsport", instruction, output, "web-motorsport"):
+            if _write_example("deltai-web-motorsport", instruction, output, "web-motorsport"):
                 result["written"] += 1
                 pages_fetched += 1
             else:

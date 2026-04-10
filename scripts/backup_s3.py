@@ -1,7 +1,7 @@
 """
-E3N Nightly Backup to AWS S3
+deltai Nightly Backup to AWS S3
 
-Backs up E3N's persistent data (ChromaDB, SQLite, knowledge base, training data,
+Backs up deltai's persistent data (ChromaDB, SQLite, knowledge base, training data,
 cold memory, adapter registry) to an S3 bucket with date-stamped prefixes.
 
 Usage:
@@ -17,11 +17,11 @@ Prerequisites:
       - Or: IAM role (if running on EC2)
 
 Environment variables:
-    E3N_S3_BUCKET       S3 bucket name (required)
-    E3N_S3_PREFIX       Prefix inside bucket (default: "e3n-backups")
-    E3N_DATA_PATH       Path to E3N data dir (default: C:\\e3n\\data)
-    E3N_S3_REGION       AWS region (default: us-east-1)
-    E3N_S3_RETENTION    Days to keep old backups (default: 30, 0 = keep forever)
+    DELTAI_S3_BUCKET       S3 bucket name (required)
+    DELTAI_S3_PREFIX       Prefix inside bucket (default: "deltai-backups")
+    DELTAI_DATA_PATH       Path to deltai data dir (default: ~/deltai/data)
+    DELTAI_S3_REGION       AWS region (default: us-east-1)
+    DELTAI_S3_RETENTION    Days to keep old backups (default: 30, 0 = keep forever)
 """
 
 import os
@@ -37,15 +37,15 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
-logger = logging.getLogger("e3n.backup")
+logger = logging.getLogger("deltai.backup")
 
 # ── Configuration ────────────────────────────────────────────────────────
 
-S3_BUCKET = os.getenv("E3N_S3_BUCKET", "")
-S3_PREFIX = os.getenv("E3N_S3_PREFIX", "e3n-backups")
-DATA_PATH = Path(os.getenv("E3N_DATA_PATH", r"C:\e3n\data"))
-S3_REGION = os.getenv("E3N_S3_REGION", "us-east-1")
-S3_RETENTION_DAYS = int(os.getenv("E3N_S3_RETENTION", "30"))
+S3_BUCKET = os.getenv("DELTAI_S3_BUCKET", "")
+S3_PREFIX = os.getenv("DELTAI_S3_PREFIX", "deltai-backups")
+DATA_PATH = Path(os.getenv("DELTAI_DATA_PATH", r"~/deltai/data"))
+S3_REGION = os.getenv("DELTAI_S3_REGION", "us-east-1")
+S3_RETENTION_DAYS = int(os.getenv("DELTAI_S3_RETENTION", "30"))
 
 # Directories and files to back up (relative to DATA_PATH)
 BACKUP_TARGETS = [
@@ -105,7 +105,7 @@ def _collect_files() -> list[tuple[Path, str]]:
 def backup(dry_run: bool = False):
     """Run a full backup to S3."""
     if not S3_BUCKET:
-        logger.error("E3N_S3_BUCKET not set. Export it before running backup.")
+        logger.error("DELTAI_S3_BUCKET not set. Export it before running backup.")
         sys.exit(1)
 
     import boto3
@@ -180,7 +180,7 @@ def _cleanup_old_backups(s3, current_date: str):
 
     for page in paginator.paginate(Bucket=S3_BUCKET, Prefix=f"{S3_PREFIX}/", Delimiter="/"):
         for prefix_obj in page.get("CommonPrefixes", []):
-            prefix = prefix_obj["Prefix"]  # e.g. "e3n-backups/2026-01-15/"
+            prefix = prefix_obj["Prefix"]  # e.g. "deltai-backups/2026-01-15/"
             date_str = prefix.rstrip("/").split("/")[-1]
             try:
                 backup_date = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
@@ -200,9 +200,9 @@ def _cleanup_old_backups(s3, current_date: str):
 
 
 def restore(date: str):
-    """Restore E3N data from an S3 backup."""
+    """Restore deltai data from an S3 backup."""
     if not S3_BUCKET:
-        logger.error("E3N_S3_BUCKET not set.")
+        logger.error("DELTAI_S3_BUCKET not set.")
         sys.exit(1)
 
     import boto3
@@ -235,7 +235,7 @@ def restore(date: str):
 def list_backups():
     """List available backup dates in S3."""
     if not S3_BUCKET:
-        logger.error("E3N_S3_BUCKET not set.")
+        logger.error("DELTAI_S3_BUCKET not set.")
         sys.exit(1)
 
     import boto3
@@ -260,7 +260,7 @@ def list_backups():
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="E3N S3 Backup")
+    parser = argparse.ArgumentParser(description="deltai S3 Backup")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be uploaded")
     parser.add_argument("--restore", metavar="DATE", help="Restore from date (YYYY-MM-DD)")
     parser.add_argument("--list", action="store_true", help="List available backups")

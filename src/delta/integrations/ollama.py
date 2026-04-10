@@ -1,6 +1,6 @@
 """Ollama integration adapter.
 
-This module should absorb reusable local-model invocation logic from E3N
+This module should absorb reusable local-model invocation logic from deltai
 (router/model call paths) while exposing a DELTA-focused interface.
 """
 

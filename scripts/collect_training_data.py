@@ -1,5 +1,5 @@
 """
-E3N Web Training Data Collector — Standalone Runner
+deltai Web Training Data Collector — Standalone Runner
 Collects training examples from Wikipedia, arXiv, OpenF1, Semantic Scholar,
 and motorsport web sources. Runs standalone (no FastAPI required).
 
@@ -60,7 +60,7 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout),
     ],
 )
-logger = logging.getLogger("e3n.collect_runner")
+logger = logging.getLogger("deltai.collect_runner")
 
 _VALID_SOURCES = {"wikipedia", "arxiv", "openf1", "papers", "motorsport", "all"}
 
@@ -121,7 +121,7 @@ def _print_report(report: dict):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="E3N Web Training Data Collector",
+        description="deltai Web Training Data Collector",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -152,7 +152,7 @@ Examples:
     _load_env()
 
     logger.info("=" * 50)
-    logger.info("E3N Web Training Data Collector starting")
+    logger.info("deltai Web Training Data Collector starting")
     logger.info(f"  Date:       {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"  Source:     {args.source}")
     logger.info(f"  Dry run:    {args.dry_run}")

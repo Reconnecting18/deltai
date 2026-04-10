@@ -1,10 +1,10 @@
 """
-E3N Training Pipeline — Dataset Management + LoRA Fine-Tuning
+deltai Training Pipeline — Dataset Management + LoRA Fine-Tuning
 Handles creation, storage, and export of fine-tuning datasets.
 Supports two training modes:
   - "fewshot": Bakes examples into system prompt via Ollama (always available)
   - "lora": Real QLoRA fine-tuning via transformers/peft/trl (requires GPU + deps)
-Training data stored as JSONL files in C:\\e3n\\data\\training\\datasets\\.
+Training data stored as JSONL files in ~/deltai/data\\training\\datasets\\.
 """
 
 import os
@@ -19,9 +19,9 @@ import threading
 
 import httpx
 
-logger = logging.getLogger("e3n.training")
+logger = logging.getLogger("deltai.training")
 
-TRAINING_PATH = os.getenv("TRAINING_PATH", r"C:\e3n\data\training")
+TRAINING_PATH = os.getenv("TRAINING_PATH", r"~/deltai/data\training")
 DATASETS_PATH = os.path.join(TRAINING_PATH, "datasets")
 ADAPTERS_PATH = os.path.join(TRAINING_PATH, "adapters")
 EXPORTS_PATH = os.path.join(TRAINING_PATH, "exports")
@@ -48,7 +48,7 @@ LORA_MAX_SEQ_LEN = int(os.getenv("LORA_MAX_SEQ_LEN", "1024"))
 LORA_WARMUP_RATIO = float(os.getenv("LORA_WARMUP_RATIO", "0.05"))
 LORA_QUANT_METHOD = os.getenv("LORA_QUANT_METHOD", "Q4_K_M")
 HF_BASE_MODEL = os.getenv("HF_BASE_MODEL", "Qwen/Qwen2.5-3B-Instruct")
-LLAMA_CPP_PATH = os.getenv("LLAMA_CPP_PATH", r"C:\e3n\tools\llama.cpp")
+LLAMA_CPP_PATH = os.getenv("LLAMA_CPP_PATH", r"~/deltai/tools\llama.cpp")
 
 # ── DISTILLATION HYPERPARAMETERS (from .env) ──────────────────────────
 
@@ -69,25 +69,25 @@ REGISTRY_PATH = os.path.join(TRAINING_PATH, "adapter_registry.json")
 ADAPTER_DOMAINS = ["racing", "engineering", "personality", "reasoning", "telemetry", "audio"]
 
 DATASET_DOMAIN_MAP = {
-    "e3n-racing": "racing",
-    "e3n-race-engineering": "racing",
-    "e3n-simulations": "racing",
-    "e3n-engineering": "engineering",
-    "e3n-meche": "engineering",
-    "e3n-eng-simulations": "engineering",
-    "e3n-personality": "personality",
-    "e3n-reasoning": "reasoning",
-    "e3n-data-context": "reasoning",
-    "e3n-cot-reasoning": "reasoning",
-    "e3n-telemetry-analysis": "telemetry",
-    "e3n-strategy-advanced": "telemetry",
-    "e3n-audio-analysis": "audio",
+    "deltai-racing": "racing",
+    "deltai-race-engineering": "racing",
+    "deltai-simulations": "racing",
+    "deltai-engineering": "engineering",
+    "deltai-meche": "engineering",
+    "deltai-eng-simulations": "engineering",
+    "deltai-personality": "personality",
+    "deltai-reasoning": "reasoning",
+    "deltai-data-context": "reasoning",
+    "deltai-cot-reasoning": "reasoning",
+    "deltai-telemetry-analysis": "telemetry",
+    "deltai-strategy-advanced": "telemetry",
+    "deltai-audio-analysis": "audio",
     # Web-collected datasets (Phase 11 — daily collector)
-    "e3n-general-knowledge": "reasoning",
-    "e3n-science-knowledge": "engineering",
-    "e3n-arxiv-papers": "engineering",
-    "e3n-openf1-strategy": "racing",
-    "e3n-web-motorsport": "racing",
+    "deltai-general-knowledge": "reasoning",
+    "deltai-science-knowledge": "engineering",
+    "deltai-arxiv-papers": "engineering",
+    "deltai-openf1-strategy": "racing",
+    "deltai-web-motorsport": "racing",
     # Daily-generated distillation datasets
     "distill-telemetry-targeted": "telemetry",
     "distill-audio-targeted": "audio",
@@ -137,7 +137,7 @@ def _load_registry() -> dict:
     return {
         "adapters": {},
         "active_adapters": {d: None for d in ADAPTER_DOMAINS},
-        "production_model": "e3n-qwen3b",
+        "production_model": "deltai-qwen3b",
         "merged_models": [],
     }
 
@@ -340,7 +340,7 @@ def merge_adapters(adapter_names: list = None, method: str = None,
         adapter_names: List of adapter names to merge. None = auto-select active.
         method: "ties" or "linear". Default from config.
         density: TIES density parameter (0-1). Default from config.
-        output_model: Output model name. Default: "e3n-qwen3b-merged".
+        output_model: Output model name. Default: "deltai-qwen3b-merged".
     """
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -348,7 +348,7 @@ def merge_adapters(adapter_names: list = None, method: str = None,
 
     method = method or ADAPTER_MERGE_METHOD
     density = density if density is not None else ADAPTER_MERGE_DENSITY
-    output_model = output_model or "e3n-qwen3b-merged"
+    output_model = output_model or "deltai-qwen3b-merged"
 
     registry = _load_registry()
 
@@ -458,7 +458,7 @@ def merge_adapters(adapter_names: list = None, method: str = None,
         _convert_to_gguf(merged_dir, gguf_file, LORA_QUANT_METHOD)
 
         # Register in Ollama
-        system_prompt = _read_system_prompt("e3n-qwen3b")
+        system_prompt = _read_system_prompt("deltai-qwen3b")
         _register_ollama_model(output_model, gguf_file, system_prompt)
 
         # Cleanup merged dir
@@ -572,7 +572,7 @@ def start_domain_training(domain: str, dataset_name: str = None,
     # Launch background training thread
     t = threading.Thread(
         target=_run_lora_training,
-        args=(dataset_name, "e3n-qwen3b", adapter_name),
+        args=(dataset_name, "deltai-qwen3b", adapter_name),
         kwargs={
             "lr_override": lr,
             "epochs_override": epochs,
@@ -601,15 +601,15 @@ def start_domain_training(domain: str, dataset_name: str = None,
 # ── ADAPTER EVALUATION ───────────────────────────────────────────────
 
 DOMAIN_EVAL_DATASETS = {
-    "racing": "e3n-racing",
-    "engineering": "e3n-engineering",
-    "personality": "e3n-personality",
-    "reasoning": "e3n-reasoning",
+    "racing": "deltai-racing",
+    "engineering": "deltai-engineering",
+    "personality": "deltai-personality",
+    "reasoning": "deltai-reasoning",
 }
 
 
 def eval_adapter(adapter_name: str, eval_dataset: str = None,
-                 baseline_model: str = "e3n-qwen3b",
+                 baseline_model: str = "deltai-qwen3b",
                  max_examples: int = 20) -> dict:
     """
     Evaluate an adapter against the baseline Ollama model.
@@ -1101,10 +1101,10 @@ def _unload_ollama_models_sync():
 # ── SYSTEM PROMPT EXTRACTION ────────────────────────────────────────
 
 _KNOWN_MODELFILES = {
-    "e3n-qwen14b": r"C:\e3n\modelfiles\E3N-qwen14b.modelfile",
-    "e3n-qwen3b": r"C:\e3n\modelfiles\E3N-qwen3b.modelfile",
-    "e3n-nemo": r"C:\e3n\modelfiles\E3N-nemo.modelfile",
-    "e3n": r"C:\e3n\modelfiles\E3N.modelfile",
+    "deltai-qwen14b": r"~/deltai/modelfiles\deltai-qwen14b.modelfile",
+    "deltai-qwen3b": r"~/deltai/modelfiles\deltai-qwen3b.modelfile",
+    "deltai-nemo": r"~/deltai/modelfiles\deltai-nemo.modelfile",
+    "deltai": r"~/deltai/modelfiles\deltai.modelfile",
 }
 
 
@@ -1120,7 +1120,7 @@ def _read_system_prompt(ollama_model_name: str) -> str:
                 return match.group(1).strip()
         except Exception:
             pass
-    return "You are E3N, a personal AI assistant. Be direct and precise."
+    return "You are deltai, a personal AI assistant. Be direct and precise."
 
 
 # ── FEWSHOT TRAINING (LEGACY) ────────────────────────────────────────
@@ -1248,7 +1248,7 @@ def _run_fewshot_training(dataset_name: str, base_model: str, output_model: str)
 
 def _prepare_hf_dataset(dataset_name: str, system_prompt: str, eval_split: float = 0.1):
     """
-    Convert E3N JSONL dataset to HuggingFace Dataset for SFTTrainer.
+    Convert deltai JSONL dataset to HuggingFace Dataset for SFTTrainer.
     Returns (train_dataset, eval_dataset) or raises on error.
     Format: ChatML messages list, matching Qwen2.5 expected format.
     """
@@ -1698,7 +1698,7 @@ def _run_distill_training(teacher_dataset: str, replay_datasets: list[str],
     if replay_ratio is None:
         replay_ratio = DISTILL_REPLAY_RATIO
 
-    blend_name = f"e3n-distill-blend-{int(time.time())}"
+    blend_name = f"deltai-distill-blend-{int(time.time())}"
 
     try:
         _update_state(status="blending datasets", progress=5)
@@ -1777,7 +1777,7 @@ def _run_distill_training(teacher_dataset: str, replay_datasets: list[str],
 
 def start_training(
     dataset_name: str,
-    base_model: str = "e3n-qwen3b",
+    base_model: str = "deltai-qwen3b",
     output_model: str | None = None,
     mode: str = "auto",
     teacher_dataset: str | None = None,
@@ -1849,7 +1849,7 @@ def start_training(
     )
 
     if actual_mode == "distill":
-        replay = replay_datasets or ["e3n-personality", "e3n-auto", "e3n-anti-hallucination"]
+        replay = replay_datasets or ["deltai-personality", "deltai-auto", "deltai-anti-hallucination"]
         thread = threading.Thread(
             target=_run_distill_training,
             args=(teacher_dataset, replay, base_model, output_model),
@@ -2067,7 +2067,7 @@ _ERROR_INDICATORS = ["error:", "exception:", "traceback", "failed to", "i can't"
 _RETENTION_BASELINE_QUERIES = {
     "personality": [
         "Who are you?",
-        "Hey E3N",
+        "Hey deltai",
         "What's your designation?",
         "Who is your operator?",
         "Are you operational?",
@@ -2092,13 +2092,13 @@ _RETENTION_BASELINE_QUERIES = {
 def generate_teacher_data(
     queries: list[str],
     teacher: str = "local14b",
-    dataset_name: str = "e3n-teacher",
+    dataset_name: str = "deltai-teacher",
     category: str = "distilled",
 ) -> dict:
     """
     Generate training data using a teacher model.
     Teacher options:
-      - "local14b": Uses Ollama's e3n-qwen14b model (free, local)
+      - "local14b": Uses Ollama's deltai-qwen14b model (free, local)
       - "anthropic": Uses Anthropic API (requires ANTHROPIC_API_KEY)
     Returns: {"status": "ok", "generated": N, "filtered": M, "dataset": name}
     """
@@ -2130,9 +2130,9 @@ def generate_teacher_data(
     generated = 0
     filtered = 0
 
-    # System prompt for teacher — instruct it to respond as E3N
+    # System prompt for teacher — instruct it to respond as deltai
     system_prompt = (
-        "You are E3N, a military-spec AI assistant. Respond concisely and technically. "
+        "You are deltai, a military-spec AI assistant. Respond concisely and technically. "
         "No filler phrases, no 'certainly', no 'I'd be happy to'. Lead with the answer. "
         "Keep responses under 300 characters for simple queries, up to 800 for complex ones. "
         "Be precise with engineering/physics/math. For racing, use data-driven language."
@@ -2147,7 +2147,7 @@ def generate_teacher_data(
                     resp = client.post(
                         f"{OLLAMA_URL}/api/chat",
                         json={
-                            "model": "e3n-qwen14b",
+                            "model": "deltai-qwen14b",
                             "messages": [
                                 {"role": "system", "content": system_prompt},
                                 {"role": "user", "content": query},
@@ -2297,7 +2297,7 @@ def blend_datasets(
 
 def verify_retention(
     model_name: str,
-    baseline_model: str = "e3n-qwen3b",
+    baseline_model: str = "deltai-qwen3b",
     min_pass_rate: float = 0.7,
 ) -> dict:
     """
@@ -2521,7 +2521,7 @@ def smart_auto_capture(
 
 def identify_weak_domains(min_samples: int = 20) -> list[dict]:
     """
-    Identify domains where E3N performs poorly based on routing feedback.
+    Identify domains where deltai performs poorly based on routing feedback.
     Returns list of {"domain": str, "avg_score": float, "sample_count": int, "worst_queries": [...]}.
     """
     try:
@@ -2568,7 +2568,7 @@ def distill_targeted(domain: str, n_queries: int = 50,
         return {"status": "error", "reason": "persistence not available"}
 
     if not teacher_model:
-        teacher_model = os.getenv("E3N_STRONG_MODEL", "e3n-qwen14b")
+        teacher_model = os.getenv("DELTAI_STRONG_MODEL", "deltai-qwen14b")
 
     stats = get_routing_stats(domain, limit=500)
     if not stats:
@@ -2669,7 +2669,7 @@ def start_dpo_training(
         return {"status": "error", "reason": f"Negative dataset not found: {negative_dataset}"}
 
     effective_base = base_model or HF_BASE_MODEL
-    effective_output = output_model or f"e3n-qwen3b-dpo-{positive_dataset}"
+    effective_output = output_model or f"deltai-qwen3b-dpo-{positive_dataset}"
 
     _training_cancel_flag.clear()
     _update_state(
@@ -2844,8 +2844,8 @@ def synthesize_session_knowledge(
         return {"status": "skipped", "reason": "no session turns provided"}
 
     effective_teacher = teacher or SESSION_SYNTHESIS_MODEL
-    model_name = os.getenv("E3N_STRONG_MODEL", "e3n-qwen14b") if effective_teacher == "local14b" \
-        else os.getenv("E3N_MODEL", "e3n-qwen3b")
+    model_name = os.getenv("DELTAI_STRONG_MODEL", "deltai-qwen14b") if effective_teacher == "local14b" \
+        else os.getenv("DELTAI_MODEL", "deltai-qwen3b")
 
     # Build session transcript (trimmed to avoid token overflow)
     transcript_lines = []
@@ -2856,7 +2856,7 @@ def synthesize_session_knowledge(
     transcript = "\n".join(transcript_lines)
 
     synthesis_prompt = (
-        "You are E3N's knowledge synthesis module. Analyze the following session transcript "
+        "You are deltai's knowledge synthesis module. Analyze the following session transcript "
         "and write a concise knowledge article (200-400 words) capturing:\n"
         "1. Key decisions made and their rationale\n"
         "2. Technical findings or setup discoveries\n"
@@ -2903,13 +2903,13 @@ def synthesize_session_knowledge(
 
 # Weekly curriculum map: weekday (0=Mon) -> list of (dataset_name, topic_label)
 _DAILY_CURRICULUM = {
-    0: [("e3n-telemetry-analysis", "telemetry"), ("e3n-audio-analysis", "audio")],
-    1: [("e3n-strategy-advanced", "telemetry"), ("e3n-race-engineering", "racing")],
-    2: [("e3n-engineering", "engineering"), ("e3n-meche", "engineering")],
-    3: [("e3n-eng-simulations", "engineering"), ("e3n-cot-reasoning", "reasoning")],
-    4: [("e3n-audio-analysis", "audio"), ("e3n-telemetry-analysis", "telemetry")],
-    5: [("e3n-reasoning", "reasoning"), ("e3n-data-context", "reasoning")],
-    6: [("e3n-personality", "personality"), ("e3n-anti-hallucination", "reasoning")],
+    0: [("deltai-telemetry-analysis", "telemetry"), ("deltai-audio-analysis", "audio")],
+    1: [("deltai-strategy-advanced", "telemetry"), ("deltai-race-engineering", "racing")],
+    2: [("deltai-engineering", "engineering"), ("deltai-meche", "engineering")],
+    3: [("deltai-eng-simulations", "engineering"), ("deltai-cot-reasoning", "reasoning")],
+    4: [("deltai-audio-analysis", "audio"), ("deltai-telemetry-analysis", "telemetry")],
+    5: [("deltai-reasoning", "reasoning"), ("deltai-data-context", "reasoning")],
+    6: [("deltai-personality", "personality"), ("deltai-anti-hallucination", "reasoning")],
 }
 
 _DAILY_TRAIN_MIN_VRAM_MB = int(os.getenv("DAILY_TRAIN_MIN_VRAM_MB", "7000"))
@@ -3094,7 +3094,7 @@ def run_daily_cycle(
         if sources:
             blend_result = blend_datasets(blend_name, sources)
             if blend_result.get("status") == "ok":
-                output_name = f"e3n-qwen3b-daily-{train_domain}"
+                output_name = f"deltai-qwen3b-daily-{train_domain}"
                 train_result = start_training(
                     dataset_name=blend_name,
                     output_model=output_name,

@@ -1,11 +1,11 @@
 """
-E3N Smart Router — decides which model handles each message.
+deltai Smart Router — decides which model handles each message.
 
 Architecture:
   LOCAL TIER (VRAM-aware):
-    - Tier A: e3n-qwen14b (Qwen2.5-14B Q4, ~8.5GB) → GPU free, no sim running
-    - Tier B: e3n-qwen3b (Qwen2.5-3B Q4, ~2.5GB)   → sim running, GPU contested
-    - Tier C: e3n-qwen3b on CPU (0 VRAM)             → GPU maxed, emergency fallback
+    - Tier A: deltai-qwen14b (Qwen2.5-14B Q4, ~8.5GB) → GPU free, no sim running
+    - Tier B: deltai-qwen3b (Qwen2.5-3B Q4, ~2.5GB)   → sim running, GPU contested
+    - Tier C: deltai-qwen3b on CPU (0 VRAM)             → GPU maxed, emergency fallback
   CLOUD TIER (dormant until API key is set):
     - Sonnet             → moderate complexity
     - Opus               → heavy reasoning, race strategy, engineering
@@ -28,8 +28,8 @@ Model cascade:
 Emergency backup (last resort only):
   If primary model fails after BACKUP_MAX_RETRIES attempts,
   the system engages a backup model as a lifeline.
-  e3n-qwen14b → e3n-nemo → e3n → system down
-  e3n-qwen3b  → e3n      → system down
+  deltai-qwen14b → deltai-nemo → e3n → system down
+  deltai-qwen3b  → e3n      → system down
 """
 
 import os
@@ -37,7 +37,7 @@ import re
 import time
 import logging
 
-logger = logging.getLogger("e3n.router")
+logger = logging.getLogger("deltai.router")
 
 # ── CONFIGURATION ───────────────────────────────────────────────────────
 
@@ -61,18 +61,18 @@ def _env_float(key: str, default: float) -> float:
 # ── DYNAMIC QUANTIZATION TIERS ───────────────────────────────────────────
 # Multiple quantization levels for smooth performance degradation.
 # Each tier maps VRAM availability to a model variant with appropriate quant.
-# Models must be pre-registered in Ollama (e.g. ollama create e3n-qwen14b-q6 -f ...)
+# Models must be pre-registered in Ollama (e.g. ollama create deltai-qwen14b-q6 -f ...)
 
 _QUANT_TIERS_14B = [
     # (min_vram_mb, model_name, quant_label)
-    (10000, os.getenv("E3N_STRONG_MODEL_Q6", ""), "Q6_K"),       # Best quality
-    (8500,  os.getenv("E3N_STRONG_MODEL", "e3n-qwen14b"), "Q4_K_M"),  # Current default
-    (6500,  os.getenv("E3N_STRONG_MODEL_Q3", ""), "Q3_K_M"),    # Good quality, less VRAM
+    (10000, os.getenv("DELTAI_STRONG_MODEL_Q6", ""), "Q6_K"),       # Best quality
+    (8500,  os.getenv("DELTAI_STRONG_MODEL", "deltai-qwen14b"), "Q4_K_M"),  # Current default
+    (6500,  os.getenv("DELTAI_STRONG_MODEL_Q3", ""), "Q3_K_M"),    # Good quality, less VRAM
 ]
 
 _QUANT_TIERS_3B = [
-    (2500, os.getenv("E3N_MODEL", "e3n-qwen3b"), "Q4_K_M"),     # Current default
-    (1200, os.getenv("E3N_MODEL_Q2", ""), "Q2_K"),               # Emergency minimal
+    (2500, os.getenv("DELTAI_MODEL", "deltai-qwen3b"), "Q4_K_M"),     # Current default
+    (1200, os.getenv("DELTAI_MODEL_Q2", ""), "Q2_K"),               # Emergency minimal
 ]
 
 
@@ -744,22 +744,22 @@ def get_backup_model(primary: str) -> str | None:
     Returns None if backups are disabled or no backup exists.
 
     Chain:
-      e3n-qwen14b → e3n-nemo → e3n → None
-      e3n-qwen3b  → e3n      → None
+      deltai-qwen14b → deltai-nemo → e3n → None
+      deltai-qwen3b  → e3n      → None
     """
     if not _env_bool("BACKUP_ENABLED", True):
         return None
 
-    backup_strong = os.getenv("E3N_BACKUP_STRONG_MODEL", "e3n-nemo").strip()
-    backup_default = os.getenv("E3N_BACKUP_MODEL", "e3n").strip()
+    backup_strong = os.getenv("DELTAI_BACKUP_STRONG_MODEL", "deltai-nemo").strip()
+    backup_default = os.getenv("DELTAI_BACKUP_MODEL", "deltai").strip()
 
-    strong_model = os.getenv("E3N_STRONG_MODEL", "e3n-qwen14b").strip()
-    default_model = os.getenv("E3N_MODEL", "e3n-qwen3b").strip()
+    strong_model = os.getenv("DELTAI_STRONG_MODEL", "deltai-qwen14b").strip()
+    default_model = os.getenv("DELTAI_MODEL", "deltai-qwen3b").strip()
 
     mapping = {
-        strong_model: backup_strong,     # e3n-qwen14b → e3n-nemo
-        default_model: backup_default,   # e3n-qwen3b  → e3n
-        backup_strong: backup_default,   # e3n-nemo    → e3n (second fallback)
+        strong_model: backup_strong,     # deltai-qwen14b → deltai-nemo
+        default_model: backup_default,   # deltai-qwen3b  → e3n
+        backup_strong: backup_default,   # deltai-nemo    → e3n (second fallback)
     }
     return mapping.get(primary)
 
@@ -927,9 +927,9 @@ def _pick_local_model() -> tuple[str, bool, str | None, int | None, int | None]:
     num_ctx: context window size override (None = model default).
     backup_model is the emergency fallback if the primary fails.
     """
-    strong_model = os.getenv("E3N_STRONG_MODEL", "e3n-qwen14b")
-    default_model = os.getenv("E3N_MODEL", "e3n-qwen3b")
-    sim_model = os.getenv("E3N_SIM_MODEL", default_model)
+    strong_model = os.getenv("DELTAI_STRONG_MODEL", "deltai-qwen14b")
+    default_model = os.getenv("DELTAI_MODEL", "deltai-qwen3b")
+    sim_model = os.getenv("DELTAI_SIM_MODEL", default_model)
 
     tier_a_min = _env_int("VRAM_TIER_A_MIN_MB", 9000)
     tier_ab_min = _env_int("VRAM_TIER_AB_MIN_MB", 5000)  # partial offload zone

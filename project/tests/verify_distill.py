@@ -1,7 +1,7 @@
-"""Verification suite for E3N knowledge distillation pipeline."""
+"""Verification suite for deltai knowledge distillation pipeline."""
 import sys, os, time, json, tempfile
 
-os.environ.setdefault('TRAINING_PATH', r'C:\e3n\data\training')
+os.environ.setdefault('TRAINING_PATH', r'~/deltai/data\training')
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 passed = 0
@@ -70,7 +70,7 @@ def run():
           f'{len(training._ERROR_INDICATORS)} indicators')
 
     # Dataset auto-creation
-    test_teacher_ds = "e3n-verify-teacher-test"
+    test_teacher_ds = "deltai-verify-teacher-test"
     try:
         path = training._dataset_path(test_teacher_ds)
         if os.path.exists(path):
@@ -94,9 +94,9 @@ def run():
     print('\n--- 3. Dataset Blending ---')
 
     # Create two test datasets
-    ds_a = "e3n-verify-blend-a"
-    ds_b = "e3n-verify-blend-b"
-    ds_out = "e3n-verify-blend-out"
+    ds_a = "deltai-verify-blend-a"
+    ds_b = "deltai-verify-blend-b"
+    ds_out = "deltai-verify-blend-out"
 
     try:
         # Setup
@@ -146,7 +146,7 @@ def run():
               result2.get("status") == "error")
 
         # Nonexistent source handled gracefully
-        ds_out2 = "e3n-verify-blend-out2"
+        ds_out2 = "deltai-verify-blend-out2"
         result3 = training.blend_datasets(
             [{"dataset": "nonexistent-ds-xyz", "weight": 1.0}],
             output_name=ds_out2,
@@ -155,7 +155,7 @@ def run():
               result3.get("status") == "error")
 
         # max_examples cap
-        ds_out3 = "e3n-verify-blend-out3"
+        ds_out3 = "deltai-verify-blend-out3"
         result4 = training.blend_datasets(
             [{"dataset": ds_a, "weight": 1.0, "max_examples": 3}],
             output_name=ds_out3,
@@ -165,8 +165,8 @@ def run():
               f'total={result4.get("total")}')
 
         # Reproducibility with same seed
-        ds_out4 = "e3n-verify-blend-out4"
-        ds_out5 = "e3n-verify-blend-out5"
+        ds_out4 = "deltai-verify-blend-out4"
+        ds_out5 = "deltai-verify-blend-out5"
         r1 = training.blend_datasets(
             [{"dataset": ds_a, "weight": 0.7}, {"dataset": ds_b, "weight": 0.3}],
             output_name=ds_out4, seed=42,
@@ -180,8 +180,8 @@ def run():
               f'{r1.get("breakdown")} vs {r2.get("breakdown")}')
 
     finally:
-        for ds in [ds_a, ds_b, ds_out, "e3n-verify-blend-out2",
-                    "e3n-verify-blend-out3", "e3n-verify-blend-out4", "e3n-verify-blend-out5"]:
+        for ds in [ds_a, ds_b, ds_out, "deltai-verify-blend-out2",
+                    "deltai-verify-blend-out3", "deltai-verify-blend-out4", "deltai-verify-blend-out5"]:
             path = training._dataset_path(ds)
             if os.path.exists(path):
                 os.remove(path)
@@ -207,7 +207,7 @@ def run():
 
     # Distill mode requires teacher_dataset
     result = training.start_training(
-        dataset_name="e3n-auto",
+        dataset_name="deltai-auto",
         mode="distill",
         teacher_dataset=None,
     )
@@ -215,11 +215,11 @@ def run():
           result.get("status") == "error" and "teacher_dataset" in result.get("reason", ""))
 
     # Distill mode rejects empty teacher dataset
-    empty_ds = "e3n-verify-empty-teacher"
+    empty_ds = "deltai-verify-empty-teacher"
     try:
         training.create_dataset(empty_ds)
         result = training.start_training(
-            dataset_name="e3n-auto",
+            dataset_name="deltai-auto",
             mode="distill",
             teacher_dataset=empty_ds,
         )
@@ -232,7 +232,7 @@ def run():
 
     # Distill mode rejects nonexistent teacher dataset
     result = training.start_training(
-        dataset_name="e3n-auto",
+        dataset_name="deltai-auto",
         mode="distill",
         teacher_dataset="nonexistent-teacher-xyz",
     )

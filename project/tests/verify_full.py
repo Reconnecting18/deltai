@@ -1,7 +1,7 @@
-"""Full verification suite for E3N training pipeline and all subsystems."""
+"""Full verification suite for deltai training pipeline and all subsystems."""
 import sys, os, time, asyncio
 
-os.environ.setdefault('TRAINING_PATH', r'C:\e3n\data\training')
+os.environ.setdefault('TRAINING_PATH', r'~/deltai/data\training')
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 passed = 0
@@ -32,15 +32,15 @@ def run():
     ok, reason = training.check_lora_deps()
     check('LoRA deps available', ok, reason or 'READY')
 
-    test_ds = 'e3n-verify-full'
+    test_ds = 'deltai-verify-full'
     training.delete_dataset(test_ds)
     training.create_dataset(test_ds)
     labels = ["VRAM routing", "RAG pipeline", "GPU protection", "telemetry", "split workload"]
     for i in range(5):
         training.add_example(
             test_ds,
-            f'Question {i} about E3N',
-            f'E3N uses a robust system for managing {labels[i]} across operational modes.',
+            f'Question {i} about deltai',
+            f'deltai uses a robust system for managing {labels[i]} across operational modes.',
             'test'
         )
     ds = training.get_dataset(test_ds)
@@ -78,7 +78,7 @@ def run():
     print('\n--- 2. Safety Guards ---')
     import router
 
-    test_ds2 = 'e3n-guard-test'
+    test_ds2 = 'deltai-guard-test'
     training.delete_dataset(test_ds2)
     training.create_dataset(test_ds2)
     training.add_example(test_ds2, 'test',
@@ -124,7 +124,7 @@ def run():
     elapsed = (time.time() - start) * 1000
     check('100 rapid routes', elapsed < 10000, f'{elapsed:.0f}ms, {elapsed/100:.1f}ms/query')
 
-    d = asyncio.run(router.route('What is E3N?'))
+    d = asyncio.run(router.route('What is deltai?'))
     check('Normal routing', d.backend in ('ollama', 'anthropic'), f'{d.backend}/{d.model}')
 
     # === 4. PERSISTENCE ===
