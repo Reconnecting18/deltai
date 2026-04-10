@@ -31,4 +31,4 @@ jobs:
         run: mypy src/delta --ignore-missing-imports
 
       - name: Run tests
-        run: pytest -q tests/delta
+        run: python -m pytest -q
