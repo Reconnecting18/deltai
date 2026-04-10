@@ -9,6 +9,7 @@ from pathlib import Path
 
 from delta.storage.db import connect
 
+
 def store_memory_item(
     db_path: Path,
     session_id: str | None,
