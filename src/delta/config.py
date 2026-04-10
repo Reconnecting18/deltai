@@ -10,7 +10,6 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-
 APP_DIRNAME = "deltai"
 
 
@@ -54,7 +53,6 @@ class Settings:
     ollama_fast_model: str
     anthropic_api_key: str
     anthropic_model_primary: str
-
 
 
 def load_settings() -> Settings:
