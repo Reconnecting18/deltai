@@ -1,7 +1,9 @@
 # E3N_STATUS.md (deprecated)
 
-**This file is no longer maintained.** It previously held an informal status snapshot and is kept only so old links do not break.
+**This file is no longer maintained.** This project has been rebranded as **deltai**.
 
-For current architecture, build phases, known issues, and feature status, use **[CLAUDE.md](CLAUDE.md)**. For short agent onboarding (Cursor), use **[AGENTS.md](AGENTS.md)**.
+For current architecture, build status, and development context, see **[CLAUDE.md](CLAUDE.md)**.
+For agent/Cursor onboarding, see **[AGENTS.md](AGENTS.md)**.
+For user-facing documentation, see **[README.md](README.md)**.
 
-_Last redirected: 2026-03-31._
+_Last redirected: 2026-04-10._
