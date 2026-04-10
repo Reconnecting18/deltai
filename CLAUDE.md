@@ -117,6 +117,7 @@ Tool categories:
 ### Persistence (project/persistence.py)
 
 SQLite (WAL mode, short-lived connections). Tables: `conversation_history`, `cloud_budget`, `reasoning_traces`, `quality_scores`, `routing_feedback`, `knowledge_gaps`.
+Python 3.11 typically ships with SQLite 3.39+ (WAL-capable). JSON1 support must also be enabled in the Python `sqlite3` build for reasoning-trace JSON queries.
 
 ### Training (project/training.py)
 

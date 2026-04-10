@@ -98,7 +98,14 @@ deltai does **not** know or care what pushed the context. Any service, script, o
 - Linux (any modern distro)
 - [Ollama](https://ollama.com) installed and running (`ollama serve`)
 - Python 3.11+
+- SQLite with JSON1 enabled in Python's `sqlite3` build (required for reasoning trace JSON queries)
 - Node.js (optional — only for the Electron desktop shell)
+
+You can verify JSON1 quickly with:
+
+```bash
+python -c "import sqlite3; c=sqlite3.connect(':memory:'); c.execute(\"select json('{}')\"); print('sqlite json1: ok')"
+```
 
 ### 1. Install
 
@@ -107,7 +114,6 @@ git clone https://github.com/Reconnecting18/deltai
 cd deltai
 
 # Backend
-cd deltai
 python -m venv venv
 source venv/bin/activate
 pip install -e .[dev]
