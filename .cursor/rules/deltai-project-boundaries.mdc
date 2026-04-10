@@ -1,11 +1,11 @@
 ---
-description: E3N scope, UI layout, shell conventions, and style alignment
+description: deltai scope, UI layout, shell conventions, and style alignment
 alwaysApply: true
 ---
 
-# E3N project boundaries
+# deltai project boundaries
 
-- **Scope:** E3N is the AI brain only (routing, RAG, tools, APIs). Do not add game telemetry parsers, UDP listeners, or domain-specific pipelines in-repo. External systems integrate via `POST /ingest` and related endpoints.
+- **Scope:** deltai is the AI brain only (routing, RAG, tools, APIs). Do not add game telemetry parsers, UDP listeners, or domain-specific pipelines in-repo. External systems integrate via `POST /ingest` and related endpoints.
 - **Dashboard UI:** Keep the renderer in a single file: `project/static/index.html` (HTML + CSS + JS together). Do not split into a multi-file frontend unless the project explicitly migrates away from this pattern.
 - **PowerShell:** Do not use `&&` for command chaining. Use `;` or separate commands.
 - **Style:** Match existing naming, structure, and comment density in touched files. Prefer extending existing helpers over parallel implementations.

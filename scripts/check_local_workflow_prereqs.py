@@ -49,12 +49,12 @@ def main() -> int:
     if _PROJECT_DIR not in sys.path:
         sys.path.insert(0, _PROJECT_DIR)
 
-    print("E3N local workflow prereqs (read-only)\n")
+    print("deltai local workflow prereqs (read-only)\n")
 
     all_ok = True
 
-    knowledge = os.getenv("KNOWLEDGE_PATH", r"C:\e3n\data\knowledge")
-    chroma = os.getenv("CHROMADB_PATH", r"C:\e3n\data\chromadb")
+    knowledge = os.getenv("KNOWLEDGE_PATH", r"~/deltai/data\knowledge")
+    chroma = os.getenv("CHROMADB_PATH", r"~/deltai/data\chromadb")
     ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
 
     all_ok &= _check(
@@ -102,13 +102,13 @@ def main() -> int:
         all_ok &= _check("Ollama", False, f"{ollama_url} ({e})")
 
     modelfiles = os.path.join(_REPO_ROOT, "modelfiles")
-    m14 = os.path.join(modelfiles, "E3N-qwen14b.modelfile")
-    m3 = os.path.join(modelfiles, "E3N-qwen3b.modelfile")
+    m14 = os.path.join(modelfiles, "deltai-qwen14b.modelfile")
+    m3 = os.path.join(modelfiles, "deltai-qwen3b.modelfile")
     mf_ok = os.path.isfile(m14) and os.path.isfile(m3)
     all_ok &= _check(
         "modelfiles",
         mf_ok,
-        "E3N-qwen14b + E3N-qwen3b present" if mf_ok else f"expected under {modelfiles}",
+        "deltai-qwen14b + deltai-qwen3b present" if mf_ok else f"expected under {modelfiles}",
     )
 
     workflow_doc = os.path.join(_REPO_ROOT, "docs", "local-model-workflow.md")

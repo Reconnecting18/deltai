@@ -13,7 +13,7 @@ import numpy as np
 
 from .voice_config import VoiceConfig, DEFAULT_CONFIG
 
-logger = logging.getLogger("e3n.voice.playback")
+logger = logging.getLogger("deltai.voice.playback")
 
 # Check for sounddevice
 try:

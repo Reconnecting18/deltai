@@ -1,7 +1,7 @@
 {
-  "name": "e3n",
+  "name": "deltai",
   "version": "1.0.0",
-  "description": "E3N — Local AI Assistant",
+  "description": "deltai — Local AI Assistant",
   "main": "main.js",
   "scripts": {
     "prestart": "node scripts/check-electron.cjs",
@@ -9,8 +9,8 @@
     "build": "electron-builder"
   },
   "build": {
-    "appId": "com.e3n.assistant",
-    "productName": "E3N",
+    "appId": "com.deltai.assistant",
+    "productName": "deltai",
     "win": {
       "target": "nsis",
       "icon": "assets/icon.ico"

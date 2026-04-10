@@ -1,7 +1,7 @@
 """
-E3N Voice Module — STT (Whisper) + TTS (Edge-TTS / espeak fallback)
+deltai Voice Module — STT (Whisper) + TTS (Edge-TTS / espeak fallback)
 
-Provides speech-to-text and text-to-speech capabilities for E3N.
+Provides speech-to-text and text-to-speech capabilities for deltai.
 STT: faster-whisper (CTranslate2 backend) — runs locally on GPU or CPU.
 TTS: edge-tts (Microsoft Edge free TTS API) — high quality, no API key needed.
 
@@ -24,14 +24,14 @@ import tempfile
 import subprocess
 from pathlib import Path
 
-logger = logging.getLogger("e3n.voice")
+logger = logging.getLogger("deltai.voice")
 
 # ── CONFIGURATION ──────────────────────────────────────────────────────
 
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")  # tiny, base, small, medium, large-v3
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "auto")  # auto, cpu, cuda
 WHISPER_COMPUTE = os.getenv("WHISPER_COMPUTE", "float16")  # float16, int8, float32
-TTS_VOICE = os.getenv("TTS_VOICE", "en-US-AndrewNeural")  # E3N's voice — warm American, slightly deeper
+TTS_VOICE = os.getenv("TTS_VOICE", "en-US-AndrewNeural")  # deltai's voice — warm American, slightly deeper
 TTS_RATE = os.getenv("TTS_RATE", "+2%")  # Slightly faster — confident, not rushed
 TTS_PITCH = os.getenv("TTS_PITCH", "-3Hz")  # Slightly deeper than default — calm, not booming
 VOICE_ENABLED = os.getenv("VOICE_ENABLED", "true").lower() in ("true", "1", "yes")
@@ -39,7 +39,7 @@ VOICE_ENABLED = os.getenv("VOICE_ENABLED", "true").lower() in ("true", "1", "yes
 # Vocabulary hint for Whisper — biases transcription toward expected racing/engineering terms
 # This dramatically reduces misinterpretation of technical jargon
 WHISPER_VOCAB_PROMPT = (
-    "E3N, Ethan, thermodynamics, aerodynamics, understeer, oversteer, downforce, drag, "
+    "deltai, Ethan, thermodynamics, aerodynamics, understeer, oversteer, downforce, drag, "
     "Le Mans, Le Mans Ultimate, LMU, telemetry, chicane, apex, stint, degradation, "
     "compound, intermediate, slick, wet, hypercar, LMDh, LMH, GTE, GT3, GT4, ECU, "
     "kinematics, statics, dynamics, calculus, differential equations, integrals, "

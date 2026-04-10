@@ -1,6 +1,6 @@
 """Anthropic cloud fallback adapter.
 
-This module should wrap reusable behavior from E3N's anthropic client,
+This module should wrap reusable behavior from deltai's anthropic client,
 including model fallback and structured error handling.
 """
 

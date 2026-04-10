@@ -2,7 +2,7 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "E3N Electron App",
+      "name": "deltai Electron App",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["start"],
       "cwd": "${workspaceFolder}/app",
@@ -10,7 +10,7 @@
       "autoPort": false
     },
     {
-      "name": "E3N FastAPI Backend (venv)",
+      "name": "deltai FastAPI Backend (venv)",
       "runtimeExecutable": "${workspaceFolder}/project/venv/Scripts/python.exe",
       "runtimeArgs": [
         "-m",
@@ -25,7 +25,7 @@
       "port": 8000
     },
     {
-      "name": "E3N FastAPI Backend (python on PATH)",
+      "name": "deltai FastAPI Backend (python on PATH)",
       "runtimeExecutable": "python",
       "runtimeArgs": [
         "-m",

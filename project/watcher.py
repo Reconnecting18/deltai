@@ -1,5 +1,5 @@
 """
-E3N File Watcher — monitors C:\\e3n\\data\\knowledge\\ for changes.
+deltai File Watcher — monitors ~/deltai/data\\knowledge\\ for changes.
 Auto-ingests new/modified files, removes deleted ones from ChromaDB.
 Runs as a background thread inside the FastAPI process.
 """
@@ -15,7 +15,7 @@ from memory import ingest_file, remove_file, KNOWLEDGE_PATH, SUPPORTED_EXTENSION
 
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB — skip files larger than this
 
-logger = logging.getLogger("e3n.watcher")
+logger = logging.getLogger("deltai.watcher")
 logger.setLevel(logging.INFO)
 if not logger.handlers:
     handler = logging.StreamHandler()

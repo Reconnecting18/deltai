@@ -1,2 +1,2 @@
-# E3N Tool System
-# Tools give E3N the ability to act — not just talk.
+# deltai Tool System
+# Tools give deltai the ability to act — not just talk.

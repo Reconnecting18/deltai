@@ -1,5 +1,5 @@
 """
-E3N Self-Diagnostic Tools — Test Suite
+deltai Self-Diagnostic Tools — Test Suite
 Tests the 3 new tools: self_diagnostics, manage_ollama_models, repair_subsystem
 """
 
@@ -16,7 +16,7 @@ os.environ.setdefault("OLLAMA_URL", "http://localhost:11434")
 os.environ.setdefault("CHROMADB_PATH", os.path.join(os.path.dirname(__file__), "test_chromadb"))
 os.environ.setdefault("KNOWLEDGE_PATH", os.path.join(os.path.dirname(__file__), "test_knowledge"))
 os.environ.setdefault("TRAINING_PATH", os.path.join(os.path.dirname(__file__), "test_training"))
-os.environ.setdefault("SQLITE_PATH", os.path.join(os.path.dirname(__file__), "test_e3n.db"))
+os.environ.setdefault("SQLITE_PATH", os.path.join(os.path.dirname(__file__), "test_deltai.db"))
 
 passed = 0
 failed = 0
@@ -88,7 +88,7 @@ print("\n=== SELF_DIAGNOSTICS TESTS ===\n")
 def test_diag_full():
     from tools.executor import self_diagnostics
     result = self_diagnostics()
-    assert "E3N SELF-DIAGNOSTICS" in result, "Missing header"
+    assert "deltai SELF-DIAGNOSTICS" in result, "Missing header"
     # Should mention all subsystems
     for subsystem in ["Ollama", "ChromaDB", "GPU", "Voice", "Watcher", "Paths", "Backup"]:
         assert subsystem in result or subsystem.lower() in result.lower(), \
@@ -127,7 +127,7 @@ def test_diag_paths():
     from tools.executor import self_diagnostics
     result = self_diagnostics(subsystem="paths")
     assert "PATH" in result.upper(), "Missing paths header"
-    assert "e3n" in result.lower(), "Should reference E3N paths"
+    assert "deltai" in result.lower(), "Should reference deltai paths"
 test_diag_paths()
 
 @test("self_diagnostics(subsystem='watcher') checks watcher")
@@ -175,26 +175,26 @@ def test_models_unload_no_model():
         f"Should require model parameter: {result}"
 test_models_unload_no_model()
 
-@test("manage_ollama_models rejects non-E3N models")
+@test("manage_ollama_models rejects non-deltai models")
 def test_models_allowlist():
     from tools.executor import manage_ollama_models
     result = manage_ollama_models(action="unload", model="llama3:latest")
     assert "ERROR" in result and "allowlist" in result.lower(), \
-        f"Should reject non-E3N model: {result}"
+        f"Should reject non-deltai model: {result}"
     result = manage_ollama_models(action="preload", model="gpt-4")
     assert "ERROR" in result and "allowlist" in result.lower(), \
-        f"Should reject non-E3N model: {result}"
+        f"Should reject non-deltai model: {result}"
 test_models_allowlist()
 
-@test("manage_ollama_models accepts E3N model names")
-def test_models_e3n_accepted():
+@test("manage_ollama_models accepts deltai model names")
+def test_models_deltai_accepted():
     from tools.executor import manage_ollama_models
-    # Unload should not fail with allowlist error for E3N models
-    for model in ["e3n-qwen14b", "e3n-qwen3b", "e3n-nemo", "e3n"]:
+    # Unload should not fail with allowlist error for deltai models
+    for model in ["deltai-qwen14b", "deltai-qwen3b", "deltai-nemo", "deltai"]:
         result = manage_ollama_models(action="unload", model=model)
         assert "allowlist" not in result.lower(), \
-            f"E3N model {model} should be accepted: {result}"
-test_models_e3n_accepted()
+            f"deltai model {model} should be accepted: {result}"
+test_models_deltai_accepted()
 
 @test("manage_ollama_models rejects invalid action")
 def test_models_invalid_action():
@@ -210,7 +210,7 @@ def test_models_sim_guard():
     from tools.executor import manage_ollama_models
     import router
     with patch.object(router, 'is_sim_running', return_value=True):
-        result = manage_ollama_models(action="preload", model="e3n-qwen14b")
+        result = manage_ollama_models(action="preload", model="deltai-qwen14b")
         assert "BLOCKED" in result or "sim" in result.lower(), \
             f"Should block 14B preload during sim: {result}"
 test_models_sim_guard()

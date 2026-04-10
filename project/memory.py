@@ -1,5 +1,5 @@
 """
-E3N Memory System — ChromaDB + Ollama Embeddings
+deltai Memory System — ChromaDB + Ollama Embeddings
 Handles ingestion, chunking, storage, and retrieval of knowledge documents.
 """
 
@@ -14,12 +14,12 @@ import httpx
 import chromadb
 from chromadb.config import Settings
 
-logger = logging.getLogger("e3n.memory")
+logger = logging.getLogger("deltai.memory")
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-EMBED_MODEL = os.getenv("E3N_EMBED_MODEL", "nomic-embed-text")
-CHROMADB_PATH = os.getenv("CHROMADB_PATH", r"C:\e3n\data\chromadb")
-KNOWLEDGE_PATH = os.getenv("KNOWLEDGE_PATH", r"C:\e3n\data\knowledge")
+EMBED_MODEL = os.getenv("DELTAI_EMBED_MODEL", "nomic-embed-text")
+CHROMADB_PATH = os.getenv("CHROMADB_PATH", r"~/deltai/data\chromadb")
+KNOWLEDGE_PATH = os.getenv("KNOWLEDGE_PATH", r"~/deltai/data\knowledge")
 
 # ── CHUNKING ────────────────────────────────────────────────────────────
 
@@ -133,7 +133,7 @@ def get_collection():
         settings=Settings(anonymized_telemetry=False),
     )
     _collection = _client.get_or_create_collection(
-        name="e3n_knowledge",
+        name="deltai_knowledge",
         metadata={"hnsw:space": "cosine"},
     )
     return _collection
@@ -890,7 +890,7 @@ def _freshen_metadata(collection, chunk_id: str, tags: list[str] | None = None,
 
 
 # ── INGEST CONNECTOR ─────────────────────────────────────────────────────
-# Allows external services to push structured context into E3N's RAG memory.
+# Allows external services to push structured context into deltai's RAG memory.
 # Each entry gets a source tag, timestamp, and optional TTL for auto-expiry.
 
 def ingest_context(source: str, context: str, ttl: int = 0,

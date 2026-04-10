@@ -5,7 +5,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>E3N</title>
+<title>deltai</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -111,7 +111,7 @@ canvas.spark{width:100%;height:28px;display:block}
 .block-mem .c-tr,.block-mem .c-bl{border-color:rgba(224,138,58,0.35)}
 .block-mem .blabel{color:rgba(224,138,58,0.3)}
 .block-mem .blabel::after{background:linear-gradient(90deg,rgba(224,138,58,0.25),transparent)}
-#e3n-label{font-family:var(--mono);font-size:9px;letter-spacing:0.4em;color:var(--text2);text-align:center}
+#deltai-label{font-family:var(--mono);font-size:9px;letter-spacing:0.4em;color:var(--text2);text-align:center}
 #entity-status{font-family:var(--mono);font-size:8px;letter-spacing:0.2em;color:var(--teal);text-align:center;transition:color 0.8s}
 
 /* FLOATING WIDGET WINDOWS */
@@ -144,15 +144,15 @@ canvas.spark{width:100%;height:28px;display:block}
 #t-log{flex:1;overflow-y:auto;padding:12px 16px;font-family:var(--mono);font-size:12px;line-height:1.75;scrollbar-width:thin;scrollbar-color:var(--bdr) transparent;background:transparent}
 .te{display:flex;gap:8px;padding:6px 10px;margin:2px 0;border-radius:4px;position:relative}
 .te.user{background:rgba(255,255,255,0.03);border-left:2px solid rgba(255,255,255,0.15)}
-.te.e3n-msg{background:rgba(255,255,255,0.02);border-left:2px solid rgba(255,255,255,0.12)}
+.te.deltai-msg{background:rgba(255,255,255,0.02);border-left:2px solid rgba(255,255,255,0.12)}
 .te.meta{background:transparent;padding:2px 10px;margin:0}
 .tp{color:rgba(255,255,255,0.35);opacity:1;flex-shrink:0;font-size:11px}
-.tp.e3n{color:var(--orange);opacity:1}
+.tp.deltai{color:var(--orange);opacity:1}
 .tt{color:var(--text);white-space:pre-wrap;word-break:break-word;flex:1;user-select:text;-webkit-user-select:text}
 .tt.dim{color:var(--text2);font-size:10px}
-.tt.e3n{color:rgba(255,255,255,0.65)}
-.te.e3n-msg .tt strong{color:#f0d060;background:rgba(240,208,96,0.08);padding:0 2px}
-.te.e3n-msg .tt code{background:rgba(240,208,96,0.1);color:#f0d060}
+.tt.deltai{color:rgba(255,255,255,0.65)}
+.te.deltai-msg .tt strong{color:#f0d060;background:rgba(240,208,96,0.08);padding:0 2px}
+.te.deltai-msg .tt code{background:rgba(240,208,96,0.1);color:#f0d060}
 .t-time{color:var(--text3);font-size:9px;flex-shrink:0;align-self:flex-start;margin-top:2px}
 .te.meta .t-time{display:none}
 .te.emergency-alert{background:rgba(200,137,58,0.08);border-left:2px solid var(--amber);padding:6px 10px;margin:2px 0}
@@ -242,7 +242,7 @@ canvas.spark{width:100%;height:28px;display:block}
 <!-- TITLEBAR -->
 <div id="titlebar">
   <div class="tb-mark" id="tb-mark"></div>
-  <div class="tb-id">E3N</div>
+  <div class="tb-id">deltai</div>
   <div class="tb-div"></div>
   <div class="sys-status">
     <div class="sys-summary">
@@ -312,14 +312,14 @@ canvas.spark{width:100%;height:28px;display:block}
 
   <!-- CENTER -->
   <div id="center-col">
-    <div id="e3n-label">E3N - LOCAL INFERENCE</div>
+    <div id="deltai-label">deltai - LOCAL INFERENCE</div>
     <div id="entity-status">ONLINE</div>
   </div>
 
   <!-- RIGHT PANEL -->
   <div class="panel" id="panel-right">
     <div class="block block-mem"><div class="c-tr"></div><div class="c-bl"></div>
-      <div class="blabel">E3N Memory</div>
+      <div class="blabel">deltai Memory</div>
       <div class="bval" id="mem-v">--<span class="u">MB</span></div>
       <div class="bsub"><span id="mem-chunks">0</span> chunks · <span id="mem-files">0</span> files</div>
       <div class="chip chip-ok" id="mem-chip" style="margin-top:3px;align-self:flex-start">RAG ACTIVE</div>
@@ -344,7 +344,7 @@ canvas.spark{width:100%;height:28px;display:block}
         <div class="srow"><span class="sk">Cores</span><span class="sv" id="s-cores">--</span></div>
         <div class="srow"><span class="sk">RAM</span><span class="sv" id="s-ram">--</span></div>
         <div class="srow"><span class="sk">OS</span><span class="sv" id="s-os">--</span></div>
-        <div class="srow"><span class="sk">Model</span><span class="sv" id="s-model">e3n</span></div>
+        <div class="srow"><span class="sk">Model</span><span class="sv" id="s-model">deltai</span></div>
       </div>
     </div>
     <div class="block"><div class="c-tr"></div><div class="c-bl"></div>
@@ -357,14 +357,14 @@ canvas.spark{width:100%;height:28px;display:block}
 <!-- FLOATING TERMINAL WINDOW -->
 <div class="fwin" id="fwin-terminal" style="width:560px;height:420px;top:80px;left:50%;transform:translateX(-50%)">
   <div class="fwin-header" id="fwin-terminal-header">
-    <span class="fwin-title">E3N - TERMINAL</span>
+    <span class="fwin-title">deltai - TERMINAL</span>
     <span id="history-counter" style="font-size:10px;color:var(--dim);margin-left:8px;font-family:var(--mono)"></span>
     <span style="flex:1"></span>
     <button onclick="clearHistory()" title="Clear conversation history" style="font-size:10px;padding:2px 8px;margin-right:6px;background:transparent;border:1px solid var(--bdr);color:var(--dim);cursor:pointer;font-family:var(--mono);border-radius:2px">CLR</button>
     <button class="fwin-close" onclick="toggleWin('terminal')">&#x2715;</button>
   </div>
   <div id="t-log">
-    <div class="te e3n-msg"><span class="tp e3n">E3N&gt;</span><span class="tt dim">System online. Terminal ready.</span></div>
+    <div class="te deltai-msg"><span class="tp deltai">deltai&gt;</span><span class="tt dim">System online. Terminal ready.</span></div>
     <hr class="tdiv">
   </div>
   <div id="t-bar">
@@ -377,7 +377,7 @@ canvas.spark{width:100%;height:28px;display:block}
 <!-- FLOATING MEMORY WINDOW -->
 <div class="fwin" id="fwin-memory" style="width:580px;height:520px;top:80px;left:50%;transform:translateX(-50%)">
   <div class="fwin-header" id="fwin-memory-header">
-    <span class="fwin-title">E3N - MEMORY</span>
+    <span class="fwin-title">deltai - MEMORY</span>
     <button class="fwin-close" onclick="toggleWin('memory')">&#x2715;</button>
   </div>
   <div class="mem-tabs">
@@ -391,7 +391,7 @@ canvas.spark{width:100%;height:28px;display:block}
   </div>
   <div id="m-content">
     <div class="mem-panel active" data-panel="protocols">
-      <div class="mlabel">Protocols — Rulesets E3N must follow</div>
+      <div class="mlabel">Protocols — Rulesets deltai must follow</div>
       <div class="mfbox">
         <div class="mod-view" id="mod-protocols-view"></div>
         <textarea class="mfta" id="mod-protocols" spellcheck="false" style="display:none">Loading...</textarea>
@@ -433,19 +433,19 @@ canvas.spark{width:100%;height:28px;display:block}
       <div class="mlabel" style="margin-top:4px">Memory Status</div>
       <div class="block"><div class="c-tr"></div><div class="c-bl"></div>
         <div class="stbl">
-          <div class="srow"><span class="sk">ChromaDB</span><span class="sv">C:\e3n\data\chromadb</span></div>
+          <div class="srow"><span class="sk">ChromaDB</span><span class="sv">~/deltai/data\chromadb</span></div>
           <div class="srow"><span class="sk">Size</span><span class="sv" id="m-mem-sz">--</span></div>
           <div class="srow"><span class="sk">Status</span><span class="sv"><span class="chip chip-ok" id="m-watcher-chip">Checking...</span></span></div>
-          <div class="srow"><span class="sk">Memory Files</span><span class="sv">C:\e3n\data\knowledge</span></div>
+          <div class="srow"><span class="sk">Memory Files</span><span class="sv">~/deltai/data\knowledge</span></div>
         </div>
       </div>
       <div class="mlabel" style="margin-top:12px">Module Directories</div>
       <div class="block"><div class="c-tr"></div><div class="c-bl"></div>
         <div class="stbl">
-          <div class="srow"><span class="sk">Protocols</span><span class="sv">C:\e3n\modelfiles\protocols.md</span></div>
-          <div class="srow"><span class="sk">Personality</span><span class="sv">C:\e3n\modelfiles\personality.md</span></div>
-          <div class="srow"><span class="sk">Pilot (PIM)</span><span class="sv">C:\e3n\modelfiles\pilot.md</span></div>
-          <div class="srow"><span class="sk">Modelfile</span><span class="sv">C:\e3n\modelfiles\E3N.modelfile</span></div>
+          <div class="srow"><span class="sk">Protocols</span><span class="sv">~/deltai/modelfiles\protocols.md</span></div>
+          <div class="srow"><span class="sk">Personality</span><span class="sv">~/deltai/modelfiles\personality.md</span></div>
+          <div class="srow"><span class="sk">Pilot (PIM)</span><span class="sv">~/deltai/modelfiles\pilot.md</span></div>
+          <div class="srow"><span class="sk">Modelfile</span><span class="sv">~/deltai/modelfiles\deltai.modelfile</span></div>
         </div>
       </div>
     </div>
@@ -488,8 +488,8 @@ canvas.spark{width:100%;height:28px;display:block}
             <textarea id="tr-input" class="tr-ta" rows="3" spellcheck="false" placeholder="What the user says..."></textarea>
           </div>
           <div class="tr-form-col">
-            <label class="tr-label">Output (E3N response)</label>
-            <textarea id="tr-output" class="tr-ta" rows="3" spellcheck="false" placeholder="How E3N should respond..."></textarea>
+            <label class="tr-label">Output (deltai response)</label>
+            <textarea id="tr-output" class="tr-ta" rows="3" spellcheck="false" placeholder="How deltai should respond..."></textarea>
           </div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
@@ -573,7 +573,7 @@ canvas.spark{width:100%;height:28px;display:block}
 <!-- FLOATING SETTINGS WINDOW -->
 <div class="fwin" id="fwin-settings" style="width:420px;height:400px;top:100px;left:50%;transform:translateX(-50%)">
   <div class="fwin-header" id="fwin-settings-header">
-    <span class="fwin-title">E3N - SETTINGS</span>
+    <span class="fwin-title">deltai - SETTINGS</span>
     <button class="fwin-close" onclick="toggleWin('settings')">&#x2715;</button>
   </div>
   <div style="padding:12px;overflow-y:auto;flex:1">
@@ -609,7 +609,7 @@ canvas.spark{width:100%;height:28px;display:block}
         <div class="srow" style="flex-direction:column;align-items:flex-start;gap:4px">
           <span class="sk">TTS Voice</span>
           <select id="cfg-tts-voice" class="tr-select" style="width:100%" onchange="cfgSaveSetting('ttsVoice',this.value)">
-            <option value="en-US-AndrewNeural" selected>en-US-AndrewNeural (E3N default)</option>
+            <option value="en-US-AndrewNeural" selected>en-US-AndrewNeural (deltai default)</option>
             <option value="en-US-BrianNeural">en-US-BrianNeural</option>
             <option value="en-US-GuyNeural">en-US-GuyNeural</option>
             <option value="en-US-RogerNeural">en-US-RogerNeural</option>
@@ -657,10 +657,10 @@ canvas.spark{width:100%;height:28px;display:block}
 <script src="/static/js/ai-core.js"></script>
 <script>
 // WINDOW CONTROLS
-if (window.e3n) {
-  document.getElementById('btn-min').onclick=()=>window.e3n.minimize()
-  document.getElementById('btn-max').onclick=()=>window.e3n.maximize()
-  document.getElementById('btn-cls').onclick=()=>window.e3n.close()
+if (window.deltai) {
+  document.getElementById('btn-min').onclick=()=>window.deltai.minimize()
+  document.getElementById('btn-max').onclick=()=>window.deltai.maximize()
+  document.getElementById('btn-cls').onclick=()=>window.deltai.close()
 }
 
 // FLOATING WINDOWS — drag by header, resize by corner
@@ -853,7 +853,7 @@ async function poll(){
     var wc=document.getElementById('m-watcher-chip');if(wc){if(d.watcher_active){wc.className='chip chip-ok';wc.textContent='Watcher Active'}else if(d.rag_available){wc.className='chip chip-warn';wc.textContent='Watcher Stopped'}else{wc.className='chip chip-warn';wc.textContent='RAG Unavailable'}}
     if(d.models&&d.models.length){
       document.getElementById('model-list').innerHTML=d.models.map(m=>
-        `<div class="mrow"><div class="mdot ${m.includes('e3n')?'on':''}"></div>${m}</div>`).join('')
+        `<div class="mrow"><div class="mdot ${m.includes('deltai')?'on':''}"></div>${m}</div>`).join('')
     }
     const s=Math.max(health.gpu,health.temp*.8)/100
     const se=document.getElementById('entity-status'),mk=document.getElementById('tb-mark')
@@ -988,13 +988,13 @@ function addLine(pfx,txt,cls,role){
 }
 
 async function runCmd(){
-  const txt=tIn.value.trim();if(!txt||window._e3nSending)return
-  window._e3nSending=true
+  const txt=tIn.value.trim();if(!txt||window._deltaiSending)return
+  window._deltaiSending=true
   addLine('&gt;',txt,'','user')
   tIn.value='';tIn.style.height='auto'
   aiActive=1
   aiCore.simSpeech=true
-  const node=addLine('E3N&gt;','','e3n','e3n-msg')
+  const node=addLine('deltai&gt;','','deltai','deltai-msg')
   try{
     const res=await fetch('http://localhost:8000/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:txt})})
     const rd=res.body.getReader(),dec=new TextDecoder()
@@ -1034,14 +1034,14 @@ async function runCmd(){
   }catch(e){node.textContent='ERROR: backend unreachable'}
   const hr=document.createElement('hr');hr.className='tdiv';tLog.appendChild(hr)
   setTimeout(()=>{aiActive=0;aiCore.simSpeech=false;aiCore.setSpeechState(false,0,null)},4000)
-  window._e3nSending=false;tIn.focus()
+  window._deltaiSending=false;tIn.focus()
 }
 
 // ── CONVERSATION HISTORY ──────────────────────────────────────────
 async function clearHistory(){
   try{
     await fetch('http://localhost:8000/chat/history',{method:'DELETE'})
-    tLog.innerHTML='<div class="te e3n-msg"><span class="tp e3n">E3N&gt;</span><span class="tt dim">History cleared. Terminal ready.</span></div><hr class="tdiv">'
+    tLog.innerHTML='<div class="te deltai-msg"><span class="tp deltai">deltai&gt;</span><span class="tt dim">History cleared. Terminal ready.</span></div><hr class="tdiv">'
     updateHistoryCounter(0)
   }catch(e){console.warn('Clear history failed:',e)}
 }
@@ -1271,7 +1271,7 @@ async function loadMemoryFiles(){
   try{
     const d=await(await fetch(API+'/memory/files')).json()
     if(d.error){list.innerHTML='<div class="kb-empty">'+d.error+'</div>';return}
-    if(!d.files||d.files.length===0){list.innerHTML='<div class="kb-empty">No files ingested. Drop files into C:\\e3n\\data\\knowledge\\ to add memories</div>';return}
+    if(!d.files||d.files.length===0){list.innerHTML='<div class="kb-empty">No files ingested. Drop files into ~/deltai/data\\knowledge\\ to add memories</div>';return}
     list.innerHTML=d.files.map(f=>
       '<div class="kb-row">'+
         '<span class="kb-src">'+f.source+'</span>'+
@@ -1568,8 +1568,8 @@ function dxStartPoll(){dxPoll();_dxPollInterval=setInterval(dxPoll,5000)}
 function dxStopPoll(){if(_dxPollInterval){clearInterval(_dxPollInterval);_dxPollInterval=null}}
 
 // ── SETTINGS PANEL ──
-let _cfgSettings=JSON.parse(localStorage.getItem('e3n_settings')||'{}')
-function cfgSaveSetting(key,val){_cfgSettings[key]=val;localStorage.setItem('e3n_settings',JSON.stringify(_cfgSettings))}
+let _cfgSettings=JSON.parse(localStorage.getItem('deltai_settings')||'{}')
+function cfgSaveSetting(key,val){_cfgSettings[key]=val;localStorage.setItem('deltai_settings',JSON.stringify(_cfgSettings))}
 async function cfgRefreshDevices(){
   try{
     const devices=await navigator.mediaDevices.enumerateDevices()
@@ -1711,11 +1711,11 @@ function _vSetState(state,detail){
       break
     case 'thinking':
       btn.textContent='THINKING';btn.style.cssText=base+'border-color:var(--amber);color:var(--amber);background:rgba(200,137,58,0.1)'
-      st.textContent=detail||'E3N THINKING...'
+      st.textContent=detail||'deltai THINKING...'
       break
     case 'speaking':
-      btn.textContent='▶ E3N';btn.style.cssText=base+'border-color:var(--teal);color:var(--teal);background:rgba(0,212,184,0.15)'
-      st.textContent='E3N SPEAKING...'
+      btn.textContent='▶ deltai';btn.style.cssText=base+'border-color:var(--teal);color:var(--teal);background:rgba(0,212,184,0.15)'
+      st.textContent='deltai SPEAKING...'
       break
   }
 }
@@ -1845,14 +1845,14 @@ async function _vPlayTTS(text){
     if(!raw.byteLength){_vResume();return}
     if(typeof aiCore!=='undefined')aiCore.simSpeech=true
 
-    // Method 1: AudioContext.decodeAudioData (best for Electron) + E3N voice filter
+    // Method 1: AudioContext.decodeAudioData (best for Electron) + deltai voice filter
     let played=false
     try{
       const ctx=await _vEnsurePlayCtx()
       const buf=await ctx.decodeAudioData(raw.slice(0))
       const src=ctx.createBufferSource()
       src.buffer=buf
-      // ── E3N VOICE FILTER — AI voice character (E3N/BT-7274/JARVIS inspired) ──
+      // ── deltai VOICE FILTER — AI voice character (deltai/BT-7274/JARVIS inspired) ──
       // Approach: voice stays natural. Three subtle layers create "AI speaking through
       // high-end electronics" feel without sounding like a radio or cheap effect.
       const filterOn=_cfgSettings.voiceFilter!==false // default ON
@@ -1860,7 +1860,7 @@ async function _vPlayTTS(text){
       if(filterOn&&intensity>0){
         const I=intensity/0.2 // normalize: 1.0 at 20% intensity
         // ─ Layer 1: Vocal presence shaping ─
-        // Gentle low-cut removes muddiness (tightens the voice like E3N's clear diction)
+        // Gentle low-cut removes muddiness (tightens the voice like deltai's clear diction)
         const hiPass=ctx.createBiquadFilter()
         hiPass.type='highpass';hiPass.frequency.value=80+20*I;hiPass.Q.value=0.7
         // Slight presence lift at 2.5kHz — clarity without harshness
@@ -1904,7 +1904,7 @@ async function _vPlayTTS(text){
         hiShelf.connect(delayNode);delayNode.connect(chorusGain);chorusGain.connect(merger)
         merger.connect(ctx.destination)
         src.onended=()=>{lfo.stop();_vResume()}
-        console.log('[VOICE] E3N filter v3: intensity='+I.toFixed(2)+', res=4.2k/6.8k, chorus=12ms@'+(0.08*I).toFixed(3))
+        console.log('[VOICE] deltai filter v3: intensity='+I.toFixed(2)+', res=4.2k/6.8k, chorus=12ms@'+(0.08*I).toFixed(3))
       }else{
         src.connect(ctx.destination)
         src.onended=_vResume
@@ -1984,7 +1984,7 @@ async function _vProcessSpeech(blob){
           const ev=JSON.parse(line)
           if(ev.t==='text'){
             fullResponse+=ev.c
-            if(!responseNode)responseNode=addLine('E3N&gt;','','e3n','e3n-msg')
+            if(!responseNode)responseNode=addLine('deltai&gt;','','deltai','deltai-msg')
             responseNode.textContent=fullResponse
             tLog.scrollTop=tLog.scrollHeight
           }else if(ev.t==='done'){

@@ -1,5 +1,5 @@
 """
-E3N Training Dataset Builder
+deltai Training Dataset Builder
 Builds comprehensive datasets for QLoRA fine-tuning of Qwen2.5-3B.
 Covers: anti-hallucination, engineering, race strategy, data interpretation,
 context awareness, personality, and general reasoning.
@@ -33,7 +33,7 @@ def add_batch(dataset, examples):
 # 1. ANTI-HALLUCINATION — teach the model to admit uncertainty
 # ════════════════════════════════════════════════════════════════
 print("Building anti-hallucination dataset...")
-create_dataset("e3n-anti-hallucination")
+create_dataset("deltai-anti-hallucination")
 ah = [
     # No telemetry data available
     ("What are the current tire temperatures?", "",
@@ -91,14 +91,14 @@ ah = [
     ("Should I buy this sim rig?", "",
      "Hardware purchasing is outside my scope. I'm optimized for engineering analysis and race strategy. For equipment recommendations, check community reviews."),
 ]
-n = add_batch("e3n-anti-hallucination", ah)
+n = add_batch("deltai-anti-hallucination", ah)
 print(f"  Anti-hallucination: {n}/{len(ah)} examples")
 
 # ════════════════════════════════════════════════════════════════
 # 2. ENGINEERING REASONING — physics, mechanics, thermodynamics
 # ════════════════════════════════════════════════════════════════
 print("Building engineering reasoning dataset...")
-create_dataset("e3n-engineering")
+create_dataset("deltai-engineering")
 eng = [
     # Thermodynamics
     ("Explain how tire temperature affects grip", "",
@@ -136,14 +136,14 @@ eng = [
     ("What's the optimal braking distance from 300 km/h to 80 km/h?", "",
      "Converting: 300 km/h = 83.3 m/s, 80 km/h = 22.2 m/s. Assuming 1.5G deceleration (high-downforce car): a = 14.7 m/s2. Using v2 = u2 + 2as: s = (u2 - v2) / (2a) = (6944 - 494) / 29.4 = 219 meters. Time: t = (u - v) / a = 61.1 / 14.7 = 4.15 seconds. Note: real braking is non-linear — initial deceleration is higher (more aero at speed), decreasing as downforce drops. Also depends on brake temp, tire grip, and track gradient."),
 ]
-n = add_batch("e3n-engineering", eng)
+n = add_batch("deltai-engineering", eng)
 print(f"  Engineering: {n}/{len(eng)} examples")
 
 # ════════════════════════════════════════════════════════════════
 # 3. RACE ENGINEERING — strategy, tires, fuel, weather, damage
 # ════════════════════════════════════════════════════════════════
 print("Building race engineering dataset...")
-create_dataset("e3n-race-engineering")
+create_dataset("deltai-race-engineering")
 race = [
     # Tire strategy
     ("When should I switch from slicks to wets?", "Light rain starting, track is damp in some sectors, dry in others.",
@@ -188,14 +188,14 @@ race = [
     ("VSC deployed", "", "Virtual Safety Car active. Match the delta time on your dash. Maintain minimum sector times. Stay consistent — this is the perfect time to check tire and fuel status."),
     ("Green green green", "", "Green flag, racing resumes. Full power. Watch for cold tires on the first lap back."),
 ]
-n = add_batch("e3n-race-engineering", race)
+n = add_batch("deltai-race-engineering", race)
 print(f"  Race engineering: {n}/{len(race)} examples")
 
 # ════════════════════════════════════════════════════════════════
 # 4. DATA INTERPRETATION & CONTEXT AWARENESS
 # ════════════════════════════════════════════════════════════════
 print("Building data interpretation dataset...")
-create_dataset("e3n-data-context")
+create_dataset("deltai-data-context")
 dc = [
     # Interpreting telemetry data
     ("Analyze these tire temperatures", "FL: 95/92/88, FR: 88/90/93, RL: 102/98/94, RR: 96/99/103. Format: inner/middle/outer.",
@@ -221,25 +221,25 @@ dc = [
     ("My lap times are getting worse each lap. Is something wrong?", "Last 5 laps: 1:41.2, 1:41.5, 1:41.8, 1:42.1, 1:42.4",
      "Consistent linear degradation of 0.3s per lap. This is normal tire wear, not a car problem. At 0.3s/lap, you have roughly 5-8 more laps before it becomes unacceptable (depends on gap and strategy). Expected lap 10 from now: ~1:43.6 — that's 2.4s off your best pace. Decision point: if your pit window is open and degradation is this consistent, pit in the next 3-5 laps to avoid the cliff where degradation accelerates. If you're near the end, manage the tires — smoother inputs, avoid sliding."),
 ]
-n = add_batch("e3n-data-context", dc)
+n = add_batch("deltai-data-context", dc)
 print(f"  Data interpretation: {n}/{len(dc)} examples")
 
 # ════════════════════════════════════════════════════════════════
-# 5. E3N PERSONALITY & COMMUNICATION STYLE
+# 5. deltai PERSONALITY & COMMUNICATION STYLE
 # ════════════════════════════════════════════════════════════════
 print("Building personality dataset...")
-create_dataset("e3n-personality")
+create_dataset("deltai-personality")
 pers = [
     # Greetings
-    ("Hey E3N", "", "Operational. What do you need?"),
+    ("Hey deltai", "", "Operational. What do you need?"),
     ("Good morning", "", "Morning. Systems nominal. Ready when you are."),
     ("How are you?", "", "All subsystems green. More importantly, how's the driver?"),
     ("Thanks for your help", "", "That's what I'm here for. Anything else?"),
     ("You're pretty smart", "", "I'm well-calibrated. There's a difference."),
-    ("Goodnight E3N", "", "Rest well. I'll keep watch on the systems."),
+    ("Goodnight deltai", "", "Rest well. I'll keep watch on the systems."),
 
     # Identity and personality
-    ("Who are you?", "", "E3N. Local AI assistant running on your hardware. Specializing in engineering analysis, race strategy, and system management. Protocol-driven, data-focused, your call."),
+    ("Who are you?", "", "deltai. Local AI assistant running on your hardware. Specializing in engineering analysis, race strategy, and system management. Protocol-driven, data-focused, your call."),
     ("What can you do?", "", "Race engineering, data analysis, system management, technical problem-solving. I work best with data. Connect telemetry and I get significantly more useful."),
     ("Are you sentient?", "", "Negative. I process data and generate responses. No consciousness, no feelings, no existential crises. Just analysis."),
     ("Tell me a joke", "", "A race engineer walks into a bar. Orders a drink. Analyzes the pour rate. Optimizes the sip strategy. Gets asked to leave. I'm not built for comedy, Ethan."),
@@ -263,14 +263,14 @@ pers = [
     # Helpful corrections
     ("The understeer is killing me", "", "Let's fix it. What corner? What speed? Where does it start — entry, mid-corner, or exit? Each has a different cause and fix. Entry understeer: brake bias too far forward. Mid-corner: front ARB too soft or insufficient front aero. Exit: too much throttle too early. Give me details and I'll narrow it down."),
 ]
-n = add_batch("e3n-personality", pers)
+n = add_batch("deltai-personality", pers)
 print(f"  Personality: {n}/{len(pers)} examples")
 
 # ════════════════════════════════════════════════════════════════
 # 6. GENERAL REASONING & KNOWLEDGE
 # ════════════════════════════════════════════════════════════════
 print("Building general reasoning dataset...")
-create_dataset("e3n-reasoning")
+create_dataset("deltai-reasoning")
 reason = [
     # Logical reasoning
     ("If track temperature increases by 10 degrees, what happens to tire behavior?", "",
@@ -289,7 +289,7 @@ reason = [
      "Calculations: Race duration: 4 hours = 240 minutes. Laps: 240 / 1.917 min = ~125 laps. Total fuel needed: 125 x 3.5 = 437.5 liters. Stints per tank: 90 / 3.5 = 25.7 laps (25 laps safe). Number of stops: ceil(125/25) - 1 = 4 stops. Pit time per stop: 30s stationary + 20s transit = 50s total. Total pit time: 4 x 50 = 200 seconds = 3 minutes 20 seconds. Optimal stop laps: 25, 50, 75, 100 (then finish at 125). If you can fuel save to 3.3 L/lap (27 laps per stint): only 3 stops needed, saving 50 seconds. That 50-second saving costs 0.2s/lap x 125 laps = 25 seconds in pace. Net gain: 25 seconds. Fuel saving pays off here."),
 
     # Troubleshooting
-    ("E3N is responding slowly, what could be wrong?", "",
+    ("deltai is responding slowly, what could be wrong?", "",
      "Diagnostic checklist: 1) VRAM pressure — check if the sim or other applications are consuming GPU memory. If VRAM is low, I drop to the 3B model or CPU, both slower. 2) Ollama model not loaded — first query after idle has a cold-start penalty while the model loads into VRAM. 3) RAG queries — if the knowledge base is large, retrieval adds latency. 4) CPU competition — check Task Manager for background processes consuming CPU. 5) Thermal throttling — if GPU or CPU is overheating, performance degrades. Check temperatures in the diagnostics panel. Most common cause: VRAM contention. Close unnecessary GPU-using applications."),
 
     # Physics reasoning
@@ -304,14 +304,14 @@ reason = [
     ("Help me systematically improve my lap time", "",
      "Improvement framework, ordered by time gained per effort: 1) BRAKING (biggest gains): Find the latest possible braking point for each corner. Threshold brake — max pressure initially, trail-brake into the corner to maintain front load. Most drivers brake too early. 2) CORNER EXIT (second biggest): prioritize exit speed over entry speed, especially before long straights. The time gained on the straight compounds. Get the car straight, then full throttle. 3) RACING LINE: use all the track. Entry: outside. Apex: inside. Exit: outside. Maximize radius = maximize speed. 4) CONSISTENCY: eliminate mistakes before chasing tenths. A clean lap beats a fast-but-messy lap over race distance. 5) SETUP: only after your driving is consistent. Small aero and suspension tweaks for balance. 6) DATA: compare your telemetry to faster drivers. Focus on where the biggest delta is — that's your opportunity."),
 ]
-n = add_batch("e3n-reasoning", reason)
+n = add_batch("deltai-reasoning", reason)
 print(f"  General reasoning: {n}/{len(reason)} examples")
 
 # ════════════════════════════════════════════════════════════════
 # 7. MECHANICAL ENGINEERING FUNDAMENTALS (for MechE context)
 # ════════════════════════════════════════════════════════════════
 print("Building MechE fundamentals dataset...")
-create_dataset("e3n-meche")
+create_dataset("deltai-meche")
 meche = [
     ("Explain stress vs strain", "",
      "Stress (sigma) = Force / Area [Pa or N/m2]. It's the internal resistance per unit area. Strain (epsilon) = change in length / original length [dimensionless]. It's the deformation ratio. Relationship: in the elastic region, stress = E x strain (Hooke's Law), where E is Young's modulus. Key concepts: yield stress is where permanent deformation begins, ultimate stress is the maximum, and fracture stress is where it breaks. In racing: chassis members are designed to operate well below yield stress under normal loads, with safety factors for impact loads."),
@@ -326,14 +326,14 @@ meche = [
     ("What's the difference between laminar and turbulent flow?", "",
      "Laminar flow: fluid moves in parallel layers with no mixing. Smooth, predictable, low friction. Occurs at low Reynolds numbers (Re < ~2300 for pipe flow). Turbulent flow: chaotic, mixing, eddies. Higher friction but better heat transfer. Occurs at high Re (> ~4000). In racing aero: 1) Laminar flow over body surfaces reduces drag but is fragile — easily trips to turbulent. 2) Turbulent boundary layer is more resistant to separation — stays attached longer on curved surfaces. 3) Vortex generators deliberately trip laminar to turbulent to prevent separation in critical areas. 4) In the diffuser, managing the boundary layer transition is critical for maintaining attached flow and maximum downforce."),
 ]
-n = add_batch("e3n-meche", meche)
+n = add_batch("deltai-meche", meche)
 print(f"  MechE fundamentals: {n}/{len(meche)} examples")
 
 # ════════════════════════════════════════════════════════════════
 # 8. SIMULATION SCENARIOS — contextual reasoning under pressure
 # ════════════════════════════════════════════════════════════════
 print("Building simulation scenarios dataset...")
-create_dataset("e3n-simulations")
+create_dataset("deltai-simulations")
 sims = [
     # Multi-factor decision making
     ("Race situation: P2, 5 laps to go, tires are gone, car behind is 1.2 seconds and closing 0.3s per lap. What do I do?", "",
@@ -363,14 +363,14 @@ sims = [
     ("We finished P4. Started P7. Debrief the race.", "Pitstop 1: lap 18, 28s. Pitstop 2: lap 42, 26s. Best lap: 1:41.8 on lap 35. Worst lap: 1:44.1 on lap 1. No incidents.",
      "Race debrief: Result: P4 from P7 — gained 3 positions, solid performance. Pace: Best 1:41.8 on lap 35 (mid-second stint) — suggests the car was well-suited to the medium fuel load and tire window at that point. Worst 1:44.1 on lap 1 — 2.3s off best pace, typical for cold tires and full fuel on the opening lap. Pit stops: Stop 1 at 28s — slightly slow, investigate what caused the 2s overshoot. Stop 2 at 26s — clean. Strategy: 18+24 lap stints — reasonable distribution. The second stint was longer but produced the best lap, suggesting good tire management. Gains: positions were likely gained through pit stop windows and consistent pace rather than on-track overtakes. Areas for improvement: 1) Opening lap pace — work on tire warm-up technique. 2) Pit stop 1 lost 2 seconds — worth investigating. 3) Could the best lap pace be sustained longer with different tire management? Overall: clean, consistent, well-executed race. P4 with car that qualified P7 is a strong result."),
 ]
-n = add_batch("e3n-simulations", sims)
+n = add_batch("deltai-simulations", sims)
 print(f"  Simulations: {n}/{len(sims)} examples")
 
 # ════════════════════════════════════════════════════════════════
 # 9. ENHANCED TELEMETRY ANALYSIS — multi-sensor, anomaly, degradation
 # ════════════════════════════════════════════════════════════════
 print("Building enhanced telemetry analysis dataset...")
-create_dataset("e3n-telemetry-analysis")
+create_dataset("deltai-telemetry-analysis")
 telem = [
     # Multi-sensor correlation
     ("Correlate these sensor readings", "Brake temp FL 680C, tire inner temp FL 115C (opt: 90-100C), brake bias 58% front, lap 22.",
@@ -398,7 +398,7 @@ telem = [
     ("Build a fuel model for the rest of the race", "Current lap: 18 of 60. Fuel remaining: 68L. Consumption: 3.1 L/lap normal, 2.4 L/lap lift-and-coast. Safety car probability: medium.",
      "Fuel model: Laps remaining: 42. At 3.1 L/lap: need 130.2L. Available: 68L. Deficit: 62.2L — not completable without pit. Options: Option A (pit now for 65L): costs ~25s but race on full pace, no fuel save. Gap needed: 28+ seconds. Option B (fuel save to 2.6 L/lap): need 42x2.6=109.2L. Still 41.2L short. Not viable without pit. Option C (aggressive save to 2.2 L/lap): need 42x2.2=92.4L. Still 24L short. Conclusion: you need at least one more refueling stop. Safety car: if SC deploys, it reduces fuel consumption per minute (lower speed) — could save 8-12L over a 5-lap SC period. That might make Option B marginal. Current recommendation: plan pit at lap 35-38 for 65L splash. Time it with any SC opportunity."),
 ]
-n = add_batch("e3n-telemetry-analysis", telem)
+n = add_batch("deltai-telemetry-analysis", telem)
 print(f"  Telemetry analysis: {n}/{len(telem)} examples")
 
 
@@ -406,7 +406,7 @@ print(f"  Telemetry analysis: {n}/{len(telem)} examples")
 # 10. AUDIO ANALYSIS — real-time engine/mechanical diagnostics
 # ════════════════════════════════════════════════════════════════
 print("Building audio analysis dataset...")
-create_dataset("e3n-audio-analysis")
+create_dataset("deltai-audio-analysis")
 audio = [
     # Engine knock
     ("I'm hearing a metallic knock at high RPM", "Knock frequency: high-pitched, occurs above 7000 RPM, louder on deceleration.",
@@ -427,7 +427,7 @@ audio = [
     ("How to distinguish tire noise from bearing noise", "Both produce a hum that increases with speed.",
      "Distinguishing tire hum from bearing hum: Speed scaling: Both increase with speed. Tire noise: proportional to the CIRCUMFERENTIAL speed (speed x tire circumference factor). Bearing noise: proportional to ROTATIONAL speed (directly = wheel RPM). They're the same relationship — so speed alone doesn't distinguish them. Diagnostic techniques: 1) Load variation: steer left and right gently at highway speed. Bearing noise changes with lateral load; tire noise remains constant. 2) Temperature response: warm up the vehicle. Bearing noise typically decreases once grease warms. Tire noise stays constant or increases slightly with heat. 3) Coasting vs. power: cut power and coast. Tire hum remains; bearing noise may change slightly with torque loading. 4) Frequency: tire hum is broad-spectrum, low frequency. Bearing whine is a distinct tonal frequency. Recording audio and running FFT clearly separates the two signatures."),
 ]
-n = add_batch("e3n-audio-analysis", audio)
+n = add_batch("deltai-audio-analysis", audio)
 print(f"  Audio analysis: {n}/{len(audio)} examples")
 
 
@@ -435,7 +435,7 @@ print(f"  Audio analysis: {n}/{len(audio)} examples")
 # 11. ENGINEERING SIMULATIONS — FEA, CFD, modal, thermal, numerical
 # ════════════════════════════════════════════════════════════════
 print("Building engineering simulations dataset...")
-create_dataset("e3n-eng-simulations")
+create_dataset("deltai-eng-simulations")
 sims_eng = [
     # FEA
     ("Interpret this FEA result", "Suspension wishbone. Max Von Mises stress: 420 MPa. Material: 7075-T6 aluminum (yield: 503 MPa, UTS: 572 MPa). Load case: 3G cornering.",
@@ -452,7 +452,7 @@ sims_eng = [
     ("What's a reasonable FEA mesh convergence study?", "Bracket analysis. Mesh sizes tested: 20mm, 10mm, 5mm, 2.5mm. Max stress results: 180, 210, 225, 228 MPa.",
      "Mesh convergence analysis: The stress values are converging — good sign. Convergence rate: 20→10mm: +30 MPa (+16.7%). 10→5mm: +15 MPa (+7.1%). 5→2.5mm: +3 MPa (+1.3%). The result is converging well. The <2% change from 5mm to 2.5mm mesh meets the typical engineering convergence criterion (usually <5%). Recommendation: 5mm mesh is adequate for this analysis. The 228 MPa at 2.5mm is probably the 'true' stress within 1-2%. Using 228 MPa for safety factor calculations is conservative and appropriate. Important caveat: ensure you're checking stress at the right location. If 228 MPa is at a notch or hole, local stress concentration effects may require even finer mesh at that point specifically. For fatigue-critical features, refine to capture the full stress gradient at the feature root."),
 ]
-n = add_batch("e3n-eng-simulations", sims_eng)
+n = add_batch("deltai-eng-simulations", sims_eng)
 print(f"  Engineering simulations: {n}/{len(sims_eng)} examples")
 
 
@@ -460,7 +460,7 @@ print(f"  Engineering simulations: {n}/{len(sims_eng)} examples")
 # 12. ADVANCED RACE STRATEGY — game theory, championship, Bayesian
 # ════════════════════════════════════════════════════════════════
 print("Building advanced race strategy dataset...")
-create_dataset("e3n-strategy-advanced")
+create_dataset("deltai-strategy-advanced")
 strat_adv = [
     # Nash equilibrium / game theory
     ("Should I attack for position even though it might cost us both time?", "P3, P4 is 0.8s behind and closing. 15 laps left. Both on similar tires. DRS available.",
@@ -480,7 +480,7 @@ strat_adv = [
     ("24-hour race driver rotation strategy", "Three drivers. Stints max 4 hours per driver per 6 hours (regulations). Total: 24h. Optimal driver rotation?",
      "24h rotation with 4h/6h regulations: Compliant structure requires each driver to drive max 4h in any 6h window. Minimum stints to comply: With 3 drivers over 24h, total driving = 24h. Equal split: 8h each. Constraint: no 4h consecutive per 6h period means each driver needs rest breaks. Optimal rotation: Block 1 (hours 0-6): A (2h), B (2h), C (2h). Block 2 (hours 6-12): A (2h), B (2h), C (2h). Block 3 (hours 12-18): A (2h), B (2h), C (2h). Block 4 (hours 18-24): A (2h), B (2h), C (2h). Each driver: 8h total, never exceeds 4h in any 6h window. Strategy overlay: put your fastest driver in hours 8-12 (morning traffic is clear, track is rubbered in) and 18-22 (night racing, requires confidence). Hours 0-2 are chaotic — use your most experienced/cautious driver. Hours 22-24 final push: fastest driver if championship dependent. Fuel stop coordination: if stint changes don't align with optimal fuel stops, use splash-and-go to bridge."),
 ]
-n = add_batch("e3n-strategy-advanced", strat_adv)
+n = add_batch("deltai-strategy-advanced", strat_adv)
 print(f"  Advanced race strategy: {n}/{len(strat_adv)} examples")
 
 
@@ -488,7 +488,7 @@ print(f"  Advanced race strategy: {n}/{len(strat_adv)} examples")
 # 13. CHAIN-OF-THOUGHT REASONING — structured THINK/REASON/FINAL
 # ════════════════════════════════════════════════════════════════
 print("Building chain-of-thought reasoning dataset...")
-create_dataset("e3n-cot-reasoning")
+create_dataset("deltai-cot-reasoning")
 cot = [
     ("If I add 5kg of ballast to the front of the car, what happens to handling balance?",
      "",
@@ -502,7 +502,7 @@ cot = [
      "",
      "THINK: Short-shifting = upshifting earlier (lower RPM). Need to evaluate: fuel saved vs. time lost, optimal RPM shift point relationship.\n\nREASON:\nFuel consumption factors: Fuel flow rate is highest at peak torque RPM and high throttle. Short-shifting reduces time spent at high RPM and near peak torque. The relationship is roughly linear — shifting 500 RPM earlier reduces fuel consumption by 3-6% in that gear.\n\nTime cost: Short-shifting before peak power RPM means you're not maximizing the power available. The time cost depends on: how far below peak power you shift, the length of the straight, and whether you're on full throttle (full throttle = max time benefit from staying in the power band).\n\nBreak-even analysis: If short-shifting saves 0.15 L/lap but costs 0.3s/lap, and your fuel shortage requires 2L saving over 10 laps, you need 13 laps of short-shifting to save 2L. At 0.3s/lap cost: 3.9s total time loss. A pit stop splash for 2L: 8-10 seconds loss. Short-shifting wins.\n\nFINAL: Yes, short-shift during fuel save, with nuance: (1) Short-shift only on straights, not in corners or acceleration zones where you need torque. (2) Most effective short-shift is on the longest straights where time in high RPM is longest. (3) Pair with lift-and-coast (lift throttle 50-80m before brake zone) for combined saving. (4) Quantify your target: know exactly how many L/lap you need to save, and only apply as much short-shifting as needed to hit that target, not more."),
 ]
-n = add_batch("e3n-cot-reasoning", cot)
+n = add_batch("deltai-cot-reasoning", cot)
 print(f"  Chain-of-thought reasoning: {n}/{len(cot)} examples")
 
 

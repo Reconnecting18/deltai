@@ -1,8 +1,8 @@
 # Local Qwen improvement workflow
 
-Operator guide for pushing **local** Qwen quality without changing model architecture inside Ollama. E3N already wires **RAG**, **ingest**, **quality → capture → training**, and **modelfiles**; this doc sequences them into a repeatable cadence.
+Operator guide for pushing **local** Qwen quality without changing model architecture inside Ollama. deltai already wires **RAG**, **ingest**, **quality → capture → training**, and **modelfiles**; this doc sequences them into a repeatable cadence.
 
-**Paths:** Replace `C:\e3n\` with your repo’s `data/` layout if you use a clone. Env defaults live in [project/memory.py](../project/memory.py) (`KNOWLEDGE_PATH`, `CHROMADB_PATH`, `OLLAMA_URL`).
+**Paths:** Replace `~/deltai/` with your repo’s `data/` layout if you use a clone. Env defaults live in [project/memory.py](../project/memory.py) (`KNOWLEDGE_PATH`, `CHROMADB_PATH`, `OLLAMA_URL`).
 
 ---
 
@@ -20,7 +20,7 @@ Low-quality turns feed **knowledge gaps** and **negative capture**; fixing knowl
 
 ### A.1 Knowledge files (`KNOWLEDGE_PATH`)
 
-- **Location:** `KNOWLEDGE_PATH` (default `C:\e3n\data\knowledge` on the primary machine).
+- **Location:** `KNOWLEDGE_PATH` (default `~/deltai/data\knowledge` on the primary machine).
 - **Watcher:** On FastAPI startup, `ingest_all` runs once, then [project/watcher.py](../project/watcher.py) watches the directory recursively (debounce ~1s per file).
 - **Supported extensions** (from [project/memory.py](../project/memory.py)): `.txt`, `.md`, `.py`, `.js`, `.ts`, `.html`, `.css`, `.json`, `.yaml`, `.yml`, `.toml`, `.ini`, `.cfg`, `.csv`, `.log`, `.bat`, `.ps1`, `.sh`, `.c`, `.cpp`, `.h`, `.rs`, `.go`, `.java`.
 - **Limits:** Max **5 MB** per file; empty files skipped; unchanged files skipped via `file_hash`.
@@ -81,16 +81,16 @@ Gaps are logged from low quality scores and related signals (see [project/main.p
 
 ### B.1 Modelfiles and Ollama rebuild
 
-- **Files:** [modelfiles/E3N-qwen14b.modelfile](../modelfiles/E3N-qwen14b.modelfile), [modelfiles/E3N-qwen3b.modelfile](../modelfiles/E3N-qwen3b.modelfile) (and backups: nemo / legacy as applicable).
+- **Files:** [modelfiles/deltai-qwen14b.modelfile](../modelfiles/deltai-qwen14b.modelfile), [modelfiles/deltai-qwen3b.modelfile](../modelfiles/deltai-qwen3b.modelfile) (and backups: nemo / legacy as applicable).
 - **Rule:** Keep system prompts aligned across modelfiles; only `FROM` / parameters differ (3B may use a condensed system prompt).
 - **Rebuild after edits:**
 
 ```powershell
-ollama create e3n-qwen14b -f modelfiles\E3N-qwen14b.modelfile
-ollama create e3n-qwen3b -f modelfiles\E3N-qwen3b.modelfile
+ollama create deltai-qwen14b -f modelfiles\deltai-qwen14b.modelfile
+ollama create deltai-qwen3b -f modelfiles\deltai-qwen3b.modelfile
 ```
 
-Use repo-relative paths on clones: `ollama create e3n-qwen14b -f .\modelfiles\E3N-qwen14b.modelfile`.
+Use repo-relative paths on clones: `ollama create deltai-qwen14b -f .\modelfiles\deltai-qwen14b.modelfile`.
 
 ### B.2 `.env` toggles (project/.env)
 
@@ -115,7 +115,7 @@ When a session is active or the sim is detected, the router applies **telemetry 
 
 ### C.1 Automatic capture from chat
 
-After each turn, [project/main.py](../project/main.py) calls `smart_auto_capture()` into dataset **`e3n-auto`** (quality-tiered; poor turns may land in **`e3n-auto-negative`** for DPO). Ensure `SMART_CAPTURE_ENABLED` matches your intent.
+After each turn, [project/main.py](../project/main.py) calls `smart_auto_capture()` into dataset **`deltai-auto`** (quality-tiered; poor turns may land in **`deltai-auto-negative`** for DPO). Ensure `SMART_CAPTURE_ENABLED` matches your intent.
 
 ### C.2 Weak domains and improvement cycle
 
@@ -142,7 +142,7 @@ Domains include `racing`, `engineering`, `personality`, `reasoning`, `telemetry`
 
 ### C.5 DPO (when negatives exist)
 
-When `e3n-auto-negative` (or paired negatives) has enough matched pairs, enable and run DPO per CLAUDE.md (`DPO_ENABLED`, `/training/start` with `mode=dpo`).
+When `deltai-auto-negative` (or paired negatives) has enough matched pairs, enable and run DPO per CLAUDE.md (`DPO_ENABLED`, `/training/start` with `mode=dpo`).
 
 ---
 

@@ -4,7 +4,7 @@ globs: project/**/*.py
 alwaysApply: false
 ---
 
-# Python backend (E3N)
+# Python backend (deltai)
 
 - After substantive changes under `project/`, run verification from `project/` with the venv active:
   - `python tests/verify_full.py`

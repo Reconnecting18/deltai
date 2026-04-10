@@ -1,21 +1,22 @@
-# Contributing to E3N
+# Contributing to deltai
 
 ## Issues
 
-- Use [GitHub Issues](https://github.com/Reconnecting18/e3n/issues) with the provided templates when possible (bug report or feature / task).
-- Describe reproduction steps for bugs, including OS, Python version, and whether Ollama is running.
+- Use [GitHub Issues](https://github.com/Reconnecting18/deltai/issues) with the provided templates (bug report or feature request).
+- For bugs, include: OS/distro, Python version, Ollama version, whether you're running as a systemd user service, and full error output.
 
 ## Pull requests
 
 - Prefer a focused branch and a clear commit message (`feat:`, `fix:`, `refactor:`, `docs:`).
-- Link related issues with `Closes #N` in the commit message or PR description when applicable.
-- Do not commit secrets, `project/.env`, or generated data under `data/`.
+- Link related issues with `Closes #N` in the commit message or PR description.
+- Do not commit `project/.env`, credentials, or anything under `data/`.
+- Keep changes consistent with the [Linux philosophy principles](AGENTS.md#non-negotiable-boundaries) described in AGENTS.md.
 
 ## Checks before you open a PR
 
 From `project/` with the virtual environment active:
 
-```powershell
+```bash
 python tests/verify_full.py
 python tests/verify_stress.py
 python tests/verify_resource_mgmt.py
@@ -25,6 +26,6 @@ Run `python tests/verify_distill.py` when you change distillation or related tra
 
 ## Documentation and agents
 
-- **User-facing or structural changes:** update [README.md](README.md) and [CLAUDE.md](CLAUDE.md) in the same PR when appropriate.
-- **Onboarding, boundaries, or verification commands:** update [AGENTS.md](AGENTS.md) so Cursor and other agents stay aligned.
-- **New conventions agents must always follow:** add or adjust rules under [`.cursor/rules/`](.cursor/rules/) (keep them short; put narrative detail in `CLAUDE.md`).
+- **User-facing or structural changes:** update [README.md](README.md) and [CLAUDE.md](CLAUDE.md) in the same PR.
+- **Onboarding, boundaries, or verification commands:** update [AGENTS.md](AGENTS.md).
+- **New agent conventions:** add or adjust rules under [`.cursor/rules/`](.cursor/rules/) (keep them short; put narrative detail in `CLAUDE.md`).

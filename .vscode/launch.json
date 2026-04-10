@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "E3N FastAPI (uvicorn)",
+      "name": "deltai FastAPI (uvicorn)",
       "type": "debugpy",
       "request": "launch",
       "module": "uvicorn",
@@ -12,7 +12,7 @@
       "justMyCode": true
     },
     {
-      "name": "E3N Electron (npm start)",
+      "name": "deltai Electron (npm start)",
       "type": "node",
       "request": "launch",
       "runtimeExecutable": "npm",

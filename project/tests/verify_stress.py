@@ -1,5 +1,5 @@
 """
-E3N Stress Test Suite -- High-Load Simulation & Verification
+deltai Stress Test Suite -- High-Load Simulation & Verification
 Tests all fixes from the 2026-03-17 code review + stress scenarios.
 
 Simulates:
@@ -33,7 +33,7 @@ os.environ.setdefault("OLLAMA_URL", "http://localhost:11434")
 os.environ.setdefault("CHROMADB_PATH", os.path.join(os.path.dirname(__file__), "test_chromadb"))
 os.environ.setdefault("KNOWLEDGE_PATH", os.path.join(os.path.dirname(__file__), "test_knowledge"))
 os.environ.setdefault("TRAINING_PATH", os.path.join(os.path.dirname(__file__), "test_training"))
-os.environ.setdefault("SQLITE_PATH", os.path.join(os.path.dirname(__file__), "test_e3n.db"))
+os.environ.setdefault("SQLITE_PATH", os.path.join(os.path.dirname(__file__), "test_deltai.db"))
 
 passed = 0
 failed = 0
@@ -130,15 +130,15 @@ def verify_fix_5():
 verify_fix_5()
 
 # Fix 6: Router default model names match CLAUDE.md
-@test("Fix 6: Router _pick_local_model defaults match e3n-qwen14b/3b")
+@test("Fix 6: Router _pick_local_model defaults match deltai-qwen14b/3b")
 def verify_fix_6():
     import router
     import inspect
     src = inspect.getsource(router._pick_local_model)
-    assert 'e3n-qwen14b' in src, \
-        "Strong model default should be e3n-qwen14b"
-    assert 'e3n-qwen3b' in src, \
-        "Default model should be e3n-qwen3b"
+    assert 'deltai-qwen14b' in src, \
+        "Strong model default should be deltai-qwen14b"
+    assert 'deltai-qwen3b' in src, \
+        "Default model should be deltai-qwen3b"
 verify_fix_6()
 
 # Fix 7: training.py list_datasets getsize race condition
@@ -202,7 +202,7 @@ def stress_low_vram():
         model, cpu_only, backup = router._pick_local_model()
         assert cpu_only is True, \
             f"Should be CPU-only with 1500MB free VRAM, got cpu_only={cpu_only}"
-        assert model == os.getenv("E3N_MODEL", "e3n-qwen3b"), \
+        assert model == os.getenv("DELTAI_MODEL", "deltai-qwen3b"), \
             f"Should use default small model, got {model}"
 stress_low_vram()
 
@@ -226,16 +226,16 @@ def stress_sim_low_vram():
          patch.object(router, 'is_sim_running', return_value=True):
         model, cpu_only, backup = router._pick_local_model()
         assert cpu_only is False, "4GB VRAM should allow GPU mode for 3B"
-        assert "3b" in model.lower() or model == os.getenv("E3N_SIM_MODEL", os.getenv("E3N_MODEL", "e3n-qwen3b")), \
+        assert "3b" in model.lower() or model == os.getenv("DELTAI_SIM_MODEL", os.getenv("DELTAI_MODEL", "deltai-qwen3b")), \
             f"Should pick sim/small model, got {model}"
 stress_sim_low_vram()
 
 # Stress 4: Emergency backup cascade
-@test("Stress 4: Backup model chain e3n-qwen14b -> e3n-nemo -> e3n")
+@test("Stress 4: Backup model chain deltai-qwen14b -> deltai-nemo -> e3n")
 def stress_backup_chain():
     import router
-    backup1 = router.get_backup_model("e3n-qwen14b")
-    assert backup1 is not None, "e3n-qwen14b should have a backup"
+    backup1 = router.get_backup_model("deltai-qwen14b")
+    assert backup1 is not None, "deltai-qwen14b should have a backup"
     backup2 = router.get_backup_model(backup1)
     assert backup2 is not None, f"{backup1} should have a second backup"
     backup3 = router.get_backup_model(backup2)
@@ -384,13 +384,13 @@ def stress_sim_model_selection():
     with patch.object(router, 'is_sim_running', return_value=True), \
          patch.object(router, 'get_vram_free_mb', return_value=5000):
         model, cpu_only, backup = router._pick_local_model()
-        assert '3b' in model.lower() or model == os.getenv('E3N_SIM_MODEL', os.getenv('E3N_MODEL', 'e3n-qwen3b')), \
+        assert '3b' in model.lower() or model == os.getenv('DELTAI_SIM_MODEL', os.getenv('DELTAI_MODEL', 'deltai-qwen3b')), \
             f"Sim running should pick small model, got {model}"
     # When sim is NOT running and plenty of VRAM, pick strong model
     with patch.object(router, 'is_sim_running', return_value=False), \
          patch.object(router, 'get_vram_free_mb', return_value=10000):
         model, cpu_only, backup = router._pick_local_model()
-        assert '14b' in model.lower() or model == os.getenv('E3N_STRONG_MODEL', 'e3n-qwen14b'), \
+        assert '14b' in model.lower() or model == os.getenv('DELTAI_STRONG_MODEL', 'deltai-qwen14b'), \
             f"No sim + plenty VRAM should pick strong model, got {model}"
 stress_sim_model_selection()
 
@@ -406,11 +406,11 @@ def stress_tool_safety():
     assert not _is_command_safe("-ExecutionPolicy Bypass")
     # Should allow
     assert _is_command_safe("Get-Process")
-    assert _is_command_safe("ls C:\\e3n")
+    assert _is_command_safe("ls ~/deltai")
     # Path safety
     assert not _is_path_safe_write("C:\\Windows\\System32\\test.txt")
     assert not _is_path_safe_write("C:\\Program Files\\test.txt")
-    assert _is_path_safe_write("C:\\e3n\\data\\test.txt")
+    assert _is_path_safe_write("~/deltai/data\\test.txt")
 stress_tool_safety()
 
 # Stress 14: Training safety — blocks during sim
@@ -471,7 +471,7 @@ def stress_vram_tiers():
         with patch.object(router, 'get_vram_free_mb', return_value=10000):
             model_a, cpu_a, _ = router._pick_local_model()
             assert not cpu_a, "Tier A should use GPU"
-            assert "14b" in model_a.lower() or model_a == os.getenv("E3N_STRONG_MODEL", "e3n-qwen14b")
+            assert "14b" in model_a.lower() or model_a == os.getenv("DELTAI_STRONG_MODEL", "deltai-qwen14b")
 
         # Tier B: 3-9GB
         with patch.object(router, 'get_vram_free_mb', return_value=5000):

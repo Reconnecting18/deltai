@@ -1,5 +1,5 @@
 """
-E3N Tool Executor — runs tools safely and returns results.
+deltai Tool Executor — runs tools safely and returns results.
 Each tool function returns a string result that gets fed back to the model.
 """
 
@@ -181,7 +181,7 @@ def run_powershell(command: str, timeout=15) -> str:
             capture_output=True,
             text=True,
             timeout=timeout,
-            cwd="C:\\e3n"
+            cwd="~/deltai"
         )
         output = ""
         if result.stdout.strip():
@@ -288,7 +288,7 @@ def memory_stats() -> str:
                 lines.append(f"    - {s}")
         else:
             lines.append("  No files ingested yet.")
-            lines.append(f"  Drop files in C:\\e3n\\data\\knowledge\\ to ingest.")
+            lines.append(f"  Drop files in ~/deltai/data\\knowledge\\ to ingest.")
         return "\n".join(lines)
     except ImportError:
         return "ERROR: Memory system not available (chromadb not installed)"
@@ -323,7 +323,7 @@ def web_search(query: str, max_results=5) -> str:
         resp = _httpx.get(
             "https://lite.duckduckgo.com/lite/",
             params={"q": query.strip(), "kl": "us-en"},
-            headers={"User-Agent": "E3N/1.0 (local AI assistant)"},
+            headers={"User-Agent": "deltai/1.0 (local AI assistant)"},
             timeout=10.0,
             follow_redirects=True,
         )
@@ -426,7 +426,7 @@ def fetch_url(url: str, max_chars: int = 8000) -> str:
             import re as _re
             resp = _httpx.get(
                 url,
-                headers={"User-Agent": "E3N/1.0 (local AI assistant)"},
+                headers={"User-Agent": "deltai/1.0 (local AI assistant)"},
                 timeout=15.0,
                 follow_redirects=True,
             )
@@ -831,12 +831,12 @@ def get_strategy_recommendation(remaining_laps=None, **kwargs) -> str:
 # ── SELF-DIAGNOSTIC TOOLS ──────────────────────────────────────────────
 
 _OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-_E3N_MODELS = {"e3n-qwen14b", "e3n-qwen3b", "e3n-nemo", "e3n"}
+_DELTAI_MODELS = {"deltai-qwen14b", "deltai-qwen3b", "deltai-nemo", "deltai"}
 _CRITICAL_PATHS = [
-    r"C:\e3n\data\knowledge",
-    r"C:\e3n\data\chromadb",
-    r"C:\e3n\project\.env",
-    r"C:\e3n\modelfiles",
+    r"~/deltai/data\knowledge",
+    r"~/deltai/data\chromadb",
+    r"~/deltai/project\.env",
+    r"~/deltai/modelfiles",
 ]
 
 
@@ -865,7 +865,7 @@ def _ollama_post(endpoint: str, payload: dict, timeout: int = 15):
 
 
 def self_diagnostics(subsystem=None) -> str:
-    """Run E3N self-diagnostics across all subsystems or deep-check one."""
+    """Run deltai self-diagnostics across all subsystems or deep-check one."""
     try:
         if subsystem:
             return _diag_deep(subsystem.lower().strip())
@@ -876,7 +876,7 @@ def self_diagnostics(subsystem=None) -> str:
 
 def _diag_full() -> str:
     """Full sweep across all subsystems."""
-    lines = ["E3N SELF-DIAGNOSTICS", "=" * 40]
+    lines = ["deltai SELF-DIAGNOSTICS", "=" * 40]
 
     # Ollama
     tags = _ollama_get("/api/tags")
@@ -885,11 +885,11 @@ def _diag_full() -> str:
         lines.append("Ollama:    DOWN — cannot reach Ollama API")
     else:
         all_models = [m["name"].split(":")[0] for m in tags.get("models", [])]
-        e3n_found = [m for m in all_models if m in _E3N_MODELS]
+        deltai_found = [m for m in all_models if m in _DELTAI_MODELS]
         loaded = [m.get("name", "?") for m in (ps or {}).get("models", [])]
         loaded_str = ", ".join(loaded) if loaded else "none"
-        lines.append(f"Ollama:    ONLINE ({len(e3n_found)}/4 E3N models, loaded: {loaded_str})")
-        missing = _E3N_MODELS - set(e3n_found)
+        lines.append(f"Ollama:    ONLINE ({len(deltai_found)}/4 deltai models, loaded: {loaded_str})")
+        missing = _DELTAI_MODELS - set(deltai_found)
         if missing:
             lines.append(f"           MISSING: {', '.join(sorted(missing))}")
 
@@ -952,7 +952,7 @@ def _diag_full() -> str:
     # Backup models
     backup_ok = []
     backup_fail = []
-    for model in ["e3n-nemo", "e3n"]:
+    for model in ["deltai-nemo", "deltai"]:
         if tags:
             all_names = [m["name"].split(":")[0] for m in tags.get("models", [])]
             if model in all_names:
@@ -994,8 +994,8 @@ def _diag_deep(subsystem: str) -> str:
         lines.append("Available models:")
         for name, info in sorted(all_models.items()):
             size_gb = round(info.get("size", 0) / 1e9, 1)
-            is_e3n = "  [E3N]" if name in _E3N_MODELS else ""
-            lines.append(f"  {name:<20} {size_gb} GB{is_e3n}")
+            is_deltai = "  [deltai]" if name in _DELTAI_MODELS else ""
+            lines.append(f"  {name:<20} {size_gb} GB{is_deltai}")
         lines.append(f"\nLoaded in VRAM ({len(loaded)}):")
         if loaded:
             for m in loaded:
@@ -1003,13 +1003,13 @@ def _diag_deep(subsystem: str) -> str:
                 lines.append(f"  {m.get('name', '?'):<20} ~{vram_mb} MB")
         else:
             lines.append("  (none)")
-        missing = _E3N_MODELS - set(all_models.keys())
+        missing = _DELTAI_MODELS - set(all_models.keys())
         if missing:
-            lines.append(f"\nMISSING E3N MODELS: {', '.join(sorted(missing))}")
+            lines.append(f"\nMISSING deltai MODELS: {', '.join(sorted(missing))}")
             for m in sorted(missing):
-                mf = f"C:\\e3n\\modelfiles\\E3N-{m.replace('e3n-', '')}.modelfile"
-                if m == "e3n":
-                    mf = "C:\\e3n\\modelfiles\\E3N.modelfile"
+                mf = f"~/deltai/modelfiles/deltai-{m.replace('deltai-', '')}.modelfile"
+                if m == "deltai":
+                    mf = "~/deltai/modelfiles/deltai.modelfile"
                 lines.append(f"  FIX: ollama create {m} -f {mf}")
         return "\n".join(lines)
 
@@ -1024,7 +1024,7 @@ def _diag_deep(subsystem: str) -> str:
             lines.append(f"Disk:    {stats['disk_mb']} MB")
             if stats['total_chunks'] == 0:
                 lines.append("\nWARNING: Empty knowledge base")
-                lines.append("FIX: Drop files in C:\\e3n\\data\\knowledge\\ or use repair_subsystem('reindex_knowledge')")
+                lines.append("FIX: Drop files in ~/deltai/data\\knowledge\\ or use repair_subsystem('reindex_knowledge')")
             files = get_file_details()
             if files:
                 lines.append(f"\nIngested files ({len(files)}):")
@@ -1032,7 +1032,7 @@ def _diag_deep(subsystem: str) -> str:
                     lines.append(f"  {f['source']:<40} {f['chunks']} chunks")
         except Exception as e:
             lines.append(f"ERROR: {e}")
-            lines.append("FIX: Check ChromaDB installation, verify C:\\e3n\\data\\chromadb exists")
+            lines.append("FIX: Check ChromaDB installation, verify ~/deltai/data\\chromadb exists")
         return "\n".join(lines)
 
     elif subsystem == "gpu":
@@ -1105,8 +1105,8 @@ def _diag_deep(subsystem: str) -> str:
         lines = ["BACKUP SYSTEM DIAGNOSTICS", "=" * 40]
         tags = _ollama_get("/api/tags")
         chains = [
-            ("e3n-qwen14b", "e3n-nemo", "e3n"),
-            ("e3n-qwen3b", "e3n"),
+            ("deltai-qwen14b", "deltai-nemo", "deltai"),
+            ("deltai-qwen3b", "deltai"),
         ]
         if tags:
             available = {m["name"].split(":")[0] for m in tags.get("models", [])}
@@ -1167,8 +1167,8 @@ def manage_ollama_models(action: str, model: str = None) -> str:
             lines.append(f"\nAvailable (not loaded):")
             for m in avail:
                 size_gb = round(m.get("size", 0) / 1e9, 1)
-                e3n_tag = " [E3N]" if m["name"].split(":")[0] in _E3N_MODELS else ""
-                lines.append(f"  {m['name']:<24} {size_gb} GB{e3n_tag}")
+                deltai_tag = " [deltai]" if m["name"].split(":")[0] in _DELTAI_MODELS else ""
+                lines.append(f"  {m['name']:<24} {size_gb} GB{deltai_tag}")
         # VRAM summary
         try:
             import pynvml
@@ -1188,8 +1188,8 @@ def manage_ollama_models(action: str, model: str = None) -> str:
         if not model:
             return "ERROR: 'model' parameter required for unload"
         model_base = model.split(":")[0]
-        if model_base not in _E3N_MODELS:
-            return f"ERROR: Can only manage E3N models. '{model}' not in allowlist: {', '.join(sorted(_E3N_MODELS))}"
+        if model_base not in _DELTAI_MODELS:
+            return f"ERROR: Can only manage deltai models. '{model}' not in allowlist: {', '.join(sorted(_DELTAI_MODELS))}"
         import httpx as _hx
         try:
             resp = _hx.post(f"{_OLLAMA_URL}/api/generate",
@@ -1204,8 +1204,8 @@ def manage_ollama_models(action: str, model: str = None) -> str:
         if not model:
             return "ERROR: 'model' parameter required for preload"
         model_base = model.split(":")[0]
-        if model_base not in _E3N_MODELS:
-            return f"ERROR: Can only manage E3N models. '{model}' not in allowlist: {', '.join(sorted(_E3N_MODELS))}"
+        if model_base not in _DELTAI_MODELS:
+            return f"ERROR: Can only manage deltai models. '{model}' not in allowlist: {', '.join(sorted(_DELTAI_MODELS))}"
         # Sim guard: block preloading 14B while sim is running
         if "14b" in model.lower():
             try:
@@ -1221,7 +1221,7 @@ def manage_ollama_models(action: str, model: str = None) -> str:
             handle = pynvml.nvmlDeviceGetHandleByIndex(0)
             mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
             free_mb = round((mem.total - mem.used) / 1e6)
-            model_sizes = {"e3n-qwen14b": 8500, "e3n-qwen3b": 2500, "e3n-nemo": 7200, "e3n": 4700}
+            model_sizes = {"deltai-qwen14b": 8500, "deltai-qwen3b": 2500, "deltai-nemo": 7200, "deltai": 4700}
             needed = model_sizes.get(model_base, 5000)
             if free_mb < needed + 500:
                 return f"WARNING: Only {free_mb} MB VRAM free, {model} needs ~{needed} MB. Unload another model first."
@@ -1243,7 +1243,7 @@ def manage_ollama_models(action: str, model: str = None) -> str:
 
 
 def repair_subsystem(repair: str) -> str:
-    """Attempt a safe, allowlisted repair on an E3N subsystem."""
+    """Attempt a safe, allowlisted repair on an deltai subsystem."""
     repair = (repair or "").lower().strip()
 
     if repair == "restart_watcher":
@@ -1318,9 +1318,9 @@ def repair_subsystem(repair: str) -> str:
 
 
 def resource_status() -> str:
-    """Get E3N resource self-manager status — VRAM pressure, circuit breaker, auto-recovery actions."""
+    """Get deltai resource self-manager status — VRAM pressure, circuit breaker, auto-recovery actions."""
     import httpx as _hx
-    lines = ["E3N RESOURCE STATUS", "=" * 40]
+    lines = ["deltai RESOURCE STATUS", "=" * 40]
 
     # VRAM
     try:
@@ -1390,7 +1390,7 @@ def resource_status() -> str:
 
 def manage_adapters(action: str, domain: str = None,
                     adapter_name: str = None, dataset: str = None) -> str:
-    """Manage E3N's augmentation slot adapters."""
+    """Manage deltai's augmentation slot adapters."""
     try:
         from training import (list_adapters, get_active_adapters, start_domain_training,
                               merge_adapters, set_active_adapter, update_adapter,

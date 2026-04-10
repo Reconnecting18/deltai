@@ -20,7 +20,7 @@ try:
 except Exception:
     GPU_AVAILABLE = False
 
-app = FastAPI(title="E3N")
+app = FastAPI(title="deltai")
 
 app.add_middleware(
     CORSMiddleware,
@@ -30,7 +30,7 @@ app.add_middleware(
 )
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-E3N_MODEL  = os.getenv("E3N_MODEL", "e3n")
+DELTAI_MODEL  = os.getenv("DELTAI_MODEL", "deltai")
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 app.mount("/static", StaticFiles(directory=os.path.join(_HERE, "static")), name="static")
@@ -45,7 +45,7 @@ def root():
 
 @app.post("/chat")
 async def chat(req: ChatRequest):
-    model = os.getenv("E3N_DEEP_MODEL", E3N_MODEL) if req.deep else E3N_MODEL
+    model = os.getenv("DELTAI_DEEP_MODEL", DELTAI_MODEL) if req.deep else DELTAI_MODEL
     payload = {
         "model": model,
         "prompt": req.message,
@@ -125,7 +125,7 @@ def stats():
     except:
         result["models"] = []
 
-    chroma_path = os.getenv("CHROMADB_PATH", "C:\\e3n\\data\\chromadb")
+    chroma_path = os.getenv("CHROMADB_PATH", "~/deltai/data\\chromadb")
     try:
         total = sum(
             os.path.getsize(os.path.join(dp, f))
@@ -136,13 +136,13 @@ def stats():
     except:
         result["memory_mb"] = 0
 
-    result["model"] = E3N_MODEL
+    result["model"] = DELTAI_MODEL
     result["platform"] = platform.system() + " " + platform.release()
 
     return result
 
 
-MODELFILE_PATH = r"C:\e3n\modelfiles\E3N.modelfile"
+MODELFILE_PATH = r"~/deltai/modelfiles\deltai.modelfile"
 MODULES_DIR = os.path.join(_HERE, '..', 'modelfiles')
 MODULE_FILES = {
     "modelfile": MODELFILE_PATH,

@@ -13,7 +13,7 @@ import numpy as np
 
 from .voice_config import VoiceConfig, DEFAULT_CONFIG
 
-logger = logging.getLogger("e3n.voice.tts")
+logger = logging.getLogger("deltai.voice.tts")
 
 
 class PiperTTS:

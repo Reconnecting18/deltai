@@ -1,5 +1,5 @@
 """
-E3N Self-Management Stack Tests
+deltai Self-Management Stack Tests
 Tests: Health Event Bus, Proactive Model Lifecycle, AI Self-Heal Loop
 """
 
@@ -18,7 +18,7 @@ os.environ.setdefault("OLLAMA_URL", "http://localhost:11434")
 os.environ.setdefault("CHROMADB_PATH", os.path.join(os.path.dirname(__file__), "test_chromadb"))
 os.environ.setdefault("KNOWLEDGE_PATH", os.path.join(os.path.dirname(__file__), "test_knowledge"))
 os.environ.setdefault("TRAINING_PATH", os.path.join(os.path.dirname(__file__), "test_training"))
-os.environ.setdefault("SQLITE_PATH", os.path.join(os.path.dirname(__file__), "test_e3n.db"))
+os.environ.setdefault("SQLITE_PATH", os.path.join(os.path.dirname(__file__), "test_deltai.db"))
 
 from unittest.mock import patch, MagicMock, AsyncMock
 

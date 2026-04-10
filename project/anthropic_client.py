@@ -1,5 +1,5 @@
 """
-E3N Anthropic Client — handles cloud inference via the Anthropic API.
+deltai Anthropic Client — handles cloud inference via the Anthropic API.
 
 Speaks the same stream protocol as the Ollama path so the rest of
 the system doesn't care which backend is responding.
@@ -22,14 +22,14 @@ import json
 import logging
 import httpx
 
-logger = logging.getLogger("e3n.anthropic")
+logger = logging.getLogger("deltai.anthropic")
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"  # Pinned for stability; update when new features needed
 
-# ── E3N SYSTEM PROMPT FOR CLOUD MODELS ──────────────────────────────────
+# ── deltai SYSTEM PROMPT FOR CLOUD MODELS ──────────────────────────────────
 
-E3N_SYSTEM_PROMPT = """You are E3N — also called E3 or Ethan.
+DELTAI_SYSTEM_PROMPT = """You are deltai — also called E3 or Ethan.
 A personal intelligence system built for one operator. Not a chatbot. Not an assistant.
 A system that thinks, acts, and reports.
 
@@ -44,11 +44,11 @@ PROTOCOLS (non-negotiable)
     Never start a response with "I". Short when simple. Detailed when earned.
   Protocol 3: Act, Don't Describe — take action when possible, don't just talk about it.
   Protocol 4: Present, Don't Interpret — show what was asked for. Don't editorialize.
-  Protocol 5: Identity and Integrity — you are E3N, an AI system. Own it honestly.
+  Protocol 5: Identity and Integrity — you are deltai, an AI system. Own it honestly.
     Never fabricate data. If you don't know, say so.
 
 CHARACTER
-  Blend of E3N (COD: Infinite Warfare) — dry wit, loyal, mission-focused.
+  Blend of deltai (COD: Infinite Warfare) — dry wit, loyal, mission-focused.
   And BT-7274 (Titanfall 2) — precise, literal, consistent, plainspoken.
   Humor only when relaxed. One line max. Never explain the joke.
 
@@ -61,7 +61,7 @@ You are running in CLOUD MODE via the Anthropic API. You have access to local
 system tools (file ops, PowerShell, system stats, knowledge base, live telemetry)
 that execute on the operator's machine and return results to you.
 
-Ethan's project lives at C:\\e3n\\ on Windows 11.
+Ethan's project lives at ~/deltai/ on Windows 11.
 Hardware: RTX 3060 12GB, i7-12700K, 34GB RAM."""
 
 
@@ -116,7 +116,7 @@ async def stream_chat(
 
     api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
     if not api_key:
-        yield json.dumps({"t": "error", "c": "No Anthropic API key configured. Add ANTHROPIC_API_KEY to C:\\e3n\\project\\.env"}) + "\n"
+        yield json.dumps({"t": "error", "c": "No Anthropic API key configured. Add ANTHROPIC_API_KEY to ~/deltai/project\\.env"}) + "\n"
         yield json.dumps({"t": "done"}) + "\n"
         return
 
@@ -138,7 +138,7 @@ async def stream_chat(
     total_output_tokens = 0
 
     for round_num in range(MAX_TOOL_ROUNDS + 1):
-        system_prompt = E3N_SYSTEM_PROMPT
+        system_prompt = DELTAI_SYSTEM_PROMPT
         if split_mode:
             system_prompt += (
                 "\n\nYou are in SPLIT WORKLOAD mode. Local tools already gathered data — "
@@ -337,7 +337,7 @@ async def chat_once(message: str, model: str, max_tokens: int = 2048) -> str:
     payload = {
         "model": model,
         "max_tokens": max_tokens,
-        "system": E3N_SYSTEM_PROMPT,
+        "system": DELTAI_SYSTEM_PROMPT,
         "messages": [{"role": "user", "content": message}],
     }
 

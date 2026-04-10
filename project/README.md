@@ -1,8 +1,8 @@
-# E3N
+# deltai
 
-Local AI intelligence layer running on Windows 11. Named after E3N from COD: Infinite Warfare, with personality blending E3N (dry wit, loyal) and BT-7274 (precise, protocol-driven).
+Local AI intelligence layer running on Windows 11. Named after deltai from COD: Infinite Warfare, with personality blending deltai (dry wit, loyal) and BT-7274 (precise, protocol-driven).
 
-E3N is the AI brain — reasoning, memory, tool execution, and model routing. External services connect via the `/ingest` endpoint to push context into its RAG memory.
+deltai is the AI brain — reasoning, memory, tool execution, and model routing. External services connect via the `/ingest` endpoint to push context into its RAG memory.
 
 ## Architecture
 
@@ -19,12 +19,12 @@ E3N is the AI brain — reasoning, memory, tool execution, and model routing. Ex
 
 ```powershell
 # Terminal 1 — Backend
-cd C:\e3n\project
+cd ~/deltai/project
 .\venv\Scripts\activate
 uvicorn main:app --reload --port 8000
 
 # Terminal 2 — Electron
-cd C:\e3n\app
+cd ~/deltai/app
 npm start
 ```
 
@@ -53,7 +53,7 @@ npm start
 ## Project Structure
 
 ```
-C:\e3n\
+~/deltai/
   project/           # FastAPI backend
     main.py           # App, endpoints, resource manager
     router.py         # VRAM-aware model routing
