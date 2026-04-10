@@ -6,6 +6,7 @@ orchestrator can select the correct agent.
 
 from __future__ import annotations
 
+
 def classify_intent(query: str) -> str:
     """Return a coarse intent label used for initial agent routing."""
     q = query.lower()
