@@ -23,6 +23,7 @@ deltai is designed around Linux values:
 - **User-space first** — deltai never requires root. It runs as a user service and only accesses what you grant it.
 - **User choice** — bring your own models, swap out any component, opt into every feature.
 - **Modularity** — plugins/extensions are first-class. The core stays small; capability is added through the plugin API.
+- **Local extensions** — add optional daemon features as packages under [`project/extensions/`](project/extensions/README.md) (auto-discovered at startup; personal folders are git-ignored by default).
 - **Transparency** — every decision (routing, tool call, RAG retrieval) is logged and observable.
 - **No lock-in** — local models only by default. Cloud is optional, gated, and budget-controlled.
 - **Config-file driven** — configure via `.env` / TOML / environment variables. No mandatory GUI.
