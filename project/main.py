@@ -3093,8 +3093,9 @@ async def api_voice_config_put(req: dict):
     try:
         voice_configure(req)
         return {"ok": True, "updated": list(req.keys())}
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+    except Exception:
+        logger.exception("Failed to update voice pipeline configuration")
+        return JSONResponse({"error": "Internal server error"}, status_code=500)
 
 
 @app.get("/api/voice/presets")
