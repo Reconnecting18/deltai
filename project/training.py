@@ -1968,9 +1968,9 @@ def run_ab_eval(
         })
 
     # Save results
-    safe_model_a = re.sub(r"[^A-Za-z0-9._-]", "_", model_a).strip("._-") or "model_a"
-    safe_model_b = re.sub(r"[^A-Za-z0-9._-]", "_", model_b).strip("._-") or "model_b"
-    eval_file = f"ab_{safe_model_a}_vs_{safe_model_b}_{int(time.time())}.json"
+    # Use a trusted filename (no user-controlled model names) to avoid
+    # uncontrolled data in path expressions.
+    eval_file = f"ab_{int(time.time())}_{threading.get_ident()}.json"
     eval_root = os.path.realpath(EVAL_PATH)
     eval_path = os.path.realpath(os.path.join(eval_root, eval_file))
     if os.path.commonpath([eval_root, eval_path]) != eval_root:
