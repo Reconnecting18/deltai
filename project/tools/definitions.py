@@ -503,7 +503,7 @@ TOOL_DOMAIN_MAP = {
 # Patterns that indicate system/diagnostic queries
 import re as _re
 _SYSTEM_PATTERNS = _re.compile(
-    r'\b(file|folder|directory|path|shell command|run command|bash|command|process|disk|'
+    r'\b(file|folder|directory|path|run command|bash|command|process|disk|'
     r'read|write|create|delete|list|open)\b', _re.IGNORECASE)
 _DIAG_PATTERNS = _re.compile(
     r'\b(diagnostic|health|status|repair|fix|restart|ollama|model|vram|'

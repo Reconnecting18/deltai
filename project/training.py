@@ -749,7 +749,10 @@ def eval_adapter(adapter_name: str, eval_dataset: str = None,
         safe_adapter_name = _sanitize_model_name(adapter_name)
         eval_root = os.path.realpath(EVAL_PATH)
         eval_file = os.path.realpath(os.path.join(eval_root, f"{safe_adapter_name}_eval.json"))
-        if os.path.commonpath([eval_root, eval_file]) != eval_root:
+        try:
+            if os.path.commonpath([eval_root, eval_file]) != eval_root:
+                return {"status": "error", "reason": "Invalid adapter name for eval path"}
+        except ValueError:
             return {"status": "error", "reason": "Invalid adapter name for eval path"}
         eval_data = {
             "adapter": adapter_name,
