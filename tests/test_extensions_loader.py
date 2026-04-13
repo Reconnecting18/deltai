@@ -1,9 +1,8 @@
 """Ensure project/extensions discovery loads packages and mounts routes."""
 
+from extensions import load_extensions
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-from extensions import load_extensions
 
 
 def test_example_extension_hello_route():
