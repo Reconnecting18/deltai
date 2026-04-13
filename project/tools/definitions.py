@@ -474,6 +474,23 @@ if _TELEMETRY_API_URL:
         TOOL_MAP[t["function"]["name"]] = t
 
 
+# ── EXTENSION TOOLS ─────────────────────────────────────────────────────
+# Tools contributed by user extensions (project/extensions/).
+# The extensions loader calls _merge_extension_tools() after load_extensions().
+
+def _merge_extension_tools(ext_tools: list) -> None:
+    """
+    Merge tool definitions from extensions into the global TOOLS list and TOOL_MAP.
+    Skips any tool whose name already exists to avoid accidental overrides.
+    Called once by main.py after load_extensions().
+    """
+    for tool in ext_tools:
+        name = tool.get("function", {}).get("name") or tool.get("name")
+        if name and name not in TOOL_MAP:
+            TOOLS.append(tool)
+            TOOL_MAP[name] = tool
+
+
 # ── TOOL RELEVANCE FILTERING ────────────────────────────────────────────
 # Pre-filter tools by query domain to improve model tool selection accuracy
 # and reduce prompt token usage (~1000 tokens saved per call).

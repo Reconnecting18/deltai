@@ -1570,6 +1570,24 @@ if _TELEMETRY_API_URL:
     EXECUTORS["get_tire_status"] = get_tire_status
     EXECUTORS["get_strategy_recommendation"] = get_strategy_recommendation
 
+def register_handler(name: str, fn) -> None:
+    """
+    Register a tool executor from an extension.
+    ``fn`` must be a callable that accepts keyword arguments matching the tool's
+    parameter schema and returns a plain string result.
+
+    Example (inside an extension's setup function)::
+
+        from tools.executor import register_handler
+
+        def _my_tool(input: str) -> str:
+            return f"processed: {input}"
+
+        register_handler("my_tool", _my_tool)
+    """
+    EXECUTORS[name] = fn
+
+
 def execute_tool(name: str, arguments: dict) -> str:
     """Execute a tool by name with given arguments. Returns result string."""
     fn = EXECUTORS.get(name)
