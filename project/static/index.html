@@ -1276,7 +1276,7 @@ async function loadMemoryFiles(){
       '<div class="kb-row">'+
         '<span class="kb-src">'+f.source+'</span>'+
         '<span class="kb-chunks">'+f.chunks+' chunks</span>'+
-        '<button class="kb-rm" onclick="kbRemoveFile(\''+f.source.replace(/'/g,"\\'")+'\')">Remove</button>'+
+        '<button class="kb-rm" onclick="kbRemoveFile(\''+f.source.replace(/\\/g,"\\\\").replace(/'/g,"\\'")+'\')">Remove</button>'+
       '</div>'
     ).join('')
   }catch(e){list.innerHTML='<div class="kb-empty">Error loading files</div>'}
