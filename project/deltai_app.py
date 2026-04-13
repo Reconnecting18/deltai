@@ -88,7 +88,7 @@ def stats():
         "percent":  ram.percent,
     }
 
-    disk = psutil.disk_usage("C:\\")
+    disk = psutil.disk_usage("/")
     result["disk"] = {
         "total_gb": round(disk.total / 1e9, 1),
         "used_gb":  round(disk.used  / 1e9, 1),

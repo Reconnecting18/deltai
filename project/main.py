@@ -83,6 +83,15 @@ try:
 except ImportError as e:
     logger.warning(f"Voice system unavailable: {e}")
 
+# ── EXTENSIONS IMPORTS ─────────────────────────────────────────────────
+EXTENSIONS_AVAILABLE = False
+try:
+    from extensions import load_extensions, get_extension_tools, shutdown_extensions
+    from tools.definitions import _merge_extension_tools
+    EXTENSIONS_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Extensions system unavailable: {e}")
+
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 DELTAI_MODEL  = os.getenv("DELTAI_MODEL", "deltai")
 BACKUP_MAX_RETRIES = int(os.getenv("BACKUP_MAX_RETRIES", "2"))
@@ -941,7 +950,6 @@ async def _resource_manager_loop():
                         subprocess.Popen(
                             ["ollama", "serve"],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
                         )
                         _resource_state["last_recovery"] = now
                         _resource_state["ollama_failures"] = 0
@@ -1287,6 +1295,12 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"Watcher shutdown failed: {e}")
 
+    if EXTENSIONS_AVAILABLE:
+        try:
+            await shutdown_extensions()
+        except Exception as e:
+            logger.error(f"Extensions shutdown failed: {e}")
+
 app = FastAPI(title="deltai", lifespan=lifespan)
 
 app.add_middleware(
@@ -1297,6 +1311,14 @@ app.add_middleware(
 )
 
 app.mount("/static", StaticFiles(directory=os.path.join(_HERE, "static")), name="static")
+
+# ── EXTENSIONS ──────────────────────────────────────────────────────────
+if EXTENSIONS_AVAILABLE:
+    try:
+        load_extensions(app)
+        _merge_extension_tools(get_extension_tools())
+    except Exception as _ext_err:
+        logger.warning(f"Extensions failed to initialise: {_ext_err}")
 
 
 # ── TEXT-AS-TOOL FALLBACK PARSER ────────────────────────────────────────
@@ -1997,12 +2019,12 @@ async def chat(req: ChatRequest):
                             f"{safe_errors.public_error_detail(tool_err)}"
                         )
                     # If tool errored, retry once with sanitized args
-                    if result.startswith("ERROR:") and name in ("run_powershell", "read_file", "write_file"):
+                    if result.startswith("ERROR:") and name in ("run_shell", "read_file", "write_file"):
                         yield json.dumps({"t": "retry", "n": name, "c": "Retrying with adjusted parameters..."}) + "\n"
                         sanitized_args = dict(args)
                         if "path" in sanitized_args:
                             sanitized_args["path"] = os.path.normpath(sanitized_args["path"])
-                        if "timeout" in sanitized_args and name == "run_powershell":
+                        if "timeout" in sanitized_args and name == "run_shell":
                             sanitized_args["timeout"] = min(int(sanitized_args.get("timeout", 15)), 30)
                         try:
                             result2 = await asyncio.to_thread(execute_tool, name, sanitized_args)

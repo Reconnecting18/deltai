@@ -74,14 +74,14 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "run_powershell",
-            "description": "Execute a PowerShell command on the local Windows system. Use for system tasks, process management, app launching, or any shell operation. Commands run with normal user privileges.",
+            "name": "run_shell",
+            "description": "Execute a bash shell command on the local Linux system. Use for system tasks, process management, app launching, or any shell operation. Commands run with normal user privileges.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "The PowerShell command to execute"
+                        "description": "The bash command to execute"
                     },
                     "timeout": {
                         "type": "integer",
@@ -113,7 +113,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_knowledge",
-            "description": "Search deltai's knowledge base (ChromaDB vector store) for information from ingested documents. Use when the operator asks about topics that might be in their knowledge files, references past notes, or asks you to recall something from their documents. Files in ~/deltai/data\\knowledge\\ are auto-ingested.",
+            "description": "Search deltai's knowledge base (ChromaDB vector store) for information from ingested documents. Use when the operator asks about topics that might be in their knowledge files, references past notes, or asks you to recall something from their documents. Files in ~/deltai/data/knowledge/ are auto-ingested.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -474,6 +474,23 @@ if _TELEMETRY_API_URL:
         TOOL_MAP[t["function"]["name"]] = t
 
 
+# ── EXTENSION TOOLS ─────────────────────────────────────────────────────
+# Tools contributed by user extensions (project/extensions/).
+# The extensions loader calls _merge_extension_tools() after load_extensions().
+
+def _merge_extension_tools(ext_tools: list) -> None:
+    """
+    Merge tool definitions from extensions into the global TOOLS list and TOOL_MAP.
+    Skips any tool whose name already exists to avoid accidental overrides.
+    Called once by main.py after load_extensions().
+    """
+    for tool in ext_tools:
+        name = tool.get("function", {}).get("name") or tool.get("name")
+        if name and name not in TOOL_MAP:
+            TOOLS.append(tool)
+            TOOL_MAP[name] = tool
+
+
 # ── TOOL RELEVANCE FILTERING ────────────────────────────────────────────
 # Pre-filter tools by query domain to improve model tool selection accuracy
 # and reduce prompt token usage (~1000 tokens saved per call).
@@ -493,7 +510,7 @@ TOOL_DOMAIN_MAP = {
                     "read_file", "summarize_data", "get_system_info"},
     "reasoning": {"search_knowledge", "calculate", "solve_math", "summarize_data",
                   "read_file", "lookup_reference"},
-    "system": {"read_file", "write_file", "list_directory", "run_powershell",
+    "system": {"read_file", "write_file", "list_directory", "run_shell",
                "get_system_info", "memory_stats", "self_diagnostics",
                "manage_ollama_models", "repair_subsystem", "resource_status"},
     "diagnostics": {"self_diagnostics", "manage_ollama_models", "repair_subsystem",
@@ -503,7 +520,7 @@ TOOL_DOMAIN_MAP = {
 # Patterns that indicate system/diagnostic queries
 import re as _re
 _SYSTEM_PATTERNS = _re.compile(
-    r'\b(file|folder|directory|path|powershell|command|process|disk|'
+    r'\b(file|folder|directory|path|run command|bash|command|process|disk|'
     r'read|write|create|delete|list|open)\b', _re.IGNORECASE)
 _DIAG_PATTERNS = _re.compile(
     r'\b(diagnostic|health|status|repair|fix|restart|ollama|model|vram|'

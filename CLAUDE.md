@@ -47,6 +47,7 @@ External services, scripts, and cron jobs push context into deltai via `POST /in
 | Path | Purpose |
 |------|---------|
 | `project/` | deltai daemon (FastAPI backend) |
+| `project/extensions/` | User extensions — personal features that don't touch core (auto-discovered at startup) |
 | `app/` | Electron desktop shell (optional) |
 | `modelfiles/` | Ollama modelfiles |
 | `systemd/user/` | systemd user service unit |
@@ -131,6 +132,19 @@ Optional. STT: faster-whisper. TTS: edge-tts / Piper. Full loop: `POST /voice/ch
 
 Web training data collection: Wikipedia (HF datasets streaming), arXiv XML API, Semantic Scholar, general web via trafilatura. SHA256 dedup via SQLite.
 
+### Extensions (project/extensions/)
+
+User-space extension system. Any subdirectory inside `project/extensions/` that contains an `__init__.py` is automatically discovered and loaded at startup. Extensions can:
+
+- Register FastAPI routers (new API endpoints, prefix `/ext/<name>/`)
+- Define additional `TOOLS` that the LLM can call (same schema as `project/tools/definitions.py`)
+- Register tool executor handlers via `tools.executor.register_handler(name, fn)`
+- Run code at startup (`setup(app)`) and shutdown (`shutdown()`)
+
+Extensions are loaded **after** the core app is initialised. A broken extension is skipped with a warning and never prevents deltai from starting. Personal extension directories are gitignored by default (see `.gitignore`); add `-f` to `git add` to opt a specific extension into version control.
+
+See `project/extensions/README.md` for the full authoring guide and `project/extensions/example_extension/` for a working template.
+
 ---
 
 ## Key Files
@@ -142,8 +156,11 @@ Web training data collection: Wikipedia (HF datasets streaming), arXiv XML API, 
 | `project/memory.py` | ChromaDB RAG, hierarchical storage, iterative retrieval, dedup, ingest |
 | `project/quality.py` | Response quality scorer, drives capture + routing feedback + gap detection |
 | `project/persistence.py` | SQLite backing store — history, budget, traces, quality, routing, gaps |
-| `project/tools/definitions.py` | Tool schemas, `filter_tools()` |
-| `project/tools/executor.py` | Tool execution with retry + safety |
+| `project/tools/definitions.py` | Tool schemas, `filter_tools()`, `_merge_extension_tools()` |
+| `project/tools/executor.py` | Tool execution with retry + safety, `register_handler()` |
+| `project/extensions/__init__.py` | Extension loader — `load_extensions()`, `get_extension_tools()`, `shutdown_extensions()` |
+| `project/extensions/README.md` | Extension authoring guide |
+| `project/extensions/example_extension/` | Working extension template |
 | `project/training.py` | QLoRA, adapters, distillation, dataset CRUD, auto-capture, daily cycle |
 | `project/collector.py` | Web data collection for training |
 | `project/voice/` | STT/TTS package |
@@ -294,6 +311,6 @@ deltai is in early development. The FastAPI backend, router, RAG, tools, trainin
 
 - [x] systemd user service unit in-repo (`systemd/user/delta-daemon.service`) and XDG-style env vars
 - [ ] Linux-appropriate defaults everywhere (`run_shell` vs legacy PowerShell naming on the host)
-- [ ] Plugin API design (tool registration from external services)
+- [x] Extension system — `project/extensions/` for personal features without touching core (tool registration, custom routes, startup/shutdown hooks)
 - [ ] Broader task automation examples beyond optional adapter domains (`racing`, `telemetry`, etc.)
 - [ ] Documentation and onboarding kept aligned with root README / AGENTS.md
