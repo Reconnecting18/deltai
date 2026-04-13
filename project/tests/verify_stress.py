@@ -410,7 +410,7 @@ def stress_tool_safety():
     # Path safety
     assert not _is_path_safe_write("/etc/test.txt"), "/etc should be protected"
     assert not _is_path_safe_write("/boot/grub/test.txt"), "/boot should be protected"
-    assert _is_path_safe_write("/home/user/deltai/test.txt")
+    assert _is_path_safe_write(os.path.expanduser("~/deltai/test.txt"))
 stress_tool_safety()
 
 # Stress 14: Training safety — blocks during sim

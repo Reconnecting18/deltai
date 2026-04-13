@@ -67,7 +67,7 @@ LORA_MAX_SEQ_LEN = int(os.getenv("LORA_MAX_SEQ_LEN", "1024"))
 LORA_WARMUP_RATIO = float(os.getenv("LORA_WARMUP_RATIO", "0.05"))
 LORA_QUANT_METHOD = os.getenv("LORA_QUANT_METHOD", "Q4_K_M")
 HF_BASE_MODEL = os.getenv("HF_BASE_MODEL", "Qwen/Qwen2.5-3B-Instruct")
-LLAMA_CPP_PATH = os.getenv("LLAMA_CPP_PATH", "~/deltai/tools/llama.cpp")
+LLAMA_CPP_PATH = os.path.expanduser(os.getenv("LLAMA_CPP_PATH", "~/deltai/tools/llama.cpp"))
 
 # ── DISTILLATION HYPERPARAMETERS (from .env) ──────────────────────────
 
@@ -1843,8 +1843,8 @@ def start_training(
     try:
         output_model = _sanitize_model_name(output_model)
         base_model = _sanitize_model_name(base_model)
-    except ValueError as e:
-        return {"status": "error", "reason": f"Invalid model name: {e}"}
+    except ValueError:
+        return {"status": "error", "reason": "Invalid model name: only alphanumerics, '.', '_', '-' are allowed"}
 
     # Validate dataset
     ds_result = get_dataset(dataset_name)
