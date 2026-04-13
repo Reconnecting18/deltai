@@ -17,17 +17,17 @@ Effects chain order:
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
-from .voice_config import VoiceConfig, DEFAULT_CONFIG
+from .voice_config import DEFAULT_CONFIG, VoiceConfig
 
 logger = logging.getLogger("deltai.voice.postprocess")
 
 # Check for scipy availability
 try:
     import scipy.signal  # noqa: F401
+
     _HAS_SCIPY = True
 except ImportError:
     _HAS_SCIPY = False
@@ -41,9 +41,9 @@ class PostProcessor:
     All parameters sourced from VoiceConfig.
     """
 
-    def __init__(self, config: Optional[VoiceConfig] = None) -> None:
+    def __init__(self, config: VoiceConfig | None = None) -> None:
         self._config = config or DEFAULT_CONFIG
-        self._ir_cache: Optional[np.ndarray] = None
+        self._ir_cache: np.ndarray | None = None
 
     def process(self, audio: np.ndarray, sample_rate: int = 22050) -> np.ndarray:
         """Run the full effects chain on audio.
@@ -165,7 +165,7 @@ class PostProcessor:
             logger.warning("Reverb failed: %s — skipping", e)
             return audio
 
-    def _get_impulse_response(self, sr: int) -> Optional[np.ndarray]:
+    def _get_impulse_response(self, sr: int) -> np.ndarray | None:
         """Load or generate a short metallic impulse response."""
         if self._ir_cache is not None:
             return self._ir_cache
@@ -277,9 +277,13 @@ class PostProcessor:
             # Envelope follower
             for i in range(1, len(audio)):
                 if abs_audio[i] > envelope[i - 1]:
-                    envelope[i] = attack_coeff * envelope[i - 1] + (1.0 - attack_coeff) * abs_audio[i]
+                    envelope[i] = (
+                        attack_coeff * envelope[i - 1] + (1.0 - attack_coeff) * abs_audio[i]
+                    )
                 else:
-                    envelope[i] = release_coeff * envelope[i - 1] + (1.0 - release_coeff) * abs_audio[i]
+                    envelope[i] = (
+                        release_coeff * envelope[i - 1] + (1.0 - release_coeff) * abs_audio[i]
+                    )
 
             # Gain computation
             gain = np.ones(len(audio), dtype=np.float32)

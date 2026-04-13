@@ -7,11 +7,10 @@ Model loaded lazily on first call. Graceful fallback if Piper unavailable.
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
-from .voice_config import VoiceConfig, DEFAULT_CONFIG
+from .voice_config import DEFAULT_CONFIG, VoiceConfig
 
 logger = logging.getLogger("deltai.voice.tts")
 
@@ -23,10 +22,10 @@ class PiperTTS:
     Returns audio as float32 numpy array normalized to [-1.0, 1.0].
     """
 
-    def __init__(self, config: Optional[VoiceConfig] = None) -> None:
+    def __init__(self, config: VoiceConfig | None = None) -> None:
         self._config = config or DEFAULT_CONFIG
         self._model = None
-        self._available: Optional[bool] = None
+        self._available: bool | None = None
 
     @property
     def sample_rate(self) -> int:
@@ -39,6 +38,7 @@ class PiperTTS:
         if self._available is None:
             try:
                 import piper  # noqa: F401
+
                 self._available = True
             except ImportError:
                 self._available = False
@@ -85,7 +85,7 @@ class PiperTTS:
             self._model = None
             return False
 
-    def synthesize(self, text: str) -> Optional[np.ndarray]:
+    def synthesize(self, text: str) -> np.ndarray | None:
         """Synthesize text to audio.
 
         Args:

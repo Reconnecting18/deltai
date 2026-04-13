@@ -17,12 +17,11 @@ Stream protocol (JSON lines):
   {"t":"error","c":"message"}
 """
 
-import os
 import json
 import logging
+import os
 
 import httpx
-
 import safe_errors
 
 logger = logging.getLogger("deltai.anthropic")
@@ -65,6 +64,7 @@ return results to you. Paths and shell follow the host OS (often bash on Linux).
 
 # ── TOOL SCHEMA CONVERSION ───────────────────────────────────────────────
 
+
 def _convert_tools_to_anthropic(ollama_tools: list) -> list:
     """
     Convert Ollama-format tool definitions to Anthropic's tool format.
@@ -74,17 +74,20 @@ def _convert_tools_to_anthropic(ollama_tools: list) -> list:
     anthropic_tools = []
     for tool in ollama_tools:
         fn = tool.get("function", {})
-        anthropic_tools.append({
-            "name": fn["name"],
-            "description": fn.get("description", ""),
-            "input_schema": fn.get("parameters", {"type": "object", "properties": {}}),
-        })
+        anthropic_tools.append(
+            {
+                "name": fn["name"],
+                "description": fn.get("description", ""),
+                "input_schema": fn.get("parameters", {"type": "object", "properties": {}}),
+            }
+        )
     return anthropic_tools
 
 
 # ── STREAMING CHAT WITH TOOL USE ─────────────────────────────────────────
 
 MAX_TOOL_ROUNDS = 5  # Prevent infinite tool loops
+
 
 async def stream_chat(
     message: str,
@@ -114,10 +117,15 @@ async def stream_chat(
 
     api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
     if not api_key:
-        yield json.dumps({
-            "t": "error",
-            "c": "No Anthropic API key configured. Set ANTHROPIC_API_KEY in project/.env (or your environment).",
-        }) + "\n"
+        yield (
+            json.dumps(
+                {
+                    "t": "error",
+                    "c": "No Anthropic API key configured. Set ANTHROPIC_API_KEY in project/.env (or your environment).",
+                }
+            )
+            + "\n"
+        )
         yield json.dumps({"t": "done"}) + "\n"
         return
 
@@ -138,7 +146,7 @@ async def stream_chat(
     total_input_tokens = 0
     total_output_tokens = 0
 
-    for round_num in range(MAX_TOOL_ROUNDS + 1):
+    for _round_num in range(MAX_TOOL_ROUNDS + 1):
         system_prompt = DELTAI_SYSTEM_PROMPT
         if split_mode:
             system_prompt += (
@@ -169,7 +177,15 @@ async def stream_chat(
                             err_msg = err.get("error", {}).get("message", body.decode()[:200])
                         except Exception:
                             err_msg = body.decode()[:200]
-                        yield json.dumps({"t": "error", "c": f"Anthropic API error ({resp.status_code}): {err_msg}"}) + "\n"
+                        yield (
+                            json.dumps(
+                                {
+                                    "t": "error",
+                                    "c": f"Anthropic API error ({resp.status_code}): {err_msg}",
+                                }
+                            )
+                            + "\n"
+                        )
                         yield json.dumps({"t": "done"}) + "\n"
                         return
 
@@ -216,32 +232,44 @@ async def stream_chat(
                                         yield json.dumps({"t": "text", "c": text}) + "\n"
                                 elif delta.get("type") == "input_json_delta":
                                     if current_tool_use:
-                                        current_tool_use["input_json"] += delta.get("partial_json", "")
+                                        current_tool_use["input_json"] += delta.get(
+                                            "partial_json", ""
+                                        )
 
                             elif event_type == "content_block_stop":
                                 if current_tool_use:
                                     # Parse tool input
                                     try:
-                                        tool_input = json.loads(current_tool_use["input_json"]) if current_tool_use["input_json"] else {}
+                                        tool_input = (
+                                            json.loads(current_tool_use["input_json"])
+                                            if current_tool_use["input_json"]
+                                            else {}
+                                        )
                                     except json.JSONDecodeError:
                                         tool_input = {}
-                                    tool_use_blocks.append({
-                                        "id": current_tool_use["id"],
-                                        "name": current_tool_use["name"],
-                                        "input": tool_input,
-                                    })
-                                    assistant_content.append({
-                                        "type": "tool_use",
-                                        "id": current_tool_use["id"],
-                                        "name": current_tool_use["name"],
-                                        "input": tool_input,
-                                    })
+                                    tool_use_blocks.append(
+                                        {
+                                            "id": current_tool_use["id"],
+                                            "name": current_tool_use["name"],
+                                            "input": tool_input,
+                                        }
+                                    )
+                                    assistant_content.append(
+                                        {
+                                            "type": "tool_use",
+                                            "id": current_tool_use["id"],
+                                            "name": current_tool_use["name"],
+                                            "input": tool_input,
+                                        }
+                                    )
                                     current_tool_use = None
                                 elif current_text:
-                                    assistant_content.append({
-                                        "type": "text",
-                                        "text": current_text,
-                                    })
+                                    assistant_content.append(
+                                        {
+                                            "type": "text",
+                                            "text": current_text,
+                                        }
+                                    )
                                     current_text = ""
 
                             elif event_type == "message_delta":
@@ -266,14 +294,22 @@ async def stream_chat(
             yield json.dumps({"t": "done"}) + "\n"
             return
         except httpx.ConnectError:
-            yield json.dumps({"t": "error", "c": "Cannot reach Anthropic API — check internet connection"}) + "\n"
+            yield (
+                json.dumps(
+                    {"t": "error", "c": "Cannot reach Anthropic API — check internet connection"}
+                )
+                + "\n"
+            )
             yield json.dumps({"t": "done"}) + "\n"
             return
         except Exception as e:
             safe_errors.log_exception(logger, "Anthropic stream_chat failed", e)
-            yield json.dumps(
-                {"t": "error", "c": f"Cloud error: {safe_errors.public_error_detail(e)}"},
-            ) + "\n"
+            yield (
+                json.dumps(
+                    {"t": "error", "c": f"Cloud error: {safe_errors.public_error_detail(e)}"},
+                )
+                + "\n"
+            )
             yield json.dumps({"t": "done"}) + "\n"
             return
 
@@ -296,21 +332,20 @@ async def stream_chat(
                 result = execute_tool_fn(name, args)
             except Exception as e:
                 safe_errors.log_exception(logger, f"Anthropic tool {name} failed", e)
-                result = (
-                    "ERROR: Tool execution failed: "
-                    f"{safe_errors.public_error_detail(e)}"
-                )
+                result = f"ERROR: Tool execution failed: {safe_errors.public_error_detail(e)}"
 
             summary = result[:300].replace("\n", " ").replace("\r", "")
             if len(result) > 300:
                 summary += "..."
             yield json.dumps({"t": "result", "n": name, "s": summary}) + "\n"
 
-            tool_results.append({
-                "type": "tool_result",
-                "tool_use_id": tool_id,
-                "content": result,
-            })
+            tool_results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_id,
+                    "content": result,
+                }
+            )
 
         messages.append({"role": "user", "content": tool_results})
 
@@ -323,15 +358,21 @@ async def stream_chat(
     yield json.dumps({"t": "done"}) + "\n"
 
     # Return token usage for cost tracking
-    yield json.dumps({
-        "t": "_usage",
-        "input_tokens": total_input_tokens,
-        "output_tokens": total_output_tokens,
-        "model": model,
-    }) + "\n"
+    yield (
+        json.dumps(
+            {
+                "t": "_usage",
+                "input_tokens": total_input_tokens,
+                "output_tokens": total_output_tokens,
+                "model": model,
+            }
+        )
+        + "\n"
+    )
 
 
 # ── SINGLE-SHOT (non-streaming, for internal use) ──────────────────────
+
 
 async def chat_once(message: str, model: str, max_tokens: int = 2048) -> str:
     """

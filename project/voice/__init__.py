@@ -17,17 +17,15 @@ warning and returns. If RVC isn't loaded, audio passes through unchanged.
 If no audio device exists, audio is silently discarded.
 """
 
-import asyncio
 import logging
-from typing import Optional
 
 import numpy as np
 
-from .voice_config import VoiceConfig, DEFAULT_CONFIG
-from .tts_engine import PiperTTS
-from .voice_converter import VoiceConverter
-from .post_processor import PostProcessor
 from .playback import Playback
+from .post_processor import PostProcessor
+from .tts_engine import PiperTTS
+from .voice_config import DEFAULT_CONFIG, VoiceConfig
+from .voice_converter import VoiceConverter
 
 logger = logging.getLogger("deltai.voice")
 
@@ -42,14 +40,14 @@ __all__ = [
 ]
 
 # Module-level pipeline components (lazy-initialized)
-_tts: Optional[PiperTTS] = None
-_rvc: Optional[VoiceConverter] = None
-_post: Optional[PostProcessor] = None
-_player: Optional[Playback] = None
+_tts: PiperTTS | None = None
+_rvc: VoiceConverter | None = None
+_post: PostProcessor | None = None
+_player: Playback | None = None
 _config: VoiceConfig = DEFAULT_CONFIG
 
 
-def configure(config: Optional[VoiceConfig] = None) -> None:
+def configure(config: VoiceConfig | None = None) -> None:
     """Reconfigure the voice pipeline with new settings.
 
     Reinitializes all pipeline components. Call before speak()
@@ -124,7 +122,7 @@ async def speak(text: str, priority: str = "normal") -> bool:
     return played
 
 
-def synthesize_only(text: str) -> Optional[np.ndarray]:
+def synthesize_only(text: str) -> np.ndarray | None:
     """Run TTS + RVC + PostProcess but skip playback.
 
     Useful for getting the processed audio buffer (e.g., to encode
@@ -157,15 +155,15 @@ def synthesize_only(text: str) -> Optional[np.ndarray]:
 # imports (`from voice import synthesize_speech, transcribe_audio, ...`) still work.
 try:
     from voice_legacy import (  # noqa: F401
-        synthesize_speech,
-        transcribe_audio,
+        VOICE_ENABLED,
+        _check_tts,
+        _clean_for_tts,
+        _init_whisper,
+        _windows_tts,
         get_voice_status,
         record_audio,
-        VOICE_ENABLED,
-        _init_whisper,
-        _clean_for_tts,
-        _windows_tts,
-        _check_tts,
+        synthesize_speech,
+        transcribe_audio,
     )
 except ImportError:
     VOICE_ENABLED = False  # Legacy voice module not available

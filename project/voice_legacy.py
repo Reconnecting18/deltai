@@ -30,7 +30,9 @@ logger = logging.getLogger("deltai.voice")
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")  # tiny, base, small, medium, large-v3
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "auto")  # auto, cpu, cuda
 WHISPER_COMPUTE = os.getenv("WHISPER_COMPUTE", "float16")  # float16, int8, float32
-TTS_VOICE = os.getenv("TTS_VOICE", "en-US-AndrewNeural")  # deltai's voice — warm American, slightly deeper
+TTS_VOICE = os.getenv(
+    "TTS_VOICE", "en-US-AndrewNeural"
+)  # deltai's voice — warm American, slightly deeper
 TTS_RATE = os.getenv("TTS_RATE", "+2%")  # Slightly faster — confident, not rushed
 TTS_PITCH = os.getenv("TTS_PITCH", "-3Hz")  # Slightly deeper than default — calm, not booming
 VOICE_ENABLED = os.getenv("VOICE_ENABLED", "true").lower() in ("true", "1", "yes")
@@ -76,12 +78,19 @@ def _init_whisper():
         if device == "auto":
             try:
                 import pynvml
+
                 pynvml.nvmlInit()
                 handle = pynvml.nvmlDeviceGetHandleByIndex(0)
                 mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
                 free_mb = (mem.total - mem.used) / 1e6
                 # Only use GPU if enough free VRAM (base model ~150MB, small ~500MB)
-                model_vram = {"tiny": 75, "base": 150, "small": 500, "medium": 1500, "large-v3": 3000}
+                model_vram = {
+                    "tiny": 75,
+                    "base": 150,
+                    "small": 500,
+                    "medium": 1500,
+                    "large-v3": 3000,
+                }
                 needed = model_vram.get(WHISPER_MODEL, 150)
                 device = "cuda" if free_mb > needed + 500 else "cpu"  # 500MB buffer
             except Exception:
@@ -145,12 +154,16 @@ def transcribe_audio(audio_bytes: bytes, language: str = "en") -> dict:
         segment_list = []
         for seg in segments:
             text_parts.append(seg.text.strip())
-            segment_list.append({
-                "start": round(seg.start, 2),
-                "end": round(seg.end, 2),
-                "text": seg.text.strip(),
-                "confidence": round(seg.avg_logprob, 3) if hasattr(seg, 'avg_logprob') else None,
-            })
+            segment_list.append(
+                {
+                    "start": round(seg.start, 2),
+                    "end": round(seg.end, 2),
+                    "text": seg.text.strip(),
+                    "confidence": round(seg.avg_logprob, 3)
+                    if hasattr(seg, "avg_logprob")
+                    else None,
+                }
+            )
 
         full_text = " ".join(text_parts).strip()
         elapsed = time.time() - start
@@ -182,15 +195,22 @@ def _check_tts():
     global _tts_available
     try:
         import edge_tts  # noqa: F401
+
         _tts_available = True
         return True
     except ImportError:
         # Fallback: check if espeak is available on Windows
         try:
             result = subprocess.run(
-                ["powershell", "-NoProfile", "-Command",
-                 "Add-Type -AssemblyName System.Speech; echo 'OK'"],
-                capture_output=True, text=True, timeout=5
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    "Add-Type -AssemblyName System.Speech; echo 'OK'",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             _tts_available = result.stdout.strip() == "OK"
             return _tts_available
@@ -199,7 +219,9 @@ def _check_tts():
             return False
 
 
-async def synthesize_speech(text: str, voice: str = None, rate: str = None, pitch: str = None) -> dict:
+async def synthesize_speech(
+    text: str, voice: str = None, rate: str = None, pitch: str = None
+) -> dict:
     """
     Convert text to speech audio bytes.
 
@@ -228,6 +250,7 @@ async def synthesize_speech(text: str, voice: str = None, rate: str = None, pitc
     # Try edge-tts first
     try:
         import edge_tts
+
         communicate = edge_tts.Communicate(clean, voice=voice, rate=rate, pitch=pitch)
 
         audio_data = bytearray()
@@ -283,7 +306,10 @@ $synth.Dispose()
 """
     try:
         proc = await asyncio.create_subprocess_exec(
-            "powershell", "-NoProfile", "-Command", ps_script,
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            ps_script,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -316,46 +342,46 @@ $synth.Dispose()
 
 def _clean_for_tts(text: str) -> str:
     """Clean text for TTS — remove code/markdown, convert to natural spoken form."""
-    import re  # noqa: local import avoids top-level dep when voice disabled
+    import re
 
     # Remove code blocks
-    text = re.sub(r'```[\s\S]*?```', ' code block omitted ', text)
+    text = re.sub(r"```[\s\S]*?```", " code block omitted ", text)
     # Remove inline code
-    text = re.sub(r'`[^`]+`', '', text)
+    text = re.sub(r"`[^`]+`", "", text)
     # Remove URLs
-    text = re.sub(r'https?://\S+', '', text)
+    text = re.sub(r"https?://\S+", "", text)
     # Remove markdown headers
-    text = re.sub(r'^#+\s+', '', text, flags=re.MULTILINE)
+    text = re.sub(r"^#+\s+", "", text, flags=re.MULTILINE)
     # Remove markdown bold/italic
-    text = re.sub(r'\*{1,3}([^*]+)\*{1,3}', r'\1', text)
+    text = re.sub(r"\*{1,3}([^*]+)\*{1,3}", r"\1", text)
     # Remove markdown links
-    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
     # Remove file paths (Windows-style)
-    text = re.sub(r'[A-Z]:\\[\w\\]+\.\w+', 'file path', text)
+    text = re.sub(r"[A-Z]:\\[\w\\]+\.\w+", "file path", text)
     # Convert bullet points / dashes to natural speech pauses
-    text = re.sub(r'^[\s]*[-•*]\s+', '', text, flags=re.MULTILINE)
+    text = re.sub(r"^[\s]*[-•*]\s+", "", text, flags=re.MULTILINE)
     # Remove numbered list markers
-    text = re.sub(r'^[\s]*\d+[\.\)]\s+', '', text, flags=re.MULTILINE)
+    text = re.sub(r"^[\s]*\d+[\.\)]\s+", "", text, flags=re.MULTILINE)
     # Remove pipe tables
-    text = re.sub(r'\|[^\n]+\|', '', text)
+    text = re.sub(r"\|[^\n]+\|", "", text)
     # Remove horizontal rules
-    text = re.sub(r'^---+$', '', text, flags=re.MULTILINE)
+    text = re.sub(r"^---+$", "", text, flags=re.MULTILINE)
     # Convert multiple newlines to period (natural pause)
-    text = re.sub(r'\n{2,}', '. ', text)
+    text = re.sub(r"\n{2,}", ". ", text)
     # Convert single newlines to space
-    text = re.sub(r'\n', ' ', text)
+    text = re.sub(r"\n", " ", text)
     # Remove emoji
-    text = re.sub(r'[\U0001F600-\U0001F9FF\U0001FA00-\U0001FAFF\U00002702-\U000027B0]', '', text)
+    text = re.sub(r"[\U0001F600-\U0001F9FF\U0001FA00-\U0001FAFF\U00002702-\U000027B0]", "", text)
     # Collapse whitespace
-    text = re.sub(r'\s+', ' ', text).strip()
+    text = re.sub(r"\s+", " ", text).strip()
     # Remove trailing "code block omitted" if it's the last thing
-    text = re.sub(r'\s*code block omitted\s*\.?\s*$', '', text).strip()
+    text = re.sub(r"\s*code block omitted\s*\.?\s*$", "", text).strip()
     # Truncate very long text (TTS shouldn't read novels)
     if len(text) > 1500:
         # Cut at sentence boundary
-        cut = text[:1500].rfind('. ')
+        cut = text[:1500].rfind(". ")
         if cut > 500:
-            text = text[:cut + 1]
+            text = text[: cut + 1]
         else:
             text = text[:1500] + "."
 
@@ -367,7 +393,11 @@ def _clean_for_tts(text: str) -> str:
 
 def get_voice_status() -> dict:
     """Get voice subsystem status."""
-    stt_status = "loaded" if _whisper_model is not None else ("available" if _stt_available else "not_loaded")
+    stt_status = (
+        "loaded"
+        if _whisper_model is not None
+        else ("available" if _stt_available else "not_loaded")
+    )
     tts_ok = _check_tts()
 
     return {
@@ -386,6 +416,7 @@ def get_voice_status() -> dict:
 
 
 # ── AUDIO RECORDING HELPER ────────────────────────────────────────────
+
 
 def record_audio(duration: float = 5.0, sample_rate: int = 16000) -> bytes:
     """

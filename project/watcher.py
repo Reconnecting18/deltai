@@ -4,14 +4,13 @@ Auto-ingests new/modified files, removes deleted ones from ChromaDB.
 Runs as a background thread inside the FastAPI process.
 """
 
+import logging
 import os
 import time
-import threading
-import logging
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
 
-from memory import ingest_file, remove_file, KNOWLEDGE_PATH, SUPPORTED_EXTENSIONS
+from memory import KNOWLEDGE_PATH, SUPPORTED_EXTENSIONS, ingest_file, remove_file
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB — skip files larger than this
 
@@ -19,9 +18,9 @@ logger = logging.getLogger("deltai.watcher")
 logger.setLevel(logging.INFO)
 if not logger.handlers:
     handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter(
-        "[%(asctime)s] WATCHER: %(message)s", datefmt="%H:%M:%S"
-    ))
+    handler.setFormatter(
+        logging.Formatter("[%(asctime)s] WATCHER: %(message)s", datefmt="%H:%M:%S")
+    )
     logger.addHandler(handler)
 
 
@@ -54,7 +53,9 @@ class KnowledgeHandler(FileSystemEventHandler):
         # Skip files that are too large
         try:
             if os.path.getsize(path) > MAX_FILE_SIZE:
-                logger.warning(f"Skipped (>{MAX_FILE_SIZE // (1024*1024)}MB): {os.path.basename(path)}")
+                logger.warning(
+                    f"Skipped (>{MAX_FILE_SIZE // (1024 * 1024)}MB): {os.path.basename(path)}"
+                )
                 return
         except OSError:
             return  # file vanished between event and size check
@@ -66,7 +67,9 @@ class KnowledgeHandler(FileSystemEventHandler):
             elif result["status"] == "skipped":
                 logger.info(f"Skipped: {os.path.basename(path)} ({result.get('reason', '?')})")
             else:
-                logger.warning(f"Error ingesting {os.path.basename(path)}: {result.get('reason', '?')}")
+                logger.warning(
+                    f"Error ingesting {os.path.basename(path)}: {result.get('reason', '?')}"
+                )
         except Exception as e:
             logger.error(f"Ingest failed for {os.path.basename(path)}: {e}")
 
@@ -93,7 +96,9 @@ class KnowledgeHandler(FileSystemEventHandler):
             try:
                 result = remove_file(event.src_path)
                 if result["status"] == "ok":
-                    logger.info(f"Removed {result['removed']} chunks for {os.path.basename(event.src_path)}")
+                    logger.info(
+                        f"Removed {result['removed']} chunks for {os.path.basename(event.src_path)}"
+                    )
             except Exception as e:
                 logger.error(f"Remove failed: {e}")
 
@@ -112,6 +117,7 @@ class KnowledgeHandler(FileSystemEventHandler):
 
 
 _observer = None
+
 
 def start_watcher():
     """Start the file watcher in a background thread."""

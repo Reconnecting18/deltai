@@ -79,8 +79,8 @@ jobs:
 
       - name: Apply Ruff fixes and format
         run: |
-          ruff check --fix src tests
-          ruff format src tests
+          ruff check --fix src tests project
+          ruff format src tests project
 
       - name: Branch name
         id: branch

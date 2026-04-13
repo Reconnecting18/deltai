@@ -50,12 +50,12 @@ _WIKI_OFFSET_FILE = os.path.join(CHECKPOINTS_PATH, "wikipedia_offset.txt")
 
 # ── Config from .env ─────────────────────────────────────────────────────────
 
-WEB_COLLECT_ENABLED    = os.getenv("WEB_COLLECT_ENABLED", "true").lower() in ("true", "1", "yes")
-WEB_COLLECT_WIKIPEDIA  = os.getenv("WEB_COLLECT_WIKIPEDIA", "true").lower() in ("true", "1", "yes")
-WEB_COLLECT_ARXIV      = os.getenv("WEB_COLLECT_ARXIV", "true").lower() in ("true", "1", "yes")
-WEB_COLLECT_OPENF1     = os.getenv("WEB_COLLECT_OPENF1", "true").lower() in ("true", "1", "yes")
+WEB_COLLECT_ENABLED = os.getenv("WEB_COLLECT_ENABLED", "true").lower() in ("true", "1", "yes")
+WEB_COLLECT_WIKIPEDIA = os.getenv("WEB_COLLECT_WIKIPEDIA", "true").lower() in ("true", "1", "yes")
+WEB_COLLECT_ARXIV = os.getenv("WEB_COLLECT_ARXIV", "true").lower() in ("true", "1", "yes")
+WEB_COLLECT_OPENF1 = os.getenv("WEB_COLLECT_OPENF1", "true").lower() in ("true", "1", "yes")
 WEB_COLLECT_MOTORSPORT = os.getenv("WEB_COLLECT_MOTORSPORT", "true").lower() in ("true", "1", "yes")
-WEB_COLLECT_PAPERS     = os.getenv("WEB_COLLECT_PAPERS", "true").lower() in ("true", "1", "yes")
+WEB_COLLECT_PAPERS = os.getenv("WEB_COLLECT_PAPERS", "true").lower() in ("true", "1", "yes")
 WEB_COLLECT_WIKI_BATCH = int(os.getenv("WEB_COLLECT_WIKIPEDIA_BATCH", "2000"))
 WEB_COLLECT_MAX_SOURCE = int(os.getenv("WEB_COLLECT_MAX_PER_SOURCE", "200"))
 
@@ -67,8 +67,7 @@ _dedup_lock = threading.Lock()
 def _get_dedup_db() -> sqlite3.Connection:
     db = sqlite3.connect(_DEDUP_DB, timeout=10)
     db.execute(
-        "CREATE TABLE IF NOT EXISTS seen_hashes "
-        "(hash TEXT PRIMARY KEY, source TEXT, added INTEGER)"
+        "CREATE TABLE IF NOT EXISTS seen_hashes (hash TEXT PRIMARY KEY, source TEXT, added INTEGER)"
     )
     db.commit()
     return db
@@ -84,7 +83,7 @@ def _is_duplicate(content: str, source: str = "") -> bool:
                 return True
             db.execute(
                 "INSERT INTO seen_hashes (hash, source, added) VALUES (?,?,?)",
-                (h, source, int(time.time()))
+                (h, source, int(time.time())),
             )
             db.commit()
             return False
@@ -94,6 +93,7 @@ def _is_duplicate(content: str, source: str = "") -> bool:
 
 # ── Dataset writing ───────────────────────────────────────────────────────────
 
+
 def _dataset_path(name: str) -> str:
     safe = re.sub(r"[^\w\-]", "_", name)
     return os.path.normpath(os.path.join(DATASETS_PATH, f"{safe}.jsonl"))
@@ -102,7 +102,7 @@ def _dataset_path(name: str) -> str:
 def _ensure_dataset(name: str):
     path = _dataset_path(name)
     if not os.path.exists(path):
-        with open(path, "w", encoding="utf-8") as f:
+        with open(path, "w", encoding="utf-8"):
             pass
 
 
@@ -131,6 +131,7 @@ def _write_example(dataset_name: str, instruction: str, output: str, category: s
 
 # ── Wikipedia checkpoint ──────────────────────────────────────────────────────
 
+
 def _read_wiki_offset() -> int:
     if os.path.exists(_WIKI_OFFSET_FILE):
         try:
@@ -156,13 +157,13 @@ _SCIENCE_KEYWORDS = re.compile(
     r"mechanical|engineering|material|force|energy|wave|radiation|nuclear|"
     r"aerospace|fluid|dynamics|mechanics|simulation|FEA|CFD|structural|"
     r"metallurgy|polymer|semiconductor|algorithm|computation|neural|signal)\b",
-    re.IGNORECASE
+    re.IGNORECASE,
 )
 
 
 def _detect_wiki_domain(title: str, text: str) -> str:
     """Return 'science' or 'general' based on article content."""
-    probe = (title + " " + text[:500])
+    probe = title + " " + text[:500]
     if _SCIENCE_KEYWORDS.search(probe):
         return "science"
     return "general"
@@ -175,7 +176,9 @@ _WIKI_TEMPLATES = [
     lambda title, _: f"What is {title}? Provide a comprehensive explanation.",
     lambda title, _: f"Describe the key principles and significance of {title}.",
     lambda title, text: f"Summarize the following topic: {title}.",
-    lambda title, _: f"Give a detailed overview of {title}, including its history, applications, and importance.",
+    lambda title, _: (
+        f"Give a detailed overview of {title}, including its history, applications, and importance."
+    ),
 ]
 
 
@@ -193,6 +196,7 @@ def _chunk_text(text: str, max_tokens: int = 900) -> list[str]:
 
 # ── SOURCE: Wikipedia ─────────────────────────────────────────────────────────
 
+
 def collect_wikipedia_batch(batch_size: int = 2000, dry_run: bool = False) -> dict:
     """
     Stream Wikipedia articles via HuggingFace datasets, starting from the
@@ -201,7 +205,14 @@ def collect_wikipedia_batch(batch_size: int = 2000, dry_run: bool = False) -> di
       deltai-science-knowledge  (science/engineering topics)
     Returns a stats dict.
     """
-    result = {"source": "wikipedia", "written": 0, "skipped": 0, "errors": 0, "offset_start": 0, "offset_end": 0}
+    result = {
+        "source": "wikipedia",
+        "written": 0,
+        "skipped": 0,
+        "errors": 0,
+        "offset_start": 0,
+        "offset_end": 0,
+    }
 
     try:
         from datasets import load_dataset  # type: ignore
@@ -221,7 +232,8 @@ def collect_wikipedia_batch(batch_size: int = 2000, dry_run: bool = False) -> di
     try:
         logger.info(f"Wikipedia: streaming from offset {offset}, batch={batch_size}")
         ds = load_dataset(
-            "wikipedia", "20220301.en",
+            "wikipedia",
+            "20220301.en",
             split="train",
             streaming=True,
             trust_remote_code=True,
@@ -241,7 +253,9 @@ def collect_wikipedia_batch(batch_size: int = 2000, dry_run: bool = False) -> di
                 continue
 
             domain = _detect_wiki_domain(title, text)
-            dataset_name = "deltai-science-knowledge" if domain == "science" else "deltai-general-knowledge"
+            dataset_name = (
+                "deltai-science-knowledge" if domain == "science" else "deltai-general-knowledge"
+            )
 
             # Use first chunk only for output (keep examples focused)
             chunks = _chunk_text(text, max_tokens=900)
@@ -266,7 +280,9 @@ def collect_wikipedia_batch(batch_size: int = 2000, dry_run: bool = False) -> di
         _write_wiki_offset(new_offset)
         result["offset_end"] = new_offset
         result["status"] = "ok"
-        logger.info(f"Wikipedia: wrote {result['written']}, skipped {result['skipped']}, new offset={new_offset}")
+        logger.info(
+            f"Wikipedia: wrote {result['written']}, skipped {result['skipped']}, new offset={new_offset}"
+        )
 
     except Exception as e:
         result["errors"] += 1
@@ -343,7 +359,9 @@ def collect_arxiv_batch(max_per_cat: int = 25, dry_run: bool = False) -> dict:
                     result["skipped"] += 1
                     continue
 
-                instruction = f"Explain the research paper titled '{title}' and its key contributions."
+                instruction = (
+                    f"Explain the research paper titled '{title}' and its key contributions."
+                )
                 output = f"This paper falls under {cat_desc}. {abstract}"
 
                 if _write_example("deltai-arxiv-papers", instruction, output, f"arxiv-{cat_id}"):
@@ -358,7 +376,9 @@ def collect_arxiv_batch(max_per_cat: int = 25, dry_run: bool = False) -> dict:
             logger.warning(f"arXiv error for {cat_id}: {e}")
 
     result["status"] = "ok" if result["errors"] == 0 else "partial"
-    logger.info(f"arXiv: wrote {result['written']}, skipped {result['skipped']}, errors {result['errors']}")
+    logger.info(
+        f"arXiv: wrote {result['written']}, skipped {result['skipped']}, errors {result['errors']}"
+    )
     return result
 
 
@@ -436,12 +456,14 @@ def collect_openf1_batch(seasons: list[int] = None, dry_run: bool = False) -> di
 
                 # Format strategy overview
                 pit_count = len(pits)
-                compound_seq = list({s.get("compound", "UNKNOWN") for s in stints if s.get("compound")})
+                compound_seq = list(
+                    {s.get("compound", "UNKNOWN") for s in stints if s.get("compound")}
+                )
                 avg_lap_at_stop = "unknown"
                 if pits:
                     lap_numbers = [p.get("lap_number") for p in pits if p.get("lap_number")]
                     if lap_numbers:
-                        avg_lap_at_stop = f"{sum(lap_numbers)/len(lap_numbers):.1f}"
+                        avg_lap_at_stop = f"{sum(lap_numbers) / len(lap_numbers):.1f}"
 
                 instruction = (
                     f"Analyze the race strategy for the {season} {gp_name} at {circuit}. "
@@ -455,7 +477,9 @@ def collect_openf1_batch(seasons: list[int] = None, dry_run: bool = False) -> di
                     f"influenced by compound performance and safety car periods."
                 )
 
-                if _write_example("deltai-openf1-strategy", instruction, output, f"openf1-{season}"):
+                if _write_example(
+                    "deltai-openf1-strategy", instruction, output, f"openf1-{season}"
+                ):
                     result["written"] += 1
                 else:
                     result["skipped"] += 1
@@ -468,7 +492,9 @@ def collect_openf1_batch(seasons: list[int] = None, dry_run: bool = False) -> di
         logger.error(f"OpenF1 collection error: {e}")
 
     result["status"] = "ok" if result["errors"] == 0 else "partial"
-    logger.info(f"OpenF1: wrote {result['written']}, skipped {result['skipped']}, errors {result['errors']}")
+    logger.info(
+        f"OpenF1: wrote {result['written']}, skipped {result['skipped']}, errors {result['errors']}"
+    )
     return result
 
 
@@ -546,7 +572,9 @@ def collect_papers_batch(max_per_query: int = 10, dry_run: bool = False) -> dict
 
                 output = " ".join(output_parts)
 
-                if _write_example("deltai-arxiv-papers", instruction, output, f"scholar-{domain_hint}"):
+                if _write_example(
+                    "deltai-arxiv-papers", instruction, output, f"scholar-{domain_hint}"
+                ):
                     result["written"] += 1
                 else:
                     result["skipped"] += 1
@@ -593,6 +621,7 @@ def _ddg_search_urls(query: str, max_results: int = 3) -> list[str]:
         if resp.status_code != 200:
             return []
         from urllib.parse import parse_qs, unquote, urlparse
+
         link_pat = re.compile(r'<a[^>]*href="([^"]*uddg=[^"]+)"', re.DOTALL)
         urls = []
         for raw in link_pat.findall(resp.text):
@@ -614,6 +643,7 @@ def _fetch_page_text(url: str, max_chars: int = 4000) -> str:
     """Fetch and extract clean article text from a URL using trafilatura."""
     try:
         import trafilatura  # type: ignore
+
         downloaded = trafilatura.fetch_url(url)
         if not downloaded:
             return ""
@@ -627,7 +657,9 @@ def _fetch_page_text(url: str, max_chars: int = 4000) -> str:
     except ImportError:
         # Fallback: basic httpx + strip tags
         try:
-            resp = httpx.get(url, timeout=10.0, headers={"User-Agent": "deltai/1.0"}, follow_redirects=True)
+            resp = httpx.get(
+                url, timeout=10.0, headers={"User-Agent": "deltai/1.0"}, follow_redirects=True
+            )
             if resp.status_code != 200:
                 return ""
             text = re.sub(r"<[^>]+>", " ", resp.text)
@@ -678,11 +710,14 @@ def collect_motorsport_batch(max_pages: int = 20, dry_run: bool = False) -> dict
             time.sleep(1.0)
 
     result["status"] = "ok"
-    logger.info(f"Motorsport web: wrote {result['written']}, skipped {result['skipped']}, errors {result['errors']}")
+    logger.info(
+        f"Motorsport web: wrote {result['written']}, skipped {result['skipped']}, errors {result['errors']}"
+    )
     return result
 
 
 # ── Main orchestrator ─────────────────────────────────────────────────────────
+
 
 def run_collection_cycle(
     dry_run: bool = False,

@@ -13,15 +13,12 @@ Graceful passthrough if model not trained or deps missing.
 """
 
 import logging
-import os
-import tempfile
 import time
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
-from .voice_config import VoiceConfig, DEFAULT_CONFIG
+from .voice_config import DEFAULT_CONFIG, VoiceConfig
 
 logger = logging.getLogger("deltai.voice.rvc")
 
@@ -39,15 +36,15 @@ class VoiceConverter:
     Fallback: returns input audio unchanged if model not available.
     """
 
-    def __init__(self, config: Optional[VoiceConfig] = None) -> None:
+    def __init__(self, config: VoiceConfig | None = None) -> None:
         self._config = config or DEFAULT_CONFIG
         self._loaded = False
         self._device = "cpu"
-        self._model = None           # RVC generator model
-        self._hubert = None          # HuBERT feature extractor
-        self._f0_extractor = None    # Pitch extractor (RMVPE)
-        self._index = None           # FAISS index for feature matching
-        self._target_sr = 40000      # RVC v2 standard output sample rate
+        self._model = None  # RVC generator model
+        self._hubert = None  # HuBERT feature extractor
+        self._f0_extractor = None  # Pitch extractor (RMVPE)
+        self._index = None  # FAISS index for feature matching
+        self._target_sr = 40000  # RVC v2 standard output sample rate
 
     @property
     def is_loaded(self) -> bool:
@@ -68,11 +65,13 @@ class VoiceConverter:
         """Select CUDA or CPU based on available VRAM."""
         try:
             import torch
+
             if not torch.cuda.is_available():
                 return "cpu"
             # Check free VRAM
             try:
                 import pynvml
+
                 pynvml.nvmlInit()
                 handle = pynvml.nvmlDeviceGetHandleByIndex(0)
                 mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
@@ -153,9 +152,25 @@ class VoiceConverter:
                 model_config = checkpoint["config"]
             else:
                 # Default RVC v2 config for 40k models
-                model_config = [768, 32, 192, 192, 768, 2, 6, 3, 0, "1", [3,7,11],
-                               [[1,3,5],[1,3,5],[1,3,5]], [1,3,5,7], [1,3,5,7], True,
-                               0.5, 40000]
+                model_config = [
+                    768,
+                    32,
+                    192,
+                    192,
+                    768,
+                    2,
+                    6,
+                    3,
+                    0,
+                    "1",
+                    [3, 7, 11],
+                    [[1, 3, 5], [1, 3, 5], [1, 3, 5]],
+                    [1, 3, 5, 7],
+                    [1, 3, 5, 7],
+                    True,
+                    0.5,
+                    40000,
+                ]
 
             # Store model weights and config for inference
             self._model = {
@@ -169,13 +184,16 @@ class VoiceConverter:
             if index_path is not None:
                 try:
                     import faiss
+
                     self._index = faiss.read_index(str(index_path))
                     if self._device == "cuda":
                         # Keep index on CPU — FAISS GPU index adds complexity
                         pass
                     logger.info("Loaded FAISS index: %s", index_path.name)
                 except ImportError:
-                    logger.info("faiss not installed — skipping feature index (quality may be slightly lower)")
+                    logger.info(
+                        "faiss not installed — skipping feature index (quality may be slightly lower)"
+                    )
                     self._index = None
                 except Exception as e:
                     logger.warning("Failed to load FAISS index: %s", e)
@@ -185,7 +203,10 @@ class VoiceConverter:
             elapsed = time.time() - t0
             logger.info(
                 "RVC model loaded: %s on %s (%.1fs). Target SR: %d Hz",
-                pth_path.name, self._device, elapsed, self._target_sr,
+                pth_path.name,
+                self._device,
+                elapsed,
+                self._target_sr,
             )
             return True
 
@@ -209,6 +230,7 @@ class VoiceConverter:
 
         try:
             import torch
+
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         except ImportError:
@@ -244,9 +266,9 @@ class VoiceConverter:
         """Extract f0 using DIO algorithm (pyworld)."""
         try:
             import pyworld as pw
+
             audio_f64 = audio.astype(np.float64)
-            f0, t = pw.dio(audio_f64, sr, f0_floor=50, f0_ceil=1100,
-                          frame_period=10.0)
+            f0, t = pw.dio(audio_f64, sr, f0_floor=50, f0_ceil=1100, frame_period=10.0)
             f0 = pw.stonemask(audio_f64, f0, t, sr)
             return f0.astype(np.float32)
         except ImportError:
@@ -258,9 +280,9 @@ class VoiceConverter:
         """Extract f0 using Harvest algorithm (pyworld, higher quality, slower)."""
         try:
             import pyworld as pw
+
             audio_f64 = audio.astype(np.float64)
-            f0, t = pw.harvest(audio_f64, sr, f0_floor=50, f0_ceil=1100,
-                              frame_period=10.0)
+            f0, t = pw.harvest(audio_f64, sr, f0_floor=50, f0_ceil=1100, frame_period=10.0)
             f0 = pw.stonemask(audio_f64, f0, t, sr)
             return f0.astype(np.float32)
         except ImportError:
@@ -274,15 +296,15 @@ class VoiceConverter:
 
         for i in range(n_frames):
             start = i * hop
-            frame = audio[start:start + hop * 4]
+            frame = audio[start : start + hop * 4]
             if len(frame) < hop * 2:
                 continue
             # Simple autocorrelation
-            corr = np.correlate(frame, frame, mode='full')
-            corr = corr[len(corr)//2:]
+            corr = np.correlate(frame, frame, mode="full")
+            corr = corr[len(corr) // 2 :]
             # Find first peak after minimum
             min_lag = int(sr / 1100)  # max f0 = 1100 Hz
-            max_lag = int(sr / 50)    # min f0 = 50 Hz
+            max_lag = int(sr / 50)  # min f0 = 50 Hz
             if max_lag > len(corr):
                 max_lag = len(corr)
             if min_lag >= max_lag:
@@ -312,7 +334,6 @@ class VoiceConverter:
             return audio
 
         try:
-            import torch
             from scipy.signal import resample
 
             t0 = time.time()
@@ -368,6 +389,8 @@ class VoiceConverter:
         if not self._loaded or self._device != "cuda":
             return 0
         return 1500  # Approximate: model ~1.5GB on GPU
+
+
 """
 Note on full RVC v2 inference:
 

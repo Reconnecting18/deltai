@@ -5,12 +5,11 @@ Zero magic numbers in processing code. All effects read from VoiceConfig.
 Presets stored as JSON in ~/deltai/data\\voice\\presets\\.
 """
 
-from dataclasses import dataclass, field, asdict
-from pathlib import Path
-from typing import Optional
 import json
 import logging
 import os
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
 from path_safety import resolve_under, safe_dataset_basename
 
@@ -24,43 +23,48 @@ def _preset_json_path(name: str) -> Path:
     stem = safe_dataset_basename(name)
     root = os.path.realpath(os.path.expanduser(str(PRESETS_DIR)))
     return Path(resolve_under(root, f"{stem}.json"))
+
+
 VOICE_DATA_DIR = Path(r"~/deltai/data\voice")
 
 
 @dataclass
 class TTSSettings:
     """Piper TTS engine settings."""
+
     model_name: str = "en_US-ryan-medium"
     model_dir: str = str(VOICE_DATA_DIR / "piper_models")
     sample_rate: int = 22050
-    speaker_id: Optional[int] = None
+    speaker_id: int | None = None
 
 
 @dataclass
 class RVCSettings:
     """RVC voice conversion settings."""
+
     enabled: bool = False
     model_dir: str = str(VOICE_DATA_DIR / "models")
     model_name: str = "deltai_voice"
-    index_path: Optional[str] = None
-    f0_method: str = "dio"          # dio (fast), harvest (quality), rmvpe (best, needs model)
-    f0_up_key: int = 0              # Pitch shift in semitones (0 = no shift)
-    protect: float = 0.33           # Protect voiceless consonants (0-0.5)
-    device: str = "auto"            # auto, cuda, cpu
+    index_path: str | None = None
+    f0_method: str = "dio"  # dio (fast), harvest (quality), rmvpe (best, needs model)
+    f0_up_key: int = 0  # Pitch shift in semitones (0 = no shift)
+    protect: float = 0.33  # Protect voiceless consonants (0-0.5)
+    device: str = "auto"  # auto, cuda, cpu
     # Training parameters
     training_audio_dir: str = str(VOICE_DATA_DIR / "training_audio")
-    training_sample_rate: int = 40000   # RVC v2 standard
+    training_sample_rate: int = 40000  # RVC v2 standard
     training_epochs: int = 200
     training_batch_size: int = 8
     training_save_interval: int = 50
     training_lr: float = 1e-4
-    min_segment_duration: float = 3.0   # seconds
+    min_segment_duration: float = 3.0  # seconds
     max_segment_duration: float = 15.0  # seconds
 
 
 @dataclass
 class PitchShiftSettings:
     """Pitch shift effect — lowers voice 1-2 semitones."""
+
     enabled: bool = True
     semitones: float = -1.5
 
@@ -68,6 +72,7 @@ class PitchShiftSettings:
 @dataclass
 class RingModSettings:
     """Ring modulation — adds metallic/electronic character."""
+
     enabled: bool = True
     carrier_freq_hz: float = 300.0
     wet_mix: float = 0.07  # 5-10% wet
@@ -76,6 +81,7 @@ class RingModSettings:
 @dataclass
 class LowPassSettings:
     """Low-pass filter — tames harsh highs."""
+
     enabled: bool = True
     cutoff_hz: float = 9000.0
     order: int = 4
@@ -84,8 +90,9 @@ class LowPassSettings:
 @dataclass
 class ReverbSettings:
     """Short convolution reverb — metallic space."""
+
     enabled: bool = True
-    ir_path: Optional[str] = str(VOICE_DATA_DIR / "impulse_responses" / "metallic_short.npy")
+    ir_path: str | None = str(VOICE_DATA_DIR / "impulse_responses" / "metallic_short.npy")
     ir_duration_ms: float = 40.0  # 30-50ms synthetic IR
     wet_mix: float = 0.15
     decay: float = 0.3
@@ -94,6 +101,7 @@ class ReverbSettings:
 @dataclass
 class ChorusSettings:
     """Light chorus/flanger — subtle movement."""
+
     enabled: bool = True
     rate_hz: float = 0.75  # 0.5-1Hz
     depth_ms: float = 2.0
@@ -103,6 +111,7 @@ class ChorusSettings:
 @dataclass
 class SubBassSettings:
     """Sub-bass hum layer — electronic presence."""
+
     enabled: bool = True
     freq_hz: float = 120.0
     level_db: float = -32.0  # -30 to -35dB
@@ -111,6 +120,7 @@ class SubBassSettings:
 @dataclass
 class CompressorSettings:
     """Dynamic compression — evens out levels."""
+
     enabled: bool = True
     ratio: float = 2.0
     threshold_db: float = -20.0
@@ -121,7 +131,8 @@ class CompressorSettings:
 @dataclass
 class PlaybackSettings:
     """Audio playback settings."""
-    device_index: Optional[int] = None
+
+    device_index: int | None = None
     blocksize: int = 1024
     latency: str = "low"
 
@@ -133,6 +144,7 @@ class VoiceConfig:
     Every tunable parameter for the TTS -> RVC -> PostProcess -> Playback
     pipeline. No magic numbers anywhere else.
     """
+
     tts: TTSSettings = field(default_factory=TTSSettings)
     rvc: RVCSettings = field(default_factory=RVCSettings)
     pitch_shift: PitchShiftSettings = field(default_factory=PitchShiftSettings)

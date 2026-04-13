@@ -8,9 +8,8 @@ import logging
 import os
 import subprocess
 
-import psutil
-
 import path_guard
+import psutil
 import safe_errors
 
 _LOG = logging.getLogger("deltai.executor")
@@ -37,20 +36,39 @@ PROTECTED_PATHS = [
 
 BLOCKED_COMMANDS = [
     # Filesystem destruction
-    "rm -rf /", "rm -rf /*", "mkfs", "dd if=",
+    "rm -rf /",
+    "rm -rf /*",
+    "mkfs",
+    "dd if=",
     # Privilege escalation
-    "sudo ", "su -", "sudo -i",
-    "chmod 777 /", "chown root",
+    "sudo ",
+    "su -",
+    "sudo -i",
+    "chmod 777 /",
+    "chown root",
     # User/group manipulation
-    "useradd", "userdel", "usermod", "groupadd", "groupdel",
+    "useradd",
+    "userdel",
+    "usermod",
+    "groupadd",
+    "groupdel",
     "passwd ",
     # System shutdown/reboot
-    "shutdown", "reboot", "halt", "poweroff", "init 0", "init 6",
+    "shutdown",
+    "reboot",
+    "halt",
+    "poweroff",
+    "init 0",
+    "init 6",
     # Dangerous network ops
-    "wget ", "curl ", "nc -",
+    "wget ",
+    "curl ",
+    "nc -",
     # Fork bomb and shell escape patterns
-    ":(){ :|:& };:", "> /dev/sda",
+    ":(){ :|:& };:",
+    "> /dev/sda",
 ]
+
 
 def _is_path_safe_write(path: str) -> bool:
     normalized = os.path.normpath(path).lower()
@@ -58,6 +76,7 @@ def _is_path_safe_write(path: str) -> bool:
         if normalized.startswith(protected.lower()):
             return False
     return True
+
 
 def _is_command_safe(cmd: str) -> bool:
     lower = cmd.lower().strip()
@@ -69,6 +88,7 @@ def _is_command_safe(cmd: str) -> bool:
 
 # ── TYPE COERCION ───────────────────────────────────────────────────────
 
+
 def _coerce_int(val, default=None):
     if val is None:
         return default
@@ -76,6 +96,7 @@ def _coerce_int(val, default=None):
         return int(val)
     except (ValueError, TypeError):
         return default
+
 
 def _coerce_bool(val, default=False):
     if val is None:
@@ -88,6 +109,7 @@ def _coerce_bool(val, default=False):
 
 
 # ── TOOL IMPLEMENTATIONS ────────────────────────────────────────────────
+
 
 def read_file(path: str, max_lines=200) -> str:
     try:
@@ -154,10 +176,21 @@ def list_directory(path: str, recursive=False) -> str:
                 if depth >= 3:
                     dirs.clear()
                     continue
-                dirs[:] = [d for d in dirs if d not in (
-                    "node_modules", ".git", "__pycache__", "venv",
-                    ".venv", "dist", "build", ".next"
-                )]
+                dirs[:] = [
+                    d
+                    for d in dirs
+                    if d
+                    not in (
+                        "node_modules",
+                        ".git",
+                        "__pycache__",
+                        "venv",
+                        ".venv",
+                        "dist",
+                        "build",
+                        ".next",
+                    )
+                ]
                 indent = "  " * depth
                 rel = os.path.relpath(root, path)
                 if rel != ".":
@@ -189,9 +222,11 @@ def list_directory(path: str, recursive=False) -> str:
 
 
 def _fmt_size(b: int) -> str:
-    if b < 1024: return f"{b} B"
-    if b < 1_048_576: return f"{b/1024:.1f} KB"
-    return f"{b/1_048_576:.1f} MB"
+    if b < 1024:
+        return f"{b} B"
+    if b < 1_048_576:
+        return f"{b / 1024:.1f} KB"
+    return f"{b / 1_048_576:.1f} MB"
 
 
 def run_shell(command: str, timeout=15) -> str:
@@ -236,11 +271,12 @@ def get_system_info(include_processes=False) -> str:
         info.append(f"CPU: {cpu_pct}% @ {round(freq.current) if freq else '?'} MHz")
         info.append(f"     {psutil.cpu_count(logical=False)}P/{psutil.cpu_count()} threads")
         ram = psutil.virtual_memory()
-        info.append(f"RAM: {ram.used/1e9:.1f}/{ram.total/1e9:.1f} GB ({ram.percent}%)")
+        info.append(f"RAM: {ram.used / 1e9:.1f}/{ram.total / 1e9:.1f} GB ({ram.percent}%)")
         disk = psutil.disk_usage("/")
-        info.append(f"Disk /: {disk.used/1e9:.0f}/{disk.total/1e9:.0f} GB ({disk.percent}%)")
+        info.append(f"Disk /: {disk.used / 1e9:.0f}/{disk.total / 1e9:.0f} GB ({disk.percent}%)")
         try:
             import pynvml
+
             pynvml.nvmlInit()
             handle = pynvml.nvmlDeviceGetHandleByIndex(0)
             mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
@@ -248,10 +284,11 @@ def get_system_info(include_processes=False) -> str:
             temp = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
             power = pynvml.nvmlDeviceGetPowerUsage(handle) / 1000
             name = pynvml.nvmlDeviceGetName(handle)
-            if isinstance(name, bytes): name = name.decode()
+            if isinstance(name, bytes):
+                name = name.decode()
             info.append(f"GPU: {name}")
             info.append(f"     Utilization: {util.gpu}%")
-            info.append(f"     VRAM: {mem.used/1e6:.0f}/{mem.total/1e6:.0f} MB")
+            info.append(f"     VRAM: {mem.used / 1e6:.0f}/{mem.total / 1e6:.0f} MB")
             info.append(f"     Temperature: {temp}°C")
             info.append(f"     Power: {power:.0f}W")
         except Exception:
@@ -275,10 +312,12 @@ def get_system_info(include_processes=False) -> str:
 
 # ── KNOWLEDGE / RAG TOOLS ──────────────────────────────────────────────
 
+
 def search_knowledge(query: str, n_results=5) -> str:
     """Search the ChromaDB knowledge base."""
     try:
         from memory import query_knowledge
+
         n_results = _coerce_int(n_results, 5)
         matches = query_knowledge(query, n_results=n_results)
         if not matches:
@@ -299,6 +338,7 @@ def memory_stats() -> str:
     """Get knowledge base statistics."""
     try:
         from memory import get_memory_stats
+
         stats = get_memory_stats()
         lines = [
             "Knowledge Base Stats:",
@@ -322,15 +362,18 @@ def memory_stats() -> str:
 
 # ── WEB SEARCH TOOL ──────────────────────────────────────────────────
 
+
 def web_search(query: str, max_results=5) -> str:
     """Search the web via DuckDuckGo Lite. Blocked during active GPU focus sessions."""
     try:
         # Session guard: block during focus workload (performance protection)
         try:
             import sys
+
             if "." not in sys.path:
                 sys.path.insert(0, ".")
             from router import _session_active
+
             if _session_active:
                 return "ERROR: Web search disabled during active GPU focus sessions (performance protection)"
         except (ImportError, AttributeError):
@@ -362,39 +405,37 @@ def web_search(query: str, max_results=5) -> str:
         results = []
 
         # Extract all <a> links with DuckDuckGo redirect URLs (contain uddg= param)
-        link_pattern = _re.compile(
-            r'<a[^>]*href="([^"]*uddg=[^"]+)"[^>]*>(.+?)</a>',
-            _re.DOTALL
-        )
+        link_pattern = _re.compile(r'<a[^>]*href="([^"]*uddg=[^"]+)"[^>]*>(.+?)</a>', _re.DOTALL)
         links = link_pattern.findall(html)
 
         # Extract all <td> content for snippets
-        td_pattern = _re.compile(r'<td[^>]*>(.*?)</td>', _re.DOTALL)
+        td_pattern = _re.compile(r"<td[^>]*>(.*?)</td>", _re.DOTALL)
         tds = td_pattern.findall(html)
 
         # Build snippet map: find td cells that contain substantial text (snippets)
         snippets = []
         for td in tds:
-            clean = _re.sub(r'<[^>]+>', '', td).strip()
-            clean = _re.sub(r'&\w+;', ' ', clean).strip()
+            clean = _re.sub(r"<[^>]+>", "", td).strip()
+            clean = _re.sub(r"&\w+;", " ", clean).strip()
             # Snippets are longer text blocks (not numbers, not URLs, not spacers)
-            if len(clean) > 40 and not clean.startswith('http') and not clean.startswith('www.'):
-                snippets.append(_re.sub(r'\s+', ' ', clean))
+            if len(clean) > 40 and not clean.startswith("http") and not clean.startswith("www."):
+                snippets.append(_re.sub(r"\s+", " ", clean))
 
         from urllib.parse import parse_qs, unquote, urlparse
+
         for i, (raw_url, raw_title) in enumerate(links[:max_results]):
-            clean_title = _re.sub(r'<[^>]+>', '', raw_title).strip()
-            clean_title = _re.sub(r'&#x27;', "'", clean_title)
-            clean_title = _re.sub(r'&amp;', '&', clean_title)
+            clean_title = _re.sub(r"<[^>]+>", "", raw_title).strip()
+            clean_title = _re.sub(r"&#x27;", "'", clean_title)
+            clean_title = _re.sub(r"&amp;", "&", clean_title)
             # Extract actual URL from DuckDuckGo redirect
             try:
                 parsed = parse_qs(urlparse(raw_url).query)
-                actual_url = unquote(parsed.get('uddg', [raw_url])[0])
+                actual_url = unquote(parsed.get("uddg", [raw_url])[0])
             except Exception:
                 actual_url = raw_url
             snippet = snippets[i] if i < len(snippets) else ""
             if clean_title:
-                results.append(f"[{i+1}] {clean_title}\n    {actual_url}\n    {snippet}")
+                results.append(f"[{i + 1}] {clean_title}\n    {actual_url}\n    {snippet}")
 
         if not results:
             return f"No results found for: {query}"
@@ -417,9 +458,11 @@ def fetch_url(url: str, max_chars: int = 8000) -> str:
         # Session guard: block during focus workload
         try:
             import sys as _sys
+
             if "." not in _sys.path:
                 _sys.path.insert(0, ".")
             from router import _session_active
+
             if _session_active:
                 return "ERROR: fetch_url disabled during active GPU focus sessions (performance protection)"
         except (ImportError, AttributeError):
@@ -435,6 +478,7 @@ def fetch_url(url: str, max_chars: int = 8000) -> str:
 
         try:
             import trafilatura as _trafilatura  # type: ignore
+
             downloaded = _trafilatura.fetch_url(url)
             if not downloaded:
                 return f"ERROR: Could not download content from {url}"
@@ -452,6 +496,9 @@ def fetch_url(url: str, max_chars: int = 8000) -> str:
         except ImportError:
             # Fallback: plain httpx fetch + strip HTML tags
             import re as _re
+
+            import httpx as _httpx
+
             resp = _httpx.get(
                 url,
                 headers={"User-Agent": "deltai/1.0 (local AI assistant)"},
@@ -482,11 +529,27 @@ def fetch_url(url: str, max_chars: int = 8000) -> str:
 
 # Sandboxed builtins for calculate tool — math + statistics only, no I/O
 _CALC_SAFE_BUILTINS = {
-    "abs": abs, "round": round, "min": min, "max": max, "sum": sum,
-    "len": len, "pow": pow, "int": int, "float": float, "bool": bool,
-    "range": range, "list": list, "tuple": tuple, "sorted": sorted,
-    "enumerate": enumerate, "zip": zip, "map": map, "filter": filter,
-    "True": True, "False": False, "None": None,
+    "abs": abs,
+    "round": round,
+    "min": min,
+    "max": max,
+    "sum": sum,
+    "len": len,
+    "pow": pow,
+    "int": int,
+    "float": float,
+    "bool": bool,
+    "range": range,
+    "list": list,
+    "tuple": tuple,
+    "sorted": sorted,
+    "enumerate": enumerate,
+    "zip": zip,
+    "map": map,
+    "filter": filter,
+    "True": True,
+    "False": False,
+    "None": None,
 }
 
 
@@ -500,10 +563,26 @@ def calculate(expression: str, description: str = None) -> str:
             return "ERROR: Expression too long (max 500 chars)"
 
         # Block dangerous patterns
-        _blocked = ["import ", "exec(", "eval(", "open(", "__", "os.", "sys.",
-                     "subprocess", "compile(", "globals(", "locals(",
-                     "getattr(", "setattr(", "delattr(", "dir(",
-                     "breakpoint(", "input(", "print("]
+        _blocked = [
+            "import ",
+            "exec(",
+            "eval(",
+            "open(",
+            "__",
+            "os.",
+            "sys.",
+            "subprocess",
+            "compile(",
+            "globals(",
+            "locals(",
+            "getattr(",
+            "setattr(",
+            "delattr(",
+            "dir(",
+            "breakpoint(",
+            "input(",
+            "print(",
+        ]
         expr_lower = expression.lower()
         for b in _blocked:
             if b in expr_lower:
@@ -528,8 +607,7 @@ def calculate(expression: str, description: str = None) -> str:
         return _tool_error(e, "calculate failed")
 
 
-def solve_math(operation: str, expression: str, variable: str = "x",
-               point: str = None) -> str:
+def solve_math(operation: str, expression: str, variable: str = "x", point: str = None) -> str:
     """Symbolic mathematics engine powered by SymPy. Handles calculus, algebra, linear algebra, and more."""
     try:
         import sympy
@@ -578,9 +656,24 @@ def solve_math(operation: str, expression: str, variable: str = "x",
         expression = expression.strip()
 
         # Block dangerous patterns (same as calculate)
-        _blocked = ["import ", "exec(", "eval(", "open(", "__", "os.", "sys.",
-                     "subprocess", "compile(", "globals(", "locals(",
-                     "getattr(", "setattr(", "delattr(", "breakpoint(", "input("]
+        _blocked = [
+            "import ",
+            "exec(",
+            "eval(",
+            "open(",
+            "__",
+            "os.",
+            "sys.",
+            "subprocess",
+            "compile(",
+            "globals(",
+            "locals(",
+            "getattr(",
+            "setattr(",
+            "delattr(",
+            "breakpoint(",
+            "input(",
+        ]
         expr_lower = expression.lower()
         for b in _blocked:
             if b in expr_lower:
@@ -593,17 +686,47 @@ def solve_math(operation: str, expression: str, variable: str = "x",
         f = Function("f")
 
         safe_locals = {
-            "x": x, "y": y, "z": z, "t": t, "s": s,
-            "a": a, "b": b_sym, "c": c, "n": n, "r": r,
-            "theta": theta, "phi": phi, "omega": omega,
-            "k": k, "m": m, "g": g, "f": f,
-            "sin": sin, "cos": cos, "tan": tan,
-            "asin": asin, "acos": acos, "atan": atan,
-            "sinh": sinh, "cosh": cosh, "tanh": tanh,
-            "exp": exp, "log": log, "ln": log, "sqrt": sqrt,
-            "abs": Abs, "sign": sign, "Abs": Abs,
-            "pi": pi, "e": E, "E": E, "I": I, "oo": oo,
-            "Rational": Rational, "Matrix": Matrix, "Eq": Eq,
+            "x": x,
+            "y": y,
+            "z": z,
+            "t": t,
+            "s": s,
+            "a": a,
+            "b": b_sym,
+            "c": c,
+            "n": n,
+            "r": r,
+            "theta": theta,
+            "phi": phi,
+            "omega": omega,
+            "k": k,
+            "m": m,
+            "g": g,
+            "f": f,
+            "sin": sin,
+            "cos": cos,
+            "tan": tan,
+            "asin": asin,
+            "acos": acos,
+            "atan": atan,
+            "sinh": sinh,
+            "cosh": cosh,
+            "tanh": tanh,
+            "exp": exp,
+            "log": log,
+            "ln": log,
+            "sqrt": sqrt,
+            "abs": Abs,
+            "sign": sign,
+            "Abs": Abs,
+            "pi": pi,
+            "e": E,
+            "E": E,
+            "I": I,
+            "oo": oo,
+            "Rational": Rational,
+            "Matrix": Matrix,
+            "Eq": Eq,
         }
 
         var = symbols(variable) if variable else x
@@ -611,8 +734,13 @@ def solve_math(operation: str, expression: str, variable: str = "x",
         # Parse expression safely
         if operation == "matrix" or operation == "eigenvalues":
             # Matrix operations need eval with controlled namespace
-            safe_eval_ns = {"__builtins__": {}, "Matrix": Matrix, "Rational": Rational,
-                            "symbols": symbols, "sqrt": sqrt}
+            safe_eval_ns = {
+                "__builtins__": {},
+                "Matrix": Matrix,
+                "Rational": Rational,
+                "symbols": symbols,
+                "sqrt": sqrt,
+            }
             safe_eval_ns.update(safe_locals)
             expr = eval(expression, safe_eval_ns)
         else:
@@ -654,7 +782,9 @@ def solve_math(operation: str, expression: str, variable: str = "x",
                     except Exception:
                         return f"integral({expression}, {variable}={lo}..{hi}) = {result}"
                 except (IndexError, ValueError):
-                    return "ERROR: For definite integral, point should be 'lower,upper' (e.g., '0,pi')"
+                    return (
+                        "ERROR: For definite integral, point should be 'lower,upper' (e.g., '0,pi')"
+                    )
             result = integrate(expr, var)
             return f"integral({expression}) d{variable} = {result} + C"
 
@@ -693,7 +823,7 @@ def solve_math(operation: str, expression: str, variable: str = "x",
             if not isinstance(expr, sympy.Matrix):
                 return "ERROR: Expression must be a Matrix for eigenvalues (e.g., 'Matrix([[1,2],[3,4]])')"
             eigenvals = expr.eigenvals()
-            eigenvects = expr.eigenvects()
+            expr.eigenvects()
             lines = [f"Eigenvalues of {expression}:"]
             for val, mult in eigenvals.items():
                 try:
@@ -762,12 +892,12 @@ def summarize_data(data: str, focus: str = "all") -> str:
                                 numbers.append(float(item))
         except (json.JSONDecodeError, TypeError):
             # Fall back to regex number extraction
-            number_matches = re.findall(r'-?\d+\.?\d*', data)
+            number_matches = re.findall(r"-?\d+\.?\d*", data)
             numbers = [float(n) for n in number_matches if abs(float(n)) < 1e15]
 
         if not numbers:
             # Text summary: word/line count
-            lines = data.strip().split('\n')
+            lines = data.strip().split("\n")
             words = data.split()
             return f"Text data: {len(lines)} lines, {len(words)} words, {len(data)} chars. No numeric data found."
 
@@ -796,7 +926,9 @@ def summarize_data(data: str, focus: str = "all") -> str:
             if focus in ("all", "outliers") and stdev > 0:
                 outliers = [n for n in numbers if abs(n - mean) > 2 * stdev]
                 if outliers:
-                    lines.append(f"\nOutliers (>2σ): {len(outliers)} — {[round(o, 4) for o in outliers[:5]]}")
+                    lines.append(
+                        f"\nOutliers (>2σ): {len(outliers)} — {[round(o, 4) for o in outliers[:5]]}"
+                    )
                 else:
                     lines.append("\nOutliers: none (all within 2σ)")
 
@@ -807,7 +939,13 @@ def summarize_data(data: str, focus: str = "all") -> str:
                 last_avg = statistics.mean(numbers[-third:])
                 if first_avg != 0:
                     change_pct = ((last_avg - first_avg) / abs(first_avg)) * 100
-                    direction = "increasing" if change_pct > 5 else "decreasing" if change_pct < -5 else "stable"
+                    direction = (
+                        "increasing"
+                        if change_pct > 5
+                        else "decreasing"
+                        if change_pct < -5
+                        else "stable"
+                    )
                     lines.append(f"\nTrend: {direction} ({change_pct:+.1f}% first→last third)")
                 else:
                     lines.append(f"\nTrend: first={first_avg:.4g}, last={last_avg:.4g}")
@@ -823,6 +961,7 @@ def lookup_reference(query: str) -> str:
         if not query or not query.strip():
             return "ERROR: Empty query"
         from memory import query_knowledge
+
         # Use lower threshold (0.6) for more targeted results, fewer results
         matches = query_knowledge(query.strip(), n_results=2)
         if not matches:
@@ -844,11 +983,13 @@ def lookup_reference(query: str) -> str:
 
 _TELEMETRY_API_URL = os.getenv("TELEMETRY_API_URL", "").strip()
 
+
 def _telemetry_get(endpoint: str, params: dict = None) -> str:
     """Helper: GET from telemetry API with error handling."""
     if not _TELEMETRY_API_URL:
         return "ERROR: Telemetry API not configured (TELEMETRY_API_URL not set)"
     import httpx as _httpx
+
     try:
         with _httpx.Client(timeout=10) as client:
             resp = client.get(f"{_TELEMETRY_API_URL}{endpoint}", params=params)
@@ -904,6 +1045,7 @@ _CRITICAL_PATHS = [
 def _ollama_get(endpoint: str, timeout: int = 5):
     """Helper: GET from Ollama API. Returns parsed JSON or None."""
     import httpx as _hx
+
     try:
         resp = _hx.get(f"{_OLLAMA_URL}{endpoint}", timeout=timeout)
         if resp.status_code == 200:
@@ -916,6 +1058,7 @@ def _ollama_get(endpoint: str, timeout: int = 5):
 def _ollama_post(endpoint: str, payload: dict, timeout: int = 15):
     """Helper: POST to Ollama API. Returns parsed JSON or None."""
     import httpx as _hx
+
     try:
         resp = _hx.post(f"{_OLLAMA_URL}{endpoint}", json=payload, timeout=timeout)
         if resp.status_code == 200:
@@ -949,7 +1092,9 @@ def _diag_full() -> str:
         deltai_found = [m for m in all_models if m in _DELTAI_MODELS]
         loaded = [m.get("name", "?") for m in (ps or {}).get("models", [])]
         loaded_str = ", ".join(loaded) if loaded else "none"
-        lines.append(f"Ollama:    ONLINE ({len(deltai_found)}/4 deltai models, loaded: {loaded_str})")
+        lines.append(
+            f"Ollama:    ONLINE ({len(deltai_found)}/4 deltai models, loaded: {loaded_str})"
+        )
         missing = _DELTAI_MODELS - set(deltai_found)
         if missing:
             lines.append(f"           MISSING: {', '.join(sorted(missing))}")
@@ -957,8 +1102,11 @@ def _diag_full() -> str:
     # ChromaDB
     try:
         from memory import get_memory_stats
+
         stats = get_memory_stats()
-        lines.append(f"ChromaDB:  ONLINE ({stats['total_chunks']} chunks, {stats['total_files']} files, {stats['disk_mb']} MB)")
+        lines.append(
+            f"ChromaDB:  ONLINE ({stats['total_chunks']} chunks, {stats['total_files']} files, {stats['disk_mb']} MB)"
+        )
     except Exception as e:
         safe_errors.log_exception(_LOG, "self_diagnostics chromadb", e)
         lines.append(f"ChromaDB:  ERROR — {_TOOL_ERR}")
@@ -966,6 +1114,7 @@ def _diag_full() -> str:
     # GPU / VRAM
     try:
         import pynvml
+
         pynvml.nvmlInit()
         handle = pynvml.nvmlDeviceGetHandleByIndex(0)
         mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
@@ -978,7 +1127,9 @@ def _diag_full() -> str:
         total = round(mem.total / 1e6)
         free = total - used
         tier = "A" if free > 9000 else "B" if free > 3000 else "C"
-        lines.append(f"GPU:       {name} — {used:,}/{total:,} MB ({free:,} free, Tier {tier}, {util.gpu}% util, {temp}C)")
+        lines.append(
+            f"GPU:       {name} — {used:,}/{total:,} MB ({free:,} free, Tier {tier}, {util.gpu}% util, {temp}C)"
+        )
         if temp > 83:
             lines.append("           WARNING: GPU temperature high")
     except Exception:
@@ -987,6 +1138,7 @@ def _diag_full() -> str:
     # Voice
     try:
         from voice import VOICE_ENABLED, get_voice_status
+
         if VOICE_ENABLED:
             vs = get_voice_status()
             stt = vs.get("stt", {}).get("status", "?")
@@ -1000,6 +1152,7 @@ def _diag_full() -> str:
     # Watcher
     try:
         from watcher import watcher_running
+
         lines.append(f"Watcher:   {'ACTIVE' if watcher_running() else 'STOPPED'}")
     except ImportError:
         lines.append("Watcher:   NOT AVAILABLE")
@@ -1029,7 +1182,16 @@ def _diag_full() -> str:
         lines.append("Backup:    UNKNOWN (Ollama unreachable)")
 
     # Issues summary
-    issues = [l for l in lines if "DOWN" in l or "MISSING" in l or "ERROR" in l or "WARNING" in l or "STOPPED" in l or "DEGRADED" in l]
+    issues = [
+        line
+        for line in lines
+        if "DOWN" in line
+        or "MISSING" in line
+        or "ERROR" in line
+        or "WARNING" in line
+        or "STOPPED" in line
+        or "DEGRADED" in line
+    ]
     lines.append("")
     if issues:
         lines.append(f"Issues found: {len(issues)}")
@@ -1048,7 +1210,9 @@ def _diag_deep(subsystem: str) -> str:
         if tags is None:
             lines.append("STATUS: DOWN — cannot reach Ollama at " + _OLLAMA_URL)
             lines.append("")
-            lines.append("FIX: Run `ollama serve` in a terminal, or use repair_subsystem('check_ollama')")
+            lines.append(
+                "FIX: Run `ollama serve` in a terminal, or use repair_subsystem('check_ollama')"
+            )
             return "\n".join(lines)
         all_models = {m["name"].split(":")[0]: m for m in tags.get("models", [])}
         ps = _ollama_get("/api/ps")
@@ -1079,14 +1243,17 @@ def _diag_deep(subsystem: str) -> str:
         lines = ["CHROMADB DEEP DIAGNOSTICS", "=" * 40]
         try:
             from memory import CHROMADB_PATH, get_file_details, get_memory_stats
+
             stats = get_memory_stats()
             lines.append(f"Path:    {CHROMADB_PATH}")
             lines.append(f"Chunks:  {stats['total_chunks']}")
             lines.append(f"Files:   {stats['total_files']}")
             lines.append(f"Disk:    {stats['disk_mb']} MB")
-            if stats['total_chunks'] == 0:
+            if stats["total_chunks"] == 0:
                 lines.append("\nWARNING: Empty knowledge base")
-                lines.append("FIX: Drop files in ~/deltai/data\\knowledge\\ or use repair_subsystem('reindex_knowledge')")
+                lines.append(
+                    "FIX: Drop files in ~/deltai/data\\knowledge\\ or use repair_subsystem('reindex_knowledge')"
+                )
             files = get_file_details()
             if files:
                 lines.append(f"\nIngested files ({len(files)}):")
@@ -1102,6 +1269,7 @@ def _diag_deep(subsystem: str) -> str:
         lines = ["GPU DEEP DIAGNOSTICS", "=" * 40]
         try:
             import pynvml
+
             pynvml.nvmlInit()
             handle = pynvml.nvmlDeviceGetHandleByIndex(0)
             mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
@@ -1114,7 +1282,13 @@ def _diag_deep(subsystem: str) -> str:
             used = round(mem.used / 1e6)
             total = round(mem.total / 1e6)
             free = total - used
-            tier = "A (14B fits)" if free > 9000 else "B (3B on GPU)" if free > 3000 else "C (CPU only)"
+            tier = (
+                "A (14B fits)"
+                if free > 9000
+                else "B (3B on GPU)"
+                if free > 3000
+                else "C (CPU only)"
+            )
             lines.append(f"Device:  {name}")
             lines.append(f"VRAM:    {used:,} / {total:,} MB ({free:,} MB free)")
             lines.append(f"Tier:    {tier}")
@@ -1123,7 +1297,9 @@ def _diag_deep(subsystem: str) -> str:
             lines.append(f"Power:   {power:.0f}W")
             if free < 3000:
                 lines.append("\nWARNING: Low VRAM — running in CPU-only mode (Tier C)")
-                lines.append("FIX: Use manage_ollama_models('unload', model='...') or repair_subsystem('clear_vram')")
+                lines.append(
+                    "FIX: Use manage_ollama_models('unload', model='...') or repair_subsystem('clear_vram')"
+                )
             if temp > 83:
                 lines.append("\nWARNING: High GPU temperature")
                 lines.append("FIX: Check cooling, reduce load, or unload models")
@@ -1136,6 +1312,7 @@ def _diag_deep(subsystem: str) -> str:
         lines = ["VOICE DEEP DIAGNOSTICS", "=" * 40]
         try:
             from voice import VOICE_ENABLED, get_voice_status
+
             vs = get_voice_status()
             lines.append(f"Enabled: {VOICE_ENABLED}")
             lines.append(f"STT:     {vs.get('stt', {})}")
@@ -1152,6 +1329,7 @@ def _diag_deep(subsystem: str) -> str:
         try:
             from memory import KNOWLEDGE_PATH
             from watcher import watcher_running
+
             running = watcher_running()
             lines.append(f"Status:  {'ACTIVE' if running else 'STOPPED'}")
             lines.append(f"Path:    {KNOWLEDGE_PATH}")
@@ -1175,12 +1353,12 @@ def _diag_deep(subsystem: str) -> str:
         if tags:
             available = {m["name"].split(":")[0] for m in tags.get("models", [])}
             for chain in chains:
-                primary = chain[0]
-                backups = chain[1:]
+                chain[0]
+                chain[1:]
                 chain_str = " -> ".join(chain)
                 statuses = ["OK" if m in available else "MISSING" for m in chain]
                 lines.append(f"Chain: {chain_str}")
-                for m, s in zip(chain, statuses):
+                for m, s in zip(chain, statuses, strict=False):
                     lines.append(f"  {m:<16} {s}")
         else:
             lines.append("Cannot check — Ollama unreachable")
@@ -1199,7 +1377,11 @@ def _diag_deep(subsystem: str) -> str:
                 lines.append(f"  OK    {p}  ({size} bytes)")
             else:
                 lines.append(f"  MISS  {p}")
-                lines.append(f"        FIX: mkdir {p}" if "." not in os.path.basename(p) else "        FIX: Check installation")
+                lines.append(
+                    f"        FIX: mkdir {p}"
+                    if "." not in os.path.basename(p)
+                    else "        FIX: Check installation"
+                )
         return "\n".join(lines)
 
     else:
@@ -1236,6 +1418,7 @@ def manage_ollama_models(action: str, model: str = None) -> str:
         # VRAM summary
         try:
             import pynvml
+
             pynvml.nvmlInit()
             handle = pynvml.nvmlDeviceGetHandleByIndex(0)
             mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
@@ -1255,11 +1438,17 @@ def manage_ollama_models(action: str, model: str = None) -> str:
         if model_base not in _DELTAI_MODELS:
             return f"ERROR: Can only manage deltai models. '{model}' not in allowlist: {', '.join(sorted(_DELTAI_MODELS))}"
         import httpx as _hx
+
         try:
-            resp = _hx.post(f"{_OLLAMA_URL}/api/generate",
-                            json={"model": model, "prompt": "", "keep_alive": 0}, timeout=10)
+            resp = _hx.post(
+                f"{_OLLAMA_URL}/api/generate",
+                json={"model": model, "prompt": "", "keep_alive": 0},
+                timeout=10,
+            )
             if resp.status_code == 200:
-                return f"OK: Unloaded {model} from VRAM. Use manage_ollama_models('status') to verify."
+                return (
+                    f"OK: Unloaded {model} from VRAM. Use manage_ollama_models('status') to verify."
+                )
             return f"ERROR: Ollama returned HTTP {resp.status_code}"
         except Exception as e:
             return _tool_error(e, "manage_ollama_models unload")
@@ -1274,6 +1463,7 @@ def manage_ollama_models(action: str, model: str = None) -> str:
         if "14b" in model.lower():
             try:
                 from router import is_sim_running
+
                 if is_sim_running():
                     return "BLOCKED: Cannot preload 14B model during GPU focus workload — VRAM reserved for foreground use"
             except ImportError:
@@ -1281,6 +1471,7 @@ def manage_ollama_models(action: str, model: str = None) -> str:
         # Check VRAM availability
         try:
             import pynvml
+
             pynvml.nvmlInit()
             handle = pynvml.nvmlDeviceGetHandleByIndex(0)
             mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
@@ -1298,10 +1489,18 @@ def manage_ollama_models(action: str, model: str = None) -> str:
         except Exception:
             pass
         import httpx as _hx
+
         try:
-            resp = _hx.post(f"{_OLLAMA_URL}/api/generate",
-                            json={"model": model, "prompt": "ping", "keep_alive": "5m",
-                                  "options": {"num_predict": 1}}, timeout=60)
+            resp = _hx.post(
+                f"{_OLLAMA_URL}/api/generate",
+                json={
+                    "model": model,
+                    "prompt": "ping",
+                    "keep_alive": "5m",
+                    "options": {"num_predict": 1},
+                },
+                timeout=60,
+            )
             if resp.status_code == 200:
                 return f"OK: Preloaded {model} into VRAM (5min keep-alive)."
             return f"ERROR: Ollama returned HTTP {resp.status_code}"
@@ -1319,6 +1518,7 @@ def repair_subsystem(repair: str) -> str:
     if repair == "restart_watcher":
         try:
             from watcher import start_watcher, stop_watcher, watcher_running
+
             stop_watcher()
             start_watcher()
             running = watcher_running()
@@ -1329,6 +1529,7 @@ def repair_subsystem(repair: str) -> str:
     elif repair == "clear_vram":
         try:
             import httpx as _hx
+
             ps = _ollama_get("/api/ps")
             if ps is None:
                 return "ERROR: Cannot reach Ollama — is it running?"
@@ -1340,8 +1541,11 @@ def repair_subsystem(repair: str) -> str:
                 model_name = m.get("name", "")
                 if model_name:
                     try:
-                        _hx.post(f"{_OLLAMA_URL}/api/generate",
-                                 json={"model": model_name, "prompt": "", "keep_alive": 0}, timeout=10)
+                        _hx.post(
+                            f"{_OLLAMA_URL}/api/generate",
+                            json={"model": model_name, "prompt": "", "keep_alive": 0},
+                            timeout=10,
+                        )
                         unloaded.append(model_name)
                     except Exception:
                         pass
@@ -1352,11 +1556,14 @@ def repair_subsystem(repair: str) -> str:
     elif repair == "reindex_knowledge":
         try:
             from memory import ingest_all
+
             results = ingest_all()
             ok = len([r for r in results if r["status"] == "ok"])
             skipped = len([r for r in results if r["status"] == "skipped"])
             errors = len([r for r in results if r["status"] == "error"])
-            return f"OK: Re-indexed knowledge base — {ok} ingested, {skipped} skipped, {errors} errors"
+            return (
+                f"OK: Re-indexed knowledge base — {ok} ingested, {skipped} skipped, {errors} errors"
+            )
         except Exception as e:
             return _tool_error(e, "repair_subsystem reindex_knowledge")
 
@@ -1368,12 +1575,14 @@ def repair_subsystem(repair: str) -> str:
         # Try to start Ollama
         try:
             import subprocess
+
             subprocess.Popen(
                 ["ollama", "serve"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
             import time
+
             time.sleep(5)
             tags = _ollama_get("/api/tags")
             if tags is not None:
@@ -1389,11 +1598,13 @@ def repair_subsystem(repair: str) -> str:
 def resource_status() -> str:
     """Get deltai resource self-manager status — VRAM pressure, circuit breaker, auto-recovery actions."""
     import httpx as _hx
+
     lines = ["deltai RESOURCE STATUS", "=" * 40]
 
     # VRAM
     try:
         import pynvml
+
         pynvml.nvmlInit()
         handle = pynvml.nvmlDeviceGetHandleByIndex(0)
         mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
@@ -1447,6 +1658,7 @@ def resource_status() -> str:
     # Sim detection
     try:
         from router import is_session_active, is_sim_running
+
         lines.append(f"\nFocus workload (sim/heavy app): {is_sim_running()}")
         lines.append(f"Session active: {is_session_active()}")
     except ImportError:
@@ -1457,8 +1669,10 @@ def resource_status() -> str:
 
 # ── ADAPTER SURGERY TOOL ────────────────────────────────────────────────
 
-def manage_adapters(action: str, domain: str = None,
-                    adapter_name: str = None, dataset: str = None) -> str:
+
+def manage_adapters(
+    action: str, domain: str = None, adapter_name: str = None, dataset: str = None
+) -> str:
     """Manage deltai's augmentation slot adapters."""
     try:
         from training import (
@@ -1486,11 +1700,13 @@ def manage_adapters(action: str, domain: str = None,
                 for a in adapters:
                     status_mark = " ★" if a["name"] == active_name else ""
                     score = f" (score: {a['eval_score']})" if a.get("eval_score") else ""
-                    lines.append(f"  {a['name']} v{a['version']} — "
-                                 f"{a['examples_used']} examples, "
-                                 f"r={a.get('lora_r', '?')}, "
-                                 f"freeze={a.get('frozen_layers', 0)}"
-                                 f"{score}{status_mark}")
+                    lines.append(
+                        f"  {a['name']} v{a['version']} — "
+                        f"{a['examples_used']} examples, "
+                        f"r={a.get('lora_r', '?')}, "
+                        f"freeze={a.get('frozen_layers', 0)}"
+                        f"{score}{status_mark}"
+                    )
             else:
                 lines.append("  (no adapters trained)")
         return "\n".join(lines)
@@ -1501,19 +1717,23 @@ def manage_adapters(action: str, domain: str = None,
         result = start_domain_training(domain=domain, dataset_name=dataset)
         if result.get("status") == "error":
             return f"ERROR: {result['reason']}"
-        return (f"Domain training started: {result['adapter_name']}\n"
-                f"Domain: {result['domain']} v{result['version']}\n"
-                f"Dataset: {result['dataset']}\n"
-                f"Frozen layers: {result['frozen_layers']}\n"
-                f"LoRA rank: {result['lora_r']}")
+        return (
+            f"Domain training started: {result['adapter_name']}\n"
+            f"Domain: {result['domain']} v{result['version']}\n"
+            f"Dataset: {result['dataset']}\n"
+            f"Frozen layers: {result['frozen_layers']}\n"
+            f"LoRA rank: {result['lora_r']}"
+        )
 
     elif action == "merge":
         result = merge_adapters()
         if result.get("status") == "error":
             return f"ERROR: {result['reason']}"
-        return (f"Merge complete: {result['output_model']}\n"
-                f"Method: {result['method']} (density={result['density']})\n"
-                f"Adapters merged: {', '.join(result['adapters_merged'])}")
+        return (
+            f"Merge complete: {result['output_model']}\n"
+            f"Method: {result['method']} (density={result['density']})\n"
+            f"Adapters merged: {', '.join(result['adapters_merged'])}"
+        )
 
     elif action == "promote":
         if not adapter_name:
@@ -1534,8 +1754,9 @@ def manage_adapters(action: str, domain: str = None,
         result = rollback_adapter(domain)
         if result.get("status") == "error":
             return f"ERROR: {result['reason']}"
-        return (f"Rolled back {domain}: {result.get('previous', 'none')} → "
-                f"{result['rolled_back_to']}")
+        return (
+            f"Rolled back {domain}: {result.get('previous', 'none')} → {result['rolled_back_to']}"
+        )
 
     else:
         return f"ERROR: Unknown action '{action}'. Valid: status, train, merge, promote, rollback"
@@ -1569,6 +1790,7 @@ if _TELEMETRY_API_URL:
     EXECUTORS["get_lap_summary"] = get_lap_summary
     EXECUTORS["get_tire_status"] = get_tire_status
     EXECUTORS["get_strategy_recommendation"] = get_strategy_recommendation
+
 
 def register_handler(name: str, fn) -> None:
     """

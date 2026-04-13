@@ -185,9 +185,7 @@ def trim_history(max_turns: int):
 def load_budget(date: str) -> float:
     """Load a specific day's spend. Returns 0.0 if no record."""
     with _connect() as conn:
-        row = conn.execute(
-            "SELECT spent FROM budget_daily WHERE date = ?", (date,)
-        ).fetchone()
+        row = conn.execute("SELECT spent FROM budget_daily WHERE date = ?", (date,)).fetchone()
     return row[0] if row else 0.0
 
 
@@ -232,18 +230,33 @@ def save_budget(date: str, spent: float):
 # ── REASONING TRACES ─────────────────────────────────────────────────
 
 
-def save_reasoning_trace(query_text: str, domain: str, steps_json: str,
-                         final_summary: str, tool_sequence: str,
-                         success: bool, confidence: str = "unknown",
-                         embedding: bytes = None):
+def save_reasoning_trace(
+    query_text: str,
+    domain: str,
+    steps_json: str,
+    final_summary: str,
+    tool_sequence: str,
+    success: bool,
+    confidence: str = "unknown",
+    embedding: bytes = None,
+):
     """Save a ReAct reasoning trace for future reference."""
     now = time.time()
     with _connect() as conn:
         conn.execute(
             "INSERT INTO reasoning_traces (query_text, domain, steps_json, final_summary, "
             "tool_sequence, success, confidence, embedding, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (query_text, domain or "general", steps_json, final_summary[:500],
-             tool_sequence, int(success), confidence, embedding, now),
+            (
+                query_text,
+                domain or "general",
+                steps_json,
+                final_summary[:500],
+                tool_sequence,
+                int(success),
+                confidence,
+                embedding,
+                now,
+            ),
         )
         conn.commit()
 
@@ -271,19 +284,24 @@ def find_similar_traces(embedding: bytes, n: int = 3) -> list[dict]:
 
     # Score each trace by cosine similarity
     scored = []
-    for query_text, domain, summary, tools, conf, steps, emb_bytes in rows:
+    for query_text, domain, summary, tools, conf, _steps, emb_bytes in rows:
         trace_emb = _deserialize_embedding(emb_bytes)
         if not trace_emb or len(trace_emb) != len(query_emb):
             continue
         sim = _cosine_similarity(query_emb, trace_emb)
         if sim > 0.7:  # similarity threshold
-            scored.append((sim, {
-                "query_text": query_text,
-                "domain": domain,
-                "final_summary": summary,
-                "tool_sequence": tools,
-                "confidence": conf,
-            }))
+            scored.append(
+                (
+                    sim,
+                    {
+                        "query_text": query_text,
+                        "domain": domain,
+                        "final_summary": summary,
+                        "tool_sequence": tools,
+                        "confidence": conf,
+                    },
+                )
+            )
 
     scored.sort(key=lambda x: x[0], reverse=True)
     return [item for _, item in scored[:n]]
@@ -308,17 +326,19 @@ def prune_old_traces(max_age_days: int = 30, max_count: int = 500):
 def _serialize_embedding(emb: list[float]) -> bytes:
     """Pack a float list into bytes for SQLite BLOB storage."""
     import struct
-    return struct.pack(f'{len(emb)}f', *emb)
+
+    return struct.pack(f"{len(emb)}f", *emb)
 
 
 def _deserialize_embedding(data: bytes) -> list[float]:
     """Unpack bytes back to float list."""
     import struct
+
     if not data:
         return []
     try:
         n = len(data) // 4  # 4 bytes per float
-        return list(struct.unpack(f'{n}f', data))
+        return list(struct.unpack(f"{n}f", data))
     except Exception:
         return []
 
@@ -326,7 +346,8 @@ def _deserialize_embedding(data: bytes) -> list[float]:
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
     """Compute cosine similarity between two vectors."""
     import math
-    dot = sum(x * y for x, y in zip(a, b))
+
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(x * x for x in b))
     if norm_a == 0 or norm_b == 0:
@@ -337,8 +358,14 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
 # ── QUALITY SCORES ───────────────────────────────────────────────────
 
 
-def save_quality_score(query_text: str, response_preview: str, score: float,
-                       signals_json: str, tier: int = 1, domain: str = "general"):
+def save_quality_score(
+    query_text: str,
+    response_preview: str,
+    score: float,
+    signals_json: str,
+    tier: int = 1,
+    domain: str = "general",
+):
     """Persist a response quality score."""
     now = time.time()
     with _connect() as conn:
@@ -353,9 +380,15 @@ def save_quality_score(query_text: str, response_preview: str, score: float,
 # ── ROUTING FEEDBACK ─────────────────────────────────────────────────
 
 
-def save_routing_feedback(query_hash: str, classified_tier: int, actual_model: str,
-                          domain: str, quality_score: float, latency_ms: float,
-                          tool_calls_count: int):
+def save_routing_feedback(
+    query_hash: str,
+    classified_tier: int,
+    actual_model: str,
+    domain: str,
+    quality_score: float,
+    latency_ms: float,
+    tool_calls_count: int,
+):
     """Record a routing outcome for adaptive feedback."""
     now = time.time()
     with _connect() as conn:
@@ -363,8 +396,16 @@ def save_routing_feedback(query_hash: str, classified_tier: int, actual_model: s
             "INSERT INTO routing_feedback (query_hash, classified_tier, actual_model, "
             "domain, quality_score, latency_ms, tool_calls_count, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (query_hash, classified_tier, actual_model, domain, quality_score,
-             latency_ms, tool_calls_count, now),
+            (
+                query_hash,
+                classified_tier,
+                actual_model,
+                domain,
+                quality_score,
+                latency_ms,
+                tool_calls_count,
+                now,
+            ),
         )
         conn.commit()
 
@@ -398,9 +439,7 @@ def save_knowledge_gap(query_text: str, domain: str, quality_score: float, gap_t
 def count_unresolved_knowledge_gaps() -> int:
     """Return number of unresolved knowledge gap rows (for daily training report)."""
     with _connect() as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) FROM knowledge_gaps WHERE resolved = 0"
-        ).fetchone()
+        row = conn.execute("SELECT COUNT(*) FROM knowledge_gaps WHERE resolved = 0").fetchone()
     return int(row[0]) if row else 0
 
 
@@ -412,8 +451,17 @@ def get_unresolved_gaps(limit: int = 50) -> list[dict]:
             "FROM knowledge_gaps WHERE resolved = 0 ORDER BY created_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
-    return [{"id": r[0], "query_text": r[1], "domain": r[2], "score": r[3],
-             "gap_type": r[4], "created_at": r[5]} for r in rows]
+    return [
+        {
+            "id": r[0],
+            "query_text": r[1],
+            "domain": r[2],
+            "score": r[3],
+            "gap_type": r[4],
+            "created_at": r[5],
+        }
+        for r in rows
+    ]
 
 
 def resolve_knowledge_gap(gap_id: int):

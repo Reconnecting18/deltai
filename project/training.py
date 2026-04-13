@@ -8,9 +8,11 @@ Training data stored as JSONL files in ~/.local/share/deltai/training/datasets/.
 """
 
 import gc
+import hashlib as _hashlib
 import json
 import logging
 import os
+import random as _random
 import re
 import shutil
 import subprocess
@@ -50,6 +52,7 @@ def _sanitize_model_name(name: str) -> str:
         raise ValueError("Model name contains unsupported characters.")
     return cleaned
 
+
 TRAINING_PATH = os.path.expanduser(os.getenv("TRAINING_PATH", "~/.local/share/deltai/training"))
 DATASETS_PATH = os.path.join(TRAINING_PATH, "datasets")
 ADAPTERS_PATH = os.path.join(TRAINING_PATH, "adapters")
@@ -60,8 +63,15 @@ CHECKPOINTS_PATH = os.path.join(TRAINING_PATH, "checkpoints")
 EVAL_PATH = os.path.join(TRAINING_PATH, "eval")
 
 # Ensure directories exist
-for _p in [DATASETS_PATH, ADAPTERS_PATH, EXPORTS_PATH, MODELFILES_PATH,
-           GGUF_PATH, CHECKPOINTS_PATH, EVAL_PATH]:
+for _p in [
+    DATASETS_PATH,
+    ADAPTERS_PATH,
+    EXPORTS_PATH,
+    MODELFILES_PATH,
+    GGUF_PATH,
+    CHECKPOINTS_PATH,
+    EVAL_PATH,
+]:
     os.makedirs(_p, exist_ok=True)
 
 # ── LORA HYPERPARAMETERS (from .env) ─────────────────────────────────
@@ -127,23 +137,23 @@ DATASET_DOMAIN_MAP = {
 
 # Per-domain training configs — different domains need different tuning
 DOMAIN_LORA_CONFIGS = {
-    "racing":      {"r": 16, "alpha": 32, "epochs": 3, "lr": 2e-4},
+    "racing": {"r": 16, "alpha": 32, "epochs": 3, "lr": 2e-4},
     "engineering": {"r": 16, "alpha": 32, "epochs": 4, "lr": 1e-4},
-    "personality": {"r": 8,  "alpha": 16, "epochs": 5, "lr": 3e-4},
-    "reasoning":   {"r": 32, "alpha": 64, "epochs": 3, "lr": 1e-4},
-    "telemetry":   {"r": 16, "alpha": 32, "epochs": 4, "lr": 1e-4},
-    "audio":       {"r": 16, "alpha": 32, "epochs": 4, "lr": 1e-4},
+    "personality": {"r": 8, "alpha": 16, "epochs": 5, "lr": 3e-4},
+    "reasoning": {"r": 32, "alpha": 64, "epochs": 3, "lr": 1e-4},
+    "telemetry": {"r": 16, "alpha": 32, "epochs": 4, "lr": 1e-4},
+    "audio": {"r": 16, "alpha": 32, "epochs": 4, "lr": 1e-4},
 }
 
 # Layer freezing depth per domain (Qwen2.5-3B has 36 layers)
 # Lower layers = universal syntax/semantics, upper layers = task-specific
 DOMAIN_FREEZE_LAYERS = {
-    "racing": 18,       # 50% — domain knowledge lives in top layers
+    "racing": 18,  # 50% — domain knowledge lives in top layers
     "engineering": 12,  # 33% — technical reasoning needs more trainable layers
     "personality": 24,  # 67% — style is surface-level, needs fewer layers
-    "reasoning": 8,     # 22% — deep reasoning needs most of the network
-    "telemetry": 14,    # 39% — pattern recognition needs middle + upper layers
-    "audio": 16,        # 44% — new signal pattern learning, upper layers critical
+    "reasoning": 8,  # 22% — deep reasoning needs most of the network
+    "telemetry": 14,  # 39% — pattern recognition needs middle + upper layers
+    "audio": 16,  # 44% — new signal pattern learning, upper layers critical
 }
 
 ADAPTER_MERGE_METHOD = os.getenv("ADAPTER_MERGE_METHOD", "ties")
@@ -182,10 +192,17 @@ def _save_registry(registry: dict):
     os.replace(tmp, REGISTRY_PATH)
 
 
-def register_adapter(name: str, domain: str, adapter_path: str,
-                     dataset: str, examples: int, frozen_layers: int = 0,
-                     lora_r: int = 16, lora_alpha: int = 32,
-                     tags: list = None) -> dict:
+def register_adapter(
+    name: str,
+    domain: str,
+    adapter_path: str,
+    dataset: str,
+    examples: int,
+    frozen_layers: int = 0,
+    lora_r: int = 16,
+    lora_alpha: int = 32,
+    tags: list = None,
+) -> dict:
     """Register a trained adapter in the registry."""
     if domain not in ADAPTER_DOMAINS:
         return {"status": "error", "reason": f"Unknown domain: {domain}"}
@@ -196,8 +213,7 @@ def register_adapter(name: str, domain: str, adapter_path: str,
     registry = _load_registry()
     # Auto-increment version
     existing_versions = [
-        v.get("version", 0) for v in registry["adapters"].values()
-        if v.get("domain") == domain
+        v.get("version", 0) for v in registry["adapters"].values() if v.get("domain") == domain
     ]
     version = max(existing_versions, default=0) + 1
     entry = {
@@ -251,9 +267,7 @@ def update_adapter(name: str, **kwargs) -> dict:
         return {"status": "error", "reason": f"Adapter not found: {name}"}
     if "adapter_path" in kwargs and kwargs["adapter_path"] is not None:
         try:
-            kwargs["adapter_path"] = require_path_under(
-                str(kwargs["adapter_path"]), ADAPTERS_PATH
-            )
+            kwargs["adapter_path"] = require_path_under(str(kwargs["adapter_path"]), ADAPTERS_PATH)
         except ValueError:
             return {
                 "status": "error",
@@ -315,6 +329,7 @@ def remove_adapter(name: str, delete_files: bool = False) -> dict:
 
 # ── TIES MERGE ───────────────────────────────────────────────────────
 
+
 def _ties_merge(deltas: list, density: float = 0.5) -> dict:
     """
     TIES merging: Trim, Elect sign, Merge.
@@ -367,7 +382,6 @@ def _ties_merge(deltas: list, density: float = 0.5) -> dict:
 
 def _linear_merge(deltas: list, weights: list = None) -> dict:
     """Simple weighted average merge of adapter deltas."""
-    import torch
 
     if weights is None:
         weights = [1.0 / len(deltas)] * len(deltas)
@@ -375,17 +389,18 @@ def _linear_merge(deltas: list, weights: list = None) -> dict:
     merged = {}
     for key in deltas[0].keys():
         tensors = [d[key] for d in deltas if key in d]
-        ws = weights[:len(tensors)]
+        ws = weights[: len(tensors)]
         # Normalize weights
         w_sum = sum(ws)
         ws = [w / w_sum for w in ws]
-        merged[key] = sum(t * w for t, w in zip(tensors, ws))
+        merged[key] = sum(t * w for t, w in zip(tensors, ws, strict=False))
 
     return merged
 
 
-def merge_adapters(adapter_names: list = None, method: str = None,
-                   density: float = None, output_model: str = None) -> dict:
+def merge_adapters(
+    adapter_names: list = None, method: str = None, density: float = None, output_model: str = None
+) -> dict:
     """
     Merge multiple domain adapters into a single production GGUF model.
     CPU-only, zero GPU cost.
@@ -409,10 +424,7 @@ def merge_adapters(adapter_names: list = None, method: str = None,
 
     # Auto-select active adapters if none specified
     if adapter_names is None:
-        adapter_names = [
-            name for name in registry["active_adapters"].values()
-            if name is not None
-        ]
+        adapter_names = [name for name in registry["active_adapters"].values() if name is not None]
 
     if not adapter_names:
         return {"status": "error", "reason": "No adapters to merge"}
@@ -563,10 +575,14 @@ def merge_adapters(adapter_names: list = None, method: str = None,
 
 # ── DOMAIN-TARGETED TRAINING ─────────────────────────────────────────
 
-def start_domain_training(domain: str, dataset_name: str = None,
-                          freeze_layers: int = None,
-                          lr_override: float = None,
-                          epochs_override: int = None) -> dict:
+
+def start_domain_training(
+    domain: str,
+    dataset_name: str = None,
+    freeze_layers: int = None,
+    lr_override: float = None,
+    epochs_override: int = None,
+) -> dict:
     """
     Start domain-targeted adapter training for an augmentation slot.
     Trains a LoRA adapter for the specified domain with selective layer freezing.
@@ -616,8 +632,7 @@ def start_domain_training(domain: str, dataset_name: str = None,
     # Auto-name: domain-vN
     registry = _load_registry()
     existing_versions = [
-        v.get("version", 0) for v in registry["adapters"].values()
-        if v.get("domain") == domain
+        v.get("version", 0) for v in registry["adapters"].values() if v.get("domain") == domain
     ]
     version = max(existing_versions, default=0) + 1
     adapter_name = f"{domain}-v{version}"
@@ -626,10 +641,18 @@ def start_domain_training(domain: str, dataset_name: str = None,
 
     # Reset training state
     _training_state = {
-        "running": True, "progress": 0, "status": "starting domain training",
-        "mode": "domain", "domain": domain, "adapter_name": adapter_name,
-        "dataset": dataset_name, "examples_used": 0, "loss": None,
-        "error": None, "started": int(time.time()), "completed": None,
+        "running": True,
+        "progress": 0,
+        "status": "starting domain training",
+        "mode": "domain",
+        "domain": domain,
+        "adapter_name": adapter_name,
+        "dataset": dataset_name,
+        "examples_used": 0,
+        "loss": None,
+        "error": None,
+        "started": int(time.time()),
+        "completed": None,
         "frozen_layers": freeze_layers,
     }
     _training_cancel_flag.clear()
@@ -673,9 +696,12 @@ DOMAIN_EVAL_DATASETS = {
 }
 
 
-def eval_adapter(adapter_name: str, eval_dataset: str = None,
-                 baseline_model: str = "deltai-qwen3b",
-                 max_examples: int = 20) -> dict:
+def eval_adapter(
+    adapter_name: str,
+    eval_dataset: str = None,
+    baseline_model: str = "deltai-qwen3b",
+    max_examples: int = 20,
+) -> dict:
     """
     Evaluate an adapter against the baseline Ollama model.
     Loads base + adapter via PEFT, runs eval dataset, compares responses.
@@ -762,31 +788,39 @@ def eval_adapter(adapter_name: str, eval_dataset: str = None,
         results = []
         for ex in examples:
             messages = [{"role": "user", "content": ex["input"]}]
-            text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            text = tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
             inputs = tokenizer(text, return_tensors="pt").to(model.device)
 
             t0 = time.time()
             with torch.no_grad():
                 outputs = model.generate(
-                    **inputs, max_new_tokens=256,
-                    do_sample=False, temperature=0.1,
+                    **inputs,
+                    max_new_tokens=256,
+                    do_sample=False,
+                    temperature=0.1,
                 )
             latency = time.time() - t0
 
-            response = tokenizer.decode(outputs[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
+            response = tokenizer.decode(
+                outputs[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True
+            )
 
             # Simple quality score: length similarity to reference
             ref_len = len(ex["output"])
             resp_len = len(response)
             len_ratio = min(resp_len, ref_len) / max(resp_len, ref_len, 1)
 
-            results.append({
-                "input": ex["input"][:100],
-                "reference_len": ref_len,
-                "response_len": resp_len,
-                "latency": round(latency, 2),
-                "len_score": round(len_ratio, 3),
-            })
+            results.append(
+                {
+                    "input": ex["input"][:100],
+                    "reference_len": ref_len,
+                    "response_len": resp_len,
+                    "latency": round(latency, 2),
+                    "len_score": round(len_ratio, 3),
+                }
+            )
 
         del model
         torch.cuda.empty_cache()
@@ -817,8 +851,7 @@ def eval_adapter(adapter_name: str, eval_dataset: str = None,
             json.dump(eval_data, f, indent=2)
 
         # Update registry
-        update_adapter(adapter_name, eval_score=round(avg_score, 3),
-                       eval_path=eval_file)
+        update_adapter(adapter_name, eval_score=round(avg_score, 3), eval_path=eval_file)
 
         # Auto-promote if better than current active
         if ADAPTER_AUTO_PROMOTE:
@@ -850,6 +883,7 @@ def eval_adapter(adapter_name: str, eval_dataset: str = None,
         logger.error("Adapter eval failed")
         try:
             import torch
+
             torch.cuda.empty_cache()
         except Exception:
             pass
@@ -864,7 +898,8 @@ def rollback_adapter(domain: str, target_version: int = None) -> dict:
 
     registry = _load_registry()
     domain_adapters = [
-        (name, info) for name, info in registry["adapters"].items()
+        (name, info)
+        for name, info in registry["adapters"].items()
         if info.get("domain") == domain and info.get("status") == "ready"
     ]
 
@@ -878,17 +913,14 @@ def rollback_adapter(domain: str, target_version: int = None) -> dict:
 
     if target_version is not None:
         target = next(
-            (name for name, info in domain_adapters if info.get("version") == target_version),
-            None
+            (name for name, info in domain_adapters if info.get("version") == target_version), None
         )
         if not target:
             return {"status": "error", "reason": f"Version {target_version} not found for {domain}"}
     else:
         # Roll back to previous version
         if current:
-            current_idx = next(
-                (i for i, (n, _) in enumerate(domain_adapters) if n == current), -1
-            )
+            current_idx = next((i for i, (n, _) in enumerate(domain_adapters) if n == current), -1)
             if current_idx > 0:
                 target = domain_adapters[current_idx - 1][0]
             else:
@@ -906,6 +938,7 @@ def rollback_adapter(domain: str, target_version: int = None) -> dict:
 
 
 # ── DATASET MANAGEMENT ────────────────────────────────────────────────
+
 
 def _dataset_path(name: str) -> str:
     """Get full path for a dataset file. Sanitizes name."""
@@ -935,11 +968,13 @@ def list_datasets() -> list[dict]:
             size_kb = round(getsize_under(fpath, DATASETS_PATH) / 1024, 1)
         except OSError:
             size_kb = 0
-        datasets.append({
-            "name": name,
-            "examples": count,
-            "size_kb": size_kb,
-        })
+        datasets.append(
+            {
+                "name": name,
+                "examples": count,
+                "size_kb": size_kb,
+            }
+        )
     return datasets
 
 
@@ -949,7 +984,7 @@ def create_dataset(name: str) -> dict:
     if exists_under(path, DATASETS_PATH):
         return {"status": "error", "reason": "Dataset already exists"}
     try:
-        with open_text(path, DATASETS_PATH, "w") as f:
+        with open_text(path, DATASETS_PATH, "w"):
             pass  # empty file
         return {"status": "ok", "name": name}
     except Exception as e:
@@ -1032,6 +1067,7 @@ def remove_example(name: str, index: int) -> dict:
 
 # ── DATASET EXPORT ─────────────────────────────────────────────────────
 
+
 def export_dataset(name: str, fmt: str = "alpaca") -> dict:
     """
     Export dataset to training-ready format.
@@ -1059,29 +1095,35 @@ def export_dataset(name: str, fmt: str = "alpaca") -> dict:
         if fmt == "alpaca":
             exported = []
             for ex in examples:
-                exported.append({
-                    "instruction": ex["input"],
-                    "input": "",
-                    "output": ex["output"],
-                })
+                exported.append(
+                    {
+                        "instruction": ex["input"],
+                        "input": "",
+                        "output": ex["output"],
+                    }
+                )
         elif fmt == "sharegpt":
             exported = []
             for ex in examples:
-                exported.append({
-                    "conversations": [
-                        {"from": "human", "value": ex["input"]},
-                        {"from": "gpt", "value": ex["output"]},
-                    ]
-                })
+                exported.append(
+                    {
+                        "conversations": [
+                            {"from": "human", "value": ex["input"]},
+                            {"from": "gpt", "value": ex["output"]},
+                        ]
+                    }
+                )
         elif fmt == "chatml":
             exported = []
             for ex in examples:
-                exported.append({
-                    "messages": [
-                        {"role": "user", "content": ex["input"]},
-                        {"role": "assistant", "content": ex["output"]},
-                    ]
-                })
+                exported.append(
+                    {
+                        "messages": [
+                            {"role": "user", "content": ex["input"]},
+                            {"role": "assistant", "content": ex["output"]},
+                        ]
+                    }
+                )
         else:
             return {"status": "error", "reason": f"Unknown format: {fmt}"}
 
@@ -1160,6 +1202,7 @@ def check_lora_deps() -> tuple[bool, str]:
 
 # ── VRAM MANAGEMENT ──────────────────────────────────────────────────
 
+
 def _unload_ollama_models_sync():
     """Synchronously unload all Ollama models from VRAM via keep_alive=0."""
     ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
@@ -1171,9 +1214,11 @@ def _unload_ollama_models_sync():
         for m in loaded:
             model_name = m.get("name", "")
             if model_name:
-                httpx.post(f"{ollama_url}/api/generate", json={
-                    "model": model_name, "prompt": "", "keep_alive": 0
-                }, timeout=10)
+                httpx.post(
+                    f"{ollama_url}/api/generate",
+                    json={"model": model_name, "prompt": "", "keep_alive": 0},
+                    timeout=10,
+                )
                 logger.info("Unloaded Ollama model from VRAM for training")
     except Exception as e:
         safe_errors.log_exception(logger, "Failed to unload Ollama models", e)
@@ -1218,8 +1263,12 @@ def _read_system_prompt(ollama_model_name: str) -> str:
 
 # Canned greeting responses — used by auto_capture to filter out non-trainable exchanges
 _CANNED_RESPONSES = {
-    "Operational.", "Standing by.", "Online.", "Copy. Out.",
-    "Online. Morning, Ethan.", "Online. Evening, Ethan.",
+    "Operational.",
+    "Standing by.",
+    "Online.",
+    "Copy. Out.",
+    "Online. Morning, Ethan.",
+    "Online. Evening, Ethan.",
     "Powering down comms. Night, Ethan.",
 }
 
@@ -1242,9 +1291,9 @@ def _build_fewshot_modelfile(base_model: str, examples: list[dict], output_path:
     full_system = base_system + fewshot_block
 
     modelfile_content = (
-        f'FROM {base_model}\n\n'
-        f'PARAMETER temperature 0.6\n'
-        f'PARAMETER top_p 0.85\n\n'
+        f"FROM {base_model}\n\n"
+        f"PARAMETER temperature 0.6\n"
+        f"PARAMETER top_p 0.85\n\n"
         f'SYSTEM """\n{full_system}\n"""\n'
     )
 
@@ -1263,7 +1312,8 @@ def _run_fewshot_training(dataset_name: str, base_model: str, output_model: str)
         export_result = export_dataset(dataset_name, fmt="chatml")
         if export_result.get("status") != "ok":
             _update_state(
-                running=False, status="failed",
+                running=False,
+                status="failed",
                 error=f"Export failed: {export_result.get('reason', 'unknown')}",
                 progress=0,
             )
@@ -1275,7 +1325,8 @@ def _run_fewshot_training(dataset_name: str, base_model: str, output_model: str)
         ds_result = get_dataset(dataset_name)
         if ds_result.get("status") != "ok":
             _update_state(
-                running=False, status="failed",
+                running=False,
+                status="failed",
                 error="Could not read dataset examples",
                 progress=0,
             )
@@ -1309,7 +1360,8 @@ def _run_fewshot_training(dataset_name: str, base_model: str, output_model: str)
         if proc.returncode != 0:
             error_msg = stderr.strip() or stdout.strip() or "Unknown ollama error"
             _update_state(
-                running=False, status="failed",
+                running=False,
+                status="failed",
                 error=f"ollama create failed (rc={proc.returncode}): {error_msg}",
                 progress=0,
             )
@@ -1317,8 +1369,11 @@ def _run_fewshot_training(dataset_name: str, base_model: str, output_model: str)
             return
 
         _update_state(
-            running=False, progress=100, status="completed",
-            completed=int(time.time()), error=None,
+            running=False,
+            progress=100,
+            status="completed",
+            completed=int(time.time()),
+            error=None,
         )
         logger.info(
             "Fewshot training complete: %s created with %s examples",
@@ -1331,7 +1386,8 @@ def _run_fewshot_training(dataset_name: str, base_model: str, output_model: str)
             _training_process.kill()
             _training_process = None
         _update_state(
-            running=False, status="failed",
+            running=False,
+            status="failed",
             error="Model creation timed out (300s limit)",
             progress=0,
         )
@@ -1339,14 +1395,17 @@ def _run_fewshot_training(dataset_name: str, base_model: str, output_model: str)
     except Exception as e:
         _training_process = None
         _update_state(
-            running=False, status="failed",
-            error=safe_errors.public_error_detail(e), progress=0,
+            running=False,
+            status="failed",
+            error=safe_errors.public_error_detail(e),
+            progress=0,
         )
         safe_errors.log_exception(logger, "Fewshot training error", e)
         logger.error("Fewshot training error")
 
 
 # ── LORA TRAINING ────────────────────────────────────────────────────
+
 
 def _prepare_hf_dataset(dataset_name: str, system_prompt: str, eval_split: float = 0.1):
     """
@@ -1405,6 +1464,7 @@ def _find_convert_script() -> str | None:
     # Check if llama_cpp python package has it
     try:
         import llama_cpp
+
         pkg_dir = os.path.dirname(llama_cpp.__file__)
         vendor = os.path.join(pkg_dir, "..", "vendor", "llama.cpp", "convert_hf_to_gguf.py")
         if os.path.exists(vendor):
@@ -1433,9 +1493,10 @@ def _convert_to_gguf(merged_dir: str, output_gguf: str, quant_method: str = "Q4_
     logger.info("Converting merged model to F16 GGUF")
 
     proc = subprocess.run(
-        ["python", convert_script, merged_dir,
-         "--outfile", f16_gguf, "--outtype", "f16"],
-        capture_output=True, text=True, timeout=600
+        ["python", convert_script, merged_dir, "--outfile", f16_gguf, "--outtype", "f16"],
+        capture_output=True,
+        text=True,
+        timeout=600,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"GGUF conversion failed: {proc.stderr[:500]}")
@@ -1446,7 +1507,9 @@ def _convert_to_gguf(merged_dir: str, output_gguf: str, quant_method: str = "Q4_
         logger.info("Quantizing GGUF weights")
         proc = subprocess.run(
             [quantize_bin, f16_gguf, output_gguf, quant_method],
-            capture_output=True, text=True, timeout=600
+            capture_output=True,
+            text=True,
+            timeout=600,
         )
         if proc.returncode != 0:
             raise RuntimeError(f"Quantization failed: {proc.stderr[:500]}")
@@ -1469,9 +1532,9 @@ def _register_ollama_model(model_name: str, gguf_path: str, system_prompt: str):
     modelfile_path = resolve_under(MODELFILES_PATH, f"{model_name}.modelfile")
 
     modelfile_content = (
-        f'FROM {gguf_path}\n\n'
-        f'PARAMETER temperature 0.6\n'
-        f'PARAMETER top_p 0.85\n\n'
+        f"FROM {gguf_path}\n\n"
+        f"PARAMETER temperature 0.6\n"
+        f"PARAMETER top_p 0.85\n\n"
         f'SYSTEM """\n{system_prompt}\n"""\n'
     )
 
@@ -1480,18 +1543,28 @@ def _register_ollama_model(model_name: str, gguf_path: str, system_prompt: str):
 
     proc = subprocess.run(
         ["ollama", "create", model_name, "-f", modelfile_path],
-        capture_output=True, text=True, timeout=300,
+        capture_output=True,
+        text=True,
+        timeout=300,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"ollama create failed: {proc.stderr[:500]}")
     logger.info("Registered GGUF-backed model in Ollama")
 
 
-def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
-                       lr_override: float = None, epochs_override: int = None,
-                       warmup_override: float = None, adapter_only: bool = False,
-                       frozen_layers: int = 0, lora_r_override: int = None,
-                       lora_alpha_override: int = None, domain: str = None):
+def _run_lora_training(
+    dataset_name: str,
+    base_model: str,
+    output_model: str,
+    lr_override: float = None,
+    epochs_override: int = None,
+    warmup_override: float = None,
+    adapter_only: bool = False,
+    frozen_layers: int = 0,
+    lora_r_override: int = None,
+    lora_alpha_override: int = None,
+    domain: str = None,
+):
     """
     Background thread: QLoRA fine-tuning via transformers + peft + trl.
     Optional overrides allow distillation mode to use gentler hyperparameters.
@@ -1539,9 +1612,14 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
 
         try:
             from router import is_sim_running
+
             if is_sim_running():
-                _update_state(running=False, status="failed",
-                              error="Cannot train while GPU focus workload is active (VRAM needed)", progress=0)
+                _update_state(
+                    running=False,
+                    status="failed",
+                    error="Cannot train while GPU focus workload is active (VRAM needed)",
+                    progress=0,
+                )
                 return
         except ImportError:
             pass  # router not available, skip sim checks
@@ -1617,8 +1695,15 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
             r=effective_r,
             lora_alpha=effective_alpha,
             lora_dropout=LORA_DROPOUT,
-            target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
-                            "gate_proj", "up_proj", "down_proj"],
+            target_modules=[
+                "q_proj",
+                "k_proj",
+                "v_proj",
+                "o_proj",
+                "gate_proj",
+                "up_proj",
+                "down_proj",
+            ],
             bias="none",
             task_type="CAUSAL_LM",
         )
@@ -1684,6 +1769,7 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
                 # Abort if sim starts mid-training
                 try:
                     from router import is_sim_running
+
                     if is_sim_running():
                         logger.warning("Sim launched during training — aborting to protect VRAM")
                         control.should_training_stop = True
@@ -1700,7 +1786,7 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
             callbacks=[ProgressCallback(), SafetyCallback()],
         )
 
-        train_result = trainer.train()
+        trainer.train()
         logger.info("LoRA training epoch loop finished")
 
         # Check if cancelled
@@ -1738,8 +1824,11 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
                     lora_alpha=effective_alpha,
                 )
             _update_state(
-                running=False, progress=100, status="completed (adapter saved)",
-                completed=int(time.time()), error=None,
+                running=False,
+                progress=100,
+                status="completed (adapter saved)",
+                completed=int(time.time()),
+                error=None,
             )
             logger.info("Domain adapter saved to registry")
             return
@@ -1785,8 +1874,11 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
                 "GGUF conversion failed. Adapter saved but model not registered in Ollama.",
             )
             _update_state(
-                running=False, progress=90, status="partial — adapter saved, GGUF conversion failed",
-                error=safe_errors.public_error_detail(e), completed=int(time.time()),
+                running=False,
+                progress=90,
+                status="partial — adapter saved, GGUF conversion failed",
+                error=safe_errors.public_error_detail(e),
+                completed=int(time.time()),
             )
             return
 
@@ -1803,17 +1895,23 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
 
         # ── Done ──
         _update_state(
-            running=False, progress=100, status="completed",
-            completed=int(time.time()), error=None,
+            running=False,
+            progress=100,
+            status="completed",
+            completed=int(time.time()),
+            error=None,
         )
         logger.info("LoRA training complete; model registered in Ollama")
 
     except Exception as e:
         safe_errors.log_exception(logger, "LoRA training failed", e)
         logger.error("LoRA training failed")
-        _update_state(running=False, status="failed", error=safe_errors.public_error_detail(e), progress=0)
+        _update_state(
+            running=False, status="failed", error=safe_errors.public_error_detail(e), progress=0
+        )
         try:
             import torch
+
             torch.cuda.empty_cache()
         except Exception:
             pass
@@ -1822,9 +1920,14 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
 
 # ── DISTILLATION TRAINING ────────────────────────────────────────────
 
-def _run_distill_training(teacher_dataset: str, replay_datasets: list[str],
-                          base_model: str, output_model: str,
-                          replay_ratio: float = None):
+
+def _run_distill_training(
+    teacher_dataset: str,
+    replay_datasets: list[str],
+    base_model: str,
+    output_model: str,
+    replay_ratio: float = None,
+):
     """
     Background thread: Knowledge distillation training.
     1. Blends teacher data with replay data
@@ -1850,7 +1953,8 @@ def _run_distill_training(teacher_dataset: str, replay_datasets: list[str],
         blend_result = blend_datasets(sources, blend_name)
         if blend_result.get("status") != "ok":
             _update_state(
-                running=False, status="failed",
+                running=False,
+                status="failed",
                 error=f"Blend failed: {blend_result.get('reason', 'unknown')}",
                 progress=0,
             )
@@ -1896,7 +2000,9 @@ def _run_distill_training(teacher_dataset: str, replay_datasets: list[str],
     except Exception as e:
         safe_errors.log_exception(logger, "Distill training error", e)
         logger.error("Distill training error")
-        _update_state(running=False, status="failed", error=safe_errors.public_error_detail(e), progress=0)
+        _update_state(
+            running=False, status="failed", error=safe_errors.public_error_detail(e), progress=0
+        )
     finally:
         # Cleanup temporary blend dataset
         try:
@@ -1909,6 +2015,7 @@ def _run_distill_training(teacher_dataset: str, replay_datasets: list[str],
 
 
 # ── TRAINING ENTRY POINT ─────────────────────────────────────────────
+
 
 def start_training(
     dataset_name: str,
@@ -1936,9 +2043,15 @@ def start_training(
             from router import is_session_active, is_sim_running
 
             if is_sim_running():
-                return {"status": "error", "reason": "Cannot train while a GPU focus workload is active"}
+                return {
+                    "status": "error",
+                    "reason": "Cannot train while a GPU focus workload is active",
+                }
             if is_session_active():
-                return {"status": "error", "reason": "Cannot train during an active GPU focus session"}
+                return {
+                    "status": "error",
+                    "reason": "Cannot train during an active GPU focus session",
+                }
         except ImportError:
             pass
 
@@ -1950,7 +2063,10 @@ def start_training(
         output_model = _sanitize_model_name(output_model)
         base_model = _sanitize_model_name(base_model)
     except ValueError:
-        return {"status": "error", "reason": "Invalid model name: only alphanumerics, '.', '_', '-' are allowed"}
+        return {
+            "status": "error",
+            "reason": "Invalid model name: only alphanumerics, '.', '_', '-' are allowed",
+        }
 
     # Validate dataset
     ds_result = get_dataset(dataset_name)
@@ -1971,28 +2087,47 @@ def start_training(
     elif mode == "distill":
         ok, reason = check_lora_deps()
         if not ok:
-            return {"status": "error", "reason": f"LoRA deps unavailable (needed for distill): {reason}"}
+            return {
+                "status": "error",
+                "reason": f"LoRA deps unavailable (needed for distill): {reason}",
+            }
         # Validate teacher dataset
         if not teacher_dataset:
             return {"status": "error", "reason": "Distill mode requires teacher_dataset parameter"}
         teacher_ds = get_dataset(teacher_dataset)
         if teacher_ds.get("status") != "ok" or not teacher_ds.get("examples"):
-            return {"status": "error", "reason": f"Teacher dataset '{teacher_dataset}' not found or empty"}
+            return {
+                "status": "error",
+                "reason": f"Teacher dataset '{teacher_dataset}' not found or empty",
+            }
         actual_mode = "distill"
 
     # Reset state and launch
     _training_cancel_flag.clear()
     _update_state(
-        running=True, progress=0, status="starting",
-        loss=None, started=int(time.time()), dataset=dataset_name,
-        base_model=base_model, output_model=output_model,
-        error=None, completed=None, examples_used=0,
-        mode=actual_mode, adapter_path=None, gguf_path=None,
+        running=True,
+        progress=0,
+        status="starting",
+        loss=None,
+        started=int(time.time()),
+        dataset=dataset_name,
+        base_model=base_model,
+        output_model=output_model,
+        error=None,
+        completed=None,
+        examples_used=0,
+        mode=actual_mode,
+        adapter_path=None,
+        gguf_path=None,
         trainable_params=0,
     )
 
     if actual_mode == "distill":
-        replay = replay_datasets or ["deltai-personality", "deltai-auto", "deltai-anti-hallucination"]
+        replay = replay_datasets or [
+            "deltai-personality",
+            "deltai-auto",
+            "deltai-anti-hallucination",
+        ]
         thread = threading.Thread(
             target=_run_distill_training,
             args=(teacher_dataset, replay, base_model, output_model),
@@ -2048,17 +2183,22 @@ def stop_training() -> dict:
 
 # ── A/B EVALUATION ───────────────────────────────────────────────────
 
+
 def _run_eval_inference(model: str, prompt: str) -> tuple[str, int]:
     """Run a single inference on Ollama and return (response_text, latency_ms)."""
     ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
     start = time.time()
     try:
-        resp = httpx.post(f"{ollama_url}/api/chat", json={
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
-            "options": {"num_predict": 512},
-        }, timeout=60)
+        resp = httpx.post(
+            f"{ollama_url}/api/chat",
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+                "options": {"num_predict": 512},
+            },
+            timeout=60,
+        )
         elapsed = int((time.time() - start) * 1000)
         if resp.status_code == 200:
             return resp.json().get("message", {}).get("content", ""), elapsed
@@ -2101,20 +2241,22 @@ def run_ab_eval(
         a_resp, a_time = _run_eval_inference(model_a, input_text)
         b_resp, b_time = _run_eval_inference(model_b, input_text)
 
-        results.append({
-            "input": input_text[:200],
-            "expected_len": len(expected),
-            "model_a": {
-                "response_len": len(a_resp),
-                "latency_ms": a_time,
-                "response": a_resp[:300],
-            },
-            "model_b": {
-                "response_len": len(b_resp),
-                "latency_ms": b_time,
-                "response": b_resp[:300],
-            },
-        })
+        results.append(
+            {
+                "input": input_text[:200],
+                "expected_len": len(expected),
+                "model_a": {
+                    "response_len": len(a_resp),
+                    "latency_ms": a_time,
+                    "response": a_resp[:300],
+                },
+                "model_b": {
+                    "response_len": len(b_resp),
+                    "latency_ms": b_time,
+                    "response": b_resp[:300],
+                },
+            }
+        )
 
     # Save results
     # Use a trusted filename (no user-controlled model names) to avoid
@@ -2125,13 +2267,18 @@ def run_ab_eval(
     except ValueError:
         return {"status": "error", "reason": "Invalid evaluation file path"}
     with open_text(eval_path, EVAL_PATH, "w") as f:
-        json.dump({
-            "model_a": model_a,
-            "model_b": model_b,
-            "dataset": dataset_name,
-            "timestamp": int(time.time()),
-            "results": results,
-        }, f, indent=2, ensure_ascii=False)
+        json.dump(
+            {
+                "model_a": model_a,
+                "model_b": model_b,
+                "dataset": dataset_name,
+                "timestamp": int(time.time()),
+                "results": results,
+            },
+            f,
+            indent=2,
+            ensure_ascii=False,
+        )
 
     avg_a = sum(r["model_a"]["latency_ms"] for r in results) / len(results) if results else 0
     avg_b = sum(r["model_b"]["latency_ms"] for r in results) / len(results) if results else 0
@@ -2145,13 +2292,22 @@ def run_ab_eval(
         "summary": {
             "avg_latency_a_ms": round(avg_a),
             "avg_latency_b_ms": round(avg_b),
-            "avg_response_len_a": round(sum(r["model_a"]["response_len"] for r in results) / len(results)) if results else 0,
-            "avg_response_len_b": round(sum(r["model_b"]["response_len"] for r in results) / len(results)) if results else 0,
+            "avg_response_len_a": round(
+                sum(r["model_a"]["response_len"] for r in results) / len(results)
+            )
+            if results
+            else 0,
+            "avg_response_len_b": round(
+                sum(r["model_b"]["response_len"] for r in results) / len(results)
+            )
+            if results
+            else 0,
         },
     }
 
 
 # ── AUTO-CAPTURE ──────────────────────────────────────────────────────
+
 
 def auto_capture(
     dataset_name: str,
@@ -2174,7 +2330,10 @@ def auto_capture(
 
     # Skip if assistant response is too short
     if len(assistant_msg) < min_quality_len:
-        return {"captured": False, "reason": f"response too short ({len(assistant_msg)} < {min_quality_len})"}
+        return {
+            "captured": False,
+            "reason": f"response too short ({len(assistant_msg)} < {min_quality_len})",
+        }
 
     # Skip error responses
     error_indicators = ["error:", "exception:", "traceback", "failed to", "i can't", "i cannot"]
@@ -2265,8 +2424,12 @@ def generate_teacher_data(
     if teacher == "local14b":
         try:
             from router import is_sim_running
+
             if is_sim_running():
-                return {"status": "error", "reason": "Cannot use 14B teacher while a GPU focus workload is active"}
+                return {
+                    "status": "error",
+                    "reason": "Cannot use 14B teacher while a GPU focus workload is active",
+                }
         except ImportError:
             pass
 
@@ -2274,7 +2437,10 @@ def generate_teacher_data(
     if teacher == "anthropic":
         api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
         if not api_key:
-            return {"status": "error", "reason": "ANTHROPIC_API_KEY not set — cannot use Anthropic teacher"}
+            return {
+                "status": "error",
+                "reason": "ANTHROPIC_API_KEY not set — cannot use Anthropic teacher",
+            }
 
     # Ensure dataset exists
     ds_path = _dataset_path(dataset_name)
@@ -2379,6 +2545,7 @@ def blend_datasets(
     Returns: {"status": "ok", "total": N, "breakdown": {...}}
     """
     import random
+
     rng = random.Random(seed)
 
     # Check output doesn't already exist
@@ -2531,9 +2698,8 @@ def verify_retention(
 
         # Personality preserved: not overly verbose, no banned phrases
         banned = ["certainly!", "absolutely!", "i'd be happy to", "great question", "as an ai"]
-        personality_ok = (
-            not any(b in resp_lower for b in banned)
-            and (len(candidate_resp) < 3 * max(len(baseline_resp), 50))
+        personality_ok = not any(b in resp_lower for b in banned) and (
+            len(candidate_resp) < 3 * max(len(baseline_resp), 50)
         )
         checks["personality_preserved"] = personality_ok
         if personality_ok:
@@ -2543,15 +2709,17 @@ def verify_retention(
         if query_passed:
             passed_count += 1
 
-        details.append({
-            "query": query,
-            "category": cat,
-            "candidate_len": len(candidate_resp),
-            "baseline_len": len(baseline_resp),
-            "checks": checks,
-            "score": score,
-            "passed": query_passed,
-        })
+        details.append(
+            {
+                "query": query,
+                "category": cat,
+                "candidate_len": len(candidate_resp),
+                "baseline_len": len(baseline_resp),
+                "checks": checks,
+                "score": score,
+                "passed": query_passed,
+            }
+        )
 
     pass_rate = passed_count / len(all_queries) if all_queries else 0.0
 
@@ -2568,9 +2736,6 @@ def verify_retention(
 
 # ── SMART AUTO-CAPTURE ───────────────────────────────────────────────────
 # Quality-tiered capture with dedup, negative examples, and DPO pairs.
-
-import hashlib as _hashlib
-import random as _random
 
 _CAPTURE_DEDUP_THRESHOLD = float(os.getenv("CAPTURE_DEDUP_THRESHOLD", "0.15"))
 _SMART_CAPTURE_ENABLED = os.getenv("SMART_CAPTURE_ENABLED", "true").lower() in ("true", "1", "yes")
@@ -2642,9 +2807,13 @@ def smart_auto_capture(
         ds_path = _dataset_path(dataset_name)
         if not exists_under(ds_path, DATASETS_PATH):
             create_dataset(dataset_name)
-        result = add_example(dataset_name, capture_input, assistant_msg, category=category)
-        return {"captured": True, "dataset": dataset_name, "tier": "exemplary",
-                "score": quality_score}
+        add_example(dataset_name, capture_input, assistant_msg, category=category)
+        return {
+            "captured": True,
+            "dataset": dataset_name,
+            "tier": "exemplary",
+            "score": quality_score,
+        }
 
     elif quality_score >= 0.6:
         # Good — capture with 50% probability to prevent dataset bloat
@@ -2652,9 +2821,13 @@ def smart_auto_capture(
             ds_path = _dataset_path(dataset_name)
             if not exists_under(ds_path, DATASETS_PATH):
                 create_dataset(dataset_name)
-            result = add_example(dataset_name, capture_input, assistant_msg, category=category)
-            return {"captured": True, "dataset": dataset_name, "tier": "good",
-                    "score": quality_score}
+            add_example(dataset_name, capture_input, assistant_msg, category=category)
+            return {
+                "captured": True,
+                "dataset": dataset_name,
+                "tier": "good",
+                "score": quality_score,
+            }
         return {"captured": False, "reason": "probabilistic skip (score 0.6-0.8)"}
 
     elif quality_score < 0.3:
@@ -2663,10 +2836,13 @@ def smart_auto_capture(
         ds_path = _dataset_path(neg_dataset)
         if not exists_under(ds_path, DATASETS_PATH):
             create_dataset(neg_dataset)
-        result = add_example(neg_dataset, capture_input, assistant_msg,
-                           category=f"negative:{category}")
-        return {"captured": True, "dataset": neg_dataset, "tier": "negative",
-                "score": quality_score}
+        add_example(neg_dataset, capture_input, assistant_msg, category=f"negative:{category}")
+        return {
+            "captured": True,
+            "dataset": neg_dataset,
+            "tier": "negative",
+            "score": quality_score,
+        }
 
     else:
         # Mediocre (0.3-0.6) — skip
@@ -2675,6 +2851,7 @@ def smart_auto_capture(
 
 # ── ITERATIVE DISTILLATION PIPELINE ──────────────────────────────────────
 # Closed loop: identify weaknesses → targeted teacher data → retrain → evaluate.
+
 
 def identify_weak_domains(min_samples: int = 20) -> list[dict]:
     """
@@ -2700,19 +2877,20 @@ def identify_weak_domains(min_samples: int = 20) -> list[dict]:
         if avg < 0.6:
             # Collect worst queries for targeted distillation
             worst = sorted(stats, key=lambda s: s.get("score", 1.0))[:10]
-            weak.append({
-                "domain": domain,
-                "avg_score": round(avg, 3),
-                "sample_count": len(scores),
-                "worst_queries": worst,
-            })
+            weak.append(
+                {
+                    "domain": domain,
+                    "avg_score": round(avg, 3),
+                    "sample_count": len(scores),
+                    "worst_queries": worst,
+                }
+            )
 
     weak.sort(key=lambda x: x["avg_score"])
     return weak
 
 
-def distill_targeted(domain: str, n_queries: int = 50,
-                     teacher_model: str = None) -> dict:
+def distill_targeted(domain: str, n_queries: int = 50, teacher_model: str = None) -> dict:
     """
     Generate targeted teacher data for a weak domain.
     Pulls the worst-scoring queries and feeds them to the teacher model.
@@ -2742,10 +2920,9 @@ def distill_targeted(domain: str, n_queries: int = 50,
     if not exists_under(ds_path, DATASETS_PATH):
         create_dataset(dataset_name)
 
-    generated = 0
     # Note: actual teacher generation would call Ollama with the teacher model
     # For now, log the queries that need improvement
-    for score, stat in worst:
+    for _score, _stat in worst:
         # These would be fed to generate_teacher_data in a full implementation
         # For now, record them as queries needing teacher responses
         pass
@@ -2773,8 +2950,11 @@ def run_improvement_cycle(domain: str) -> dict:
     target = next((w for w in weak if w["domain"] == domain), None)
 
     if not target:
-        return {"status": "skipped", "reason": f"domain '{domain}' is not below threshold",
-                "weak_domains": [w["domain"] for w in weak]}
+        return {
+            "status": "skipped",
+            "reason": f"domain '{domain}' is not below threshold",
+            "weak_domains": [w["domain"] for w in weak],
+        }
 
     # Step 2: Generate targeted data
     result = distill_targeted(domain)
@@ -2792,6 +2972,7 @@ def run_improvement_cycle(domain: str) -> dict:
 # ── DPO TRAINING ─────────────────────────────────────────────────────────
 # Direct Preference Optimization using positive/negative example pairs.
 # Consumes {dataset}-negative datasets accumulated by smart_auto_capture.
+
 
 def start_dpo_training(
     positive_dataset: str,
@@ -2830,9 +3011,15 @@ def start_dpo_training(
 
     _training_cancel_flag.clear()
     _update_state(
-        running=True, status="starting DPO training", progress=0,
-        dataset=positive_dataset, model=effective_output, mode="dpo",
-        error=None, loss=None, completed=None,
+        running=True,
+        status="starting DPO training",
+        progress=0,
+        dataset=positive_dataset,
+        model=effective_output,
+        mode="dpo",
+        error=None,
+        loss=None,
+        completed=None,
     )
 
     def _run_dpo():
@@ -2872,9 +3059,7 @@ def _dpo_train_impl(
         _update_state(
             running=False,
             status="failed",
-            error=(
-                "DPO deps missing. Install: pip install trl transformers peft bitsandbytes"
-            ),
+            error=("DPO deps missing. Install: pip install trl transformers peft bitsandbytes"),
         )
         return
 
@@ -2905,8 +3090,11 @@ def _dpo_train_impl(
             pairs.append({"prompt": inp, "chosen": chosen, "rejected": rejected})
 
     if len(pairs) < 10:
-        _update_state(running=False, status="failed",
-                      error=f"Too few preference pairs ({len(pairs)}). Need at least 10 matched examples.")
+        _update_state(
+            running=False,
+            status="failed",
+            error=f"Too few preference pairs ({len(pairs)}). Need at least 10 matched examples.",
+        )
         return
 
     _update_state(progress=10, status=f"building {len(pairs)} preference pairs")
@@ -2914,7 +3102,9 @@ def _dpo_train_impl(
     hf_data = HFDataset.from_list(pairs)
     train_size = max(1, int(len(hf_data) * 0.9))
     train_ds = hf_data.select(range(train_size))
-    eval_ds = hf_data.select(range(train_size, len(hf_data))) if len(hf_data) > train_size else train_ds
+    eval_ds = (
+        hf_data.select(range(train_size, len(hf_data))) if len(hf_data) > train_size else train_ds
+    )
 
     _update_state(progress=15, status="loading base model (4-bit)")
     bnb_config = BitsAndBytesConfig(
@@ -2934,9 +3124,14 @@ def _dpo_train_impl(
 
     _update_state(progress=20, status="applying LoRA for DPO")
     model = prepare_model_for_kbit_training(model)
-    lora_cfg = LoraConfig(r=8, lora_alpha=16, lora_dropout=0.05,
-                          target_modules=["q_proj", "v_proj"], bias="none",
-                          task_type="CAUSAL_LM")
+    lora_cfg = LoraConfig(
+        r=8,
+        lora_alpha=16,
+        lora_dropout=0.05,
+        target_modules=["q_proj", "v_proj"],
+        bias="none",
+        task_type="CAUSAL_LM",
+    )
     model = get_peft_model(model, lora_cfg)
 
     try:
@@ -2978,19 +3173,29 @@ def _dpo_train_impl(
 
     del model, trainer
     import gc
+
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    _update_state(running=False, progress=100, status="DPO training complete",
-                  completed=int(time.time()), error=None)
+    _update_state(
+        running=False,
+        progress=100,
+        status="DPO training complete",
+        completed=int(time.time()),
+        error=None,
+    )
     logger.info("DPO training complete (%s preference pairs)", len(pairs))
 
 
 # ── SESSION KNOWLEDGE SYNTHESIS ───────────────────────────────────────────
 # At session end, synthesize key learnings into a durable knowledge article.
 
-SESSION_SYNTHESIS_ENABLED = os.getenv("SESSION_SYNTHESIS_ENABLED", "true").lower() in ("true", "1", "yes")
+SESSION_SYNTHESIS_ENABLED = os.getenv("SESSION_SYNTHESIS_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
 SESSION_SYNTHESIS_MODEL = os.getenv("SESSION_SYNTHESIS_MODEL", "local14b")
 
 
@@ -3015,8 +3220,11 @@ def synthesize_session_knowledge(
         return {"status": "skipped", "reason": "no session turns provided"}
 
     effective_teacher = teacher or SESSION_SYNTHESIS_MODEL
-    model_name = os.getenv("DELTAI_STRONG_MODEL", "deltai-qwen14b") if effective_teacher == "local14b" \
+    model_name = (
+        os.getenv("DELTAI_STRONG_MODEL", "deltai-qwen14b")
+        if effective_teacher == "local14b"
         else os.getenv("DELTAI_MODEL", "deltai-qwen3b")
+    )
 
     # Build session transcript (trimmed to avoid token overflow)
     transcript_lines = []
@@ -3128,13 +3336,11 @@ def run_daily_cycle(
         "errors": [],
     }
 
-    effective_auto_merge = _DAILY_TRAIN_AUTO_MERGE if auto_merge is None else auto_merge
-    effective_auto_promote = _DAILY_TRAIN_AUTO_PROMOTE if auto_promote is None else auto_promote
-
     # ── Phase 0: Guard checks ──
     guards = {}
     try:
         from router import _get_vram_info, is_sim_running
+
         _sim = is_sim_running()
         guards["sim_running"] = _sim  # legacy report key
         guards["focus_workload_active"] = _sim
@@ -3189,6 +3395,7 @@ def run_daily_cycle(
     if _WEB_COLLECT_ENABLED:
         try:
             from collector import run_collection_cycle  # noqa: PLC0415
+
             collect_report = run_collection_cycle(dry_run=dry_run)
             logger.info("Web collection phase finished")
         except Exception as e:
@@ -3201,8 +3408,10 @@ def run_daily_cycle(
     # ── Phase 1: Weakness analysis ──
     weak_domains = identify_weak_domains(min_samples=15)
     report["phases"]["weakness_analysis"] = {
-        "weak_domains": [{"domain": w["domain"], "avg_score": w["avg_score"],
-                          "samples": w["sample_count"]} for w in weak_domains]
+        "weak_domains": [
+            {"domain": w["domain"], "avg_score": w["avg_score"], "samples": w["sample_count"]}
+            for w in weak_domains
+        ]
     }
     logger.info("Daily cycle: weak_domain_count=%s", len(weak_domains))
 
@@ -3222,16 +3431,20 @@ def run_daily_cycle(
             dataset_name=f"distill-{domain}-targeted",
             category=f"distill-{domain}",
         )
-        distill_results.append({
-            "domain": domain,
-            "generated": teacher_result.get("generated", 0),
-            "filtered": teacher_result.get("filtered", 0),
-            "status": teacher_result.get("status", "unknown"),
-        })
+        distill_results.append(
+            {
+                "domain": domain,
+                "generated": teacher_result.get("generated", 0),
+                "filtered": teacher_result.get("filtered", 0),
+                "status": teacher_result.get("status", "unknown"),
+            }
+        )
     report["phases"]["targeted_distillation"] = distill_results
 
     # ── Phase 3: Daily curriculum ──
-    weekday = force_day_override if force_day_override is not None else datetime.datetime.now().weekday()
+    weekday = (
+        force_day_override if force_day_override is not None else datetime.datetime.now().weekday()
+    )
     curriculum = _DAILY_CURRICULUM.get(weekday, _DAILY_CURRICULUM[0])
     curriculum_results = []
     for ds_name, domain in curriculum:
@@ -3245,8 +3458,15 @@ def run_daily_cycle(
 
     # ── Phase 4: Domain training ──
     # Determine which domain to train today based on weekday
-    train_domain_map = {0: "telemetry", 1: "racing", 2: "engineering", 3: "reasoning",
-                        4: "audio", 5: "reasoning", 6: "personality"}
+    train_domain_map = {
+        0: "telemetry",
+        1: "racing",
+        2: "engineering",
+        3: "reasoning",
+        4: "audio",
+        5: "reasoning",
+        6: "personality",
+    }
     train_domain = train_domain_map.get(weekday, "reasoning")
 
     # Gather datasets for this domain
@@ -3269,8 +3489,11 @@ def run_daily_cycle(
     else:
         # Blend domain datasets for training
         blend_name = f"daily-blend-{train_domain}-{datetime.datetime.now().strftime('%Y%m%d')}"
-        sources = [{"dataset": ds, "weight": 1.0}
-                   for ds in domain_datasets if exists_under(_dataset_path(ds), DATASETS_PATH)]
+        sources = [
+            {"dataset": ds, "weight": 1.0}
+            for ds in domain_datasets
+            if exists_under(_dataset_path(ds), DATASETS_PATH)
+        ]
         if sources:
             blend_result = blend_datasets(blend_name, sources)
             if blend_result.get("status") == "ok":
@@ -3282,12 +3505,14 @@ def run_daily_cycle(
                     domain=train_domain,
                     adapter_only=True,
                 )
-                training_result.update({
-                    "status": train_result.get("status", "unknown"),
-                    "domain": train_domain,
-                    "blend": blend_result.get("total", 0),
-                    "output": output_name,
-                })
+                training_result.update(
+                    {
+                        "status": train_result.get("status", "unknown"),
+                        "domain": train_domain,
+                        "blend": blend_result.get("total", 0),
+                        "output": output_name,
+                    }
+                )
 
     report["phases"]["training"] = training_result
 

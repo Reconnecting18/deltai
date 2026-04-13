@@ -8,8 +8,8 @@ feedback, and knowledge gap detection.
 No LLM calls — all signals are computed from string analysis and metadata.
 """
 
-import re
 import logging
+import re
 
 logger = logging.getLogger("deltai.quality")
 
@@ -26,29 +26,67 @@ _WEIGHTS = {
 
 # ── Error / hedging patterns ────────────────────────────────────────────
 _ERROR_PATTERNS = [
-    r"^error:", r"^exception:", r"^sorry,?\s+i\s+(can't|cannot|couldn't)",
-    r"^i\s+(don't|do not)\s+know", r"^i'm\s+not\s+sure",
-    r"^unfortunately,?\s+i", r"^i\s+apologize",
+    r"^error:",
+    r"^exception:",
+    r"^sorry,?\s+i\s+(can't|cannot|couldn't)",
+    r"^i\s+(don't|do not)\s+know",
+    r"^i'm\s+not\s+sure",
+    r"^unfortunately,?\s+i",
+    r"^i\s+apologize",
 ]
 _ERROR_RE = [re.compile(p, re.IGNORECASE) for p in _ERROR_PATTERNS]
 
 _HEDGING_PHRASES = [
-    "i think", "i believe", "it might be", "it could be", "possibly",
-    "not entirely sure", "i'm not certain", "take this with",
-    "don't quote me", "i may be wrong",
+    "i think",
+    "i believe",
+    "it might be",
+    "it could be",
+    "possibly",
+    "not entirely sure",
+    "i'm not certain",
+    "take this with",
+    "don't quote me",
+    "i may be wrong",
 ]
 
 # ── Specificity indicators ──────────────────────────────────────────────
-_NUMBER_RE = re.compile(r'\b\d+\.?\d*\s*(?:MB|GB|KB|ms|s|min|hr|km/h|mph|kg|N|Pa|°C|°F|psi|bar|rpm|kW|HP|Nm|%)\b', re.IGNORECASE)
-_CODE_BLOCK_RE = re.compile(r'```[\s\S]*?```')
-_PROPER_NOUN_RE = re.compile(r'\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)*\b')
+_NUMBER_RE = re.compile(
+    r"\b\d+\.?\d*\s*(?:MB|GB|KB|ms|s|min|hr|km/h|mph|kg|N|Pa|°C|°F|psi|bar|rpm|kW|HP|Nm|%)\b",
+    re.IGNORECASE,
+)
+_CODE_BLOCK_RE = re.compile(r"```[\s\S]*?```")
+_PROPER_NOUN_RE = re.compile(r"\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)*\b")
 
 # ── Engineering scaffolds ───────────────────────────────────────────────
-_ENG_SCAFFOLDS = ["given:", "find:", "solve:", "solution:", "approach:",
-                  "step 1", "step 2", "therefore", "substituting", "result:"]
-_RACING_INDICATORS = ["lap", "stint", "tire", "tyre", "compound", "pit",
-                      "fuel", "sector", "delta", "gap", "position",
-                      "brake", "throttle", "speed", "corner"]
+_ENG_SCAFFOLDS = [
+    "given:",
+    "find:",
+    "solve:",
+    "solution:",
+    "approach:",
+    "step 1",
+    "step 2",
+    "therefore",
+    "substituting",
+    "result:",
+]
+_RACING_INDICATORS = [
+    "lap",
+    "stint",
+    "tire",
+    "tyre",
+    "compound",
+    "pit",
+    "fuel",
+    "sector",
+    "delta",
+    "gap",
+    "position",
+    "brake",
+    "throttle",
+    "speed",
+    "corner",
+]
 
 
 def _score_length(response: str, tier: int) -> float:
@@ -60,9 +98,9 @@ def _score_length(response: str, tier: int) -> float:
     length = len(response)
     # Expected ranges by tier
     ranges = {
-        1: (30, 800),     # simple: 30-800 chars
-        2: (100, 2000),   # moderate: 100-2000 chars
-        3: (200, 4000),   # complex: 200-4000 chars
+        1: (30, 800),  # simple: 30-800 chars
+        2: (100, 2000),  # moderate: 100-2000 chars
+        3: (200, 4000),  # complex: 200-4000 chars
     }
     min_len, max_len = ranges.get(tier, (50, 2000))
 
@@ -144,15 +182,23 @@ def _score_structural_match(response: str, domain: str) -> float:
 
     if domain == "reasoning":
         # Look for structured reasoning
-        reasoning_markers = ["because", "therefore", "however", "first",
-                           "second", "in conclusion", "the key", "this means"]
+        reasoning_markers = [
+            "because",
+            "therefore",
+            "however",
+            "first",
+            "second",
+            "in conclusion",
+            "the key",
+            "this means",
+        ]
         matches = sum(1 for s in reasoning_markers if s in lower)
         return min(1.0, matches * 0.15)
 
     # General: reward any structure
     has_structure = (
-        "\n" in response and  # multi-line
-        (response.count(". ") > 2 or "- " in response)  # multiple sentences or bullets
+        "\n" in response  # multi-line
+        and (response.count(". ") > 2 or "- " in response)  # multiple sentences or bullets
     )
     return 0.7 if has_structure else 0.4
 
@@ -239,6 +285,7 @@ def score_response(user_msg: str, assistant_msg: str, metadata: dict | None = No
         _recent_responses = _recent_responses[-_RECENT_CACHE_SIZE:]
 
     import os
+
     threshold = float(os.getenv("QUALITY_CAPTURE_THRESHOLD", "0.6"))
 
     return {

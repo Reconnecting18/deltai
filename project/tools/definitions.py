@@ -3,6 +3,9 @@ deltai Tool Definitions — JSON schemas for Ollama tool calling.
 llama3.1 uses these to decide when and how to invoke tools.
 """
 
+import os as _os
+import re as _re
+
 TOOLS = [
     {
         "type": "function",
@@ -14,16 +17,16 @@ TOOLS = [
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Absolute path to the file (e.g., ~/deltai/project\\main.py)"
+                        "description": "Absolute path to the file (e.g., ~/deltai/project\\main.py)",
                     },
                     "max_lines": {
                         "type": "integer",
-                        "description": "Maximum number of lines to return. Default 200. Use for large files."
-                    }
+                        "description": "Maximum number of lines to return. Default 200. Use for large files.",
+                    },
                 },
-                "required": ["path"]
-            }
-        }
+                "required": ["path"],
+            },
+        },
     },
     {
         "type": "function",
@@ -35,20 +38,20 @@ TOOLS = [
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Absolute path for the file to write"
+                        "description": "Absolute path for the file to write",
                     },
                     "content": {
                         "type": "string",
-                        "description": "Full content to write to the file"
+                        "description": "Full content to write to the file",
                     },
                     "append": {
                         "type": "boolean",
-                        "description": "If true, append to existing file instead of overwriting. Default false."
-                    }
+                        "description": "If true, append to existing file instead of overwriting. Default false.",
+                    },
                 },
-                "required": ["path", "content"]
-            }
-        }
+                "required": ["path", "content"],
+            },
+        },
     },
     {
         "type": "function",
@@ -60,16 +63,16 @@ TOOLS = [
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Absolute path to the directory to list"
+                        "description": "Absolute path to the directory to list",
                     },
                     "recursive": {
                         "type": "boolean",
-                        "description": "If true, list subdirectories recursively (max 3 levels). Default false."
-                    }
+                        "description": "If true, list subdirectories recursively (max 3 levels). Default false.",
+                    },
                 },
-                "required": ["path"]
-            }
-        }
+                "required": ["path"],
+            },
+        },
     },
     {
         "type": "function",
@@ -79,18 +82,15 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "The bash command to execute"
-                    },
+                    "command": {"type": "string", "description": "The bash command to execute"},
                     "timeout": {
                         "type": "integer",
-                        "description": "Timeout in seconds. Default 15."
-                    }
+                        "description": "Timeout in seconds. Default 15.",
+                    },
                 },
-                "required": ["command"]
-            }
-        }
+                "required": ["command"],
+            },
+        },
     },
     {
         "type": "function",
@@ -102,12 +102,12 @@ TOOLS = [
                 "properties": {
                     "include_processes": {
                         "type": "boolean",
-                        "description": "If true, include top 10 processes by memory usage. Default false."
+                        "description": "If true, include top 10 processes by memory usage. Default false.",
                     }
                 },
-                "required": []
-            }
-        }
+                "required": [],
+            },
+        },
     },
     {
         "type": "function",
@@ -119,28 +119,24 @@ TOOLS = [
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Natural language search query describing what to find"
+                        "description": "Natural language search query describing what to find",
                     },
                     "n_results": {
                         "type": "integer",
-                        "description": "Number of results to return. Default 5."
-                    }
+                        "description": "Number of results to return. Default 5.",
+                    },
                 },
-                "required": ["query"]
-            }
-        }
+                "required": ["query"],
+            },
+        },
     },
     {
         "type": "function",
         "function": {
             "name": "memory_stats",
             "description": "Get stats about deltai's knowledge base: number of chunks, files ingested, disk usage. Use when the operator asks about memory status or what's been ingested.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-        }
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
     },
     {
         "type": "function",
@@ -152,16 +148,16 @@ TOOLS = [
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Search query (e.g., 'Ferrari 296 GT3 specs', 'Python FastAPI tutorial')"
+                        "description": "Search query (e.g., 'Ferrari 296 GT3 specs', 'Python FastAPI tutorial')",
                     },
                     "max_results": {
                         "type": "integer",
-                        "description": "Maximum results to return. Default 5, max 10."
-                    }
+                        "description": "Maximum results to return. Default 5, max 10.",
+                    },
                 },
-                "required": ["query"]
-            }
-        }
+                "required": ["query"],
+            },
+        },
     },
     {
         "type": "function",
@@ -173,16 +169,16 @@ TOOLS = [
                 "properties": {
                     "url": {
                         "type": "string",
-                        "description": "Full URL to fetch (must start with http:// or https://)"
+                        "description": "Full URL to fetch (must start with http:// or https://)",
                     },
                     "max_chars": {
                         "type": "integer",
-                        "description": "Maximum characters to return. Default 8000, max 20000."
-                    }
+                        "description": "Maximum characters to return. Default 8000, max 20000.",
+                    },
                 },
-                "required": ["url"]
-            }
-        }
+                "required": ["url"],
+            },
+        },
     },
 ]
 
@@ -199,16 +195,16 @@ COMPUTATION_TOOLS = [
                 "properties": {
                     "expression": {
                         "type": "string",
-                        "description": "Python expression to evaluate (e.g., 'math.sqrt(144)', '9.81 * 75 * math.sin(math.radians(30))', 'statistics.mean([1.32, 1.34, 1.31])')"
+                        "description": "Python expression to evaluate (e.g., 'math.sqrt(144)', '9.81 * 75 * math.sin(math.radians(30))', 'statistics.mean([1.32, 1.34, 1.31])')",
                     },
                     "description": {
                         "type": "string",
-                        "description": "What this calculation represents (e.g., 'Normal force on 30-degree incline for 75kg mass')"
-                    }
+                        "description": "What this calculation represents (e.g., 'Normal force on 30-degree incline for 75kg mass')",
+                    },
                 },
-                "required": ["expression"]
-            }
-        }
+                "required": ["expression"],
+            },
+        },
     },
     {
         "type": "function",
@@ -220,16 +216,16 @@ COMPUTATION_TOOLS = [
                 "properties": {
                     "data": {
                         "type": "string",
-                        "description": "The data to summarize (JSON string, CSV, or text with numbers)"
+                        "description": "The data to summarize (JSON string, CSV, or text with numbers)",
                     },
                     "focus": {
                         "type": "string",
-                        "description": "What aspect to focus on: 'trends', 'outliers', 'averages', 'distribution', or 'all'. Default 'all'."
-                    }
+                        "description": "What aspect to focus on: 'trends', 'outliers', 'averages', 'distribution', or 'all'. Default 'all'.",
+                    },
                 },
-                "required": ["data"]
-            }
-        }
+                "required": ["data"],
+            },
+        },
     },
     {
         "type": "function",
@@ -241,12 +237,12 @@ COMPUTATION_TOOLS = [
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "What to look up (e.g., 'Reynolds number formula', 'Pacejka magic formula coefficients', 'moment of inertia for cylinder')"
+                        "description": "What to look up (e.g., 'Reynolds number formula', 'Pacejka magic formula coefficients', 'moment of inertia for cylinder')",
                     }
                 },
-                "required": ["query"]
-            }
-        }
+                "required": ["query"],
+            },
+        },
     },
     {
         "type": "function",
@@ -258,25 +254,37 @@ COMPUTATION_TOOLS = [
                 "properties": {
                     "operation": {
                         "type": "string",
-                        "enum": ["solve", "differentiate", "integrate", "limit", "simplify", "expand", "factor", "matrix", "series", "laplace", "eigenvalues"],
-                        "description": "The symbolic math operation to perform."
+                        "enum": [
+                            "solve",
+                            "differentiate",
+                            "integrate",
+                            "limit",
+                            "simplify",
+                            "expand",
+                            "factor",
+                            "matrix",
+                            "series",
+                            "laplace",
+                            "eigenvalues",
+                        ],
+                        "description": "The symbolic math operation to perform.",
                     },
                     "expression": {
                         "type": "string",
-                        "description": "Math expression in SymPy syntax (e.g., 'x**2 + 3*x - 4', 'sin(x)*exp(x)', 'Matrix([[1,2],[3,4]])')"
+                        "description": "Math expression in SymPy syntax (e.g., 'x**2 + 3*x - 4', 'sin(x)*exp(x)', 'Matrix([[1,2],[3,4]])')",
                     },
                     "variable": {
                         "type": "string",
-                        "description": "Variable to operate on (default: 'x'). For solve: the unknown. For diff/integrate: the variable."
+                        "description": "Variable to operate on (default: 'x'). For solve: the unknown. For diff/integrate: the variable.",
                     },
                     "point": {
                         "type": "string",
-                        "description": "For limits: point to approach (e.g., '0', 'oo'). For definite integrals: 'lower,upper' (e.g., '0,pi'). For series: expansion point."
-                    }
+                        "description": "For limits: point to approach (e.g., '0', 'oo'). For definite integrals: 'lower,upper' (e.g., '0,pi'). For series: expansion point.",
+                    },
                 },
-                "required": ["operation", "expression"]
-            }
-        }
+                "required": ["operation", "expression"],
+            },
+        },
     },
 ]
 
@@ -295,12 +303,12 @@ DIAGNOSTIC_TOOLS = [
                 "properties": {
                     "subsystem": {
                         "type": "string",
-                        "description": "Optional: deep-check one subsystem. One of: ollama, chromadb, gpu, voice, watcher, backup, paths. Omit for full sweep."
+                        "description": "Optional: deep-check one subsystem. One of: ollama, chromadb, gpu, voice, watcher, backup, paths. Omit for full sweep.",
                     }
                 },
-                "required": []
-            }
-        }
+                "required": [],
+            },
+        },
     },
     {
         "type": "function",
@@ -312,16 +320,16 @@ DIAGNOSTIC_TOOLS = [
                 "properties": {
                     "action": {
                         "type": "string",
-                        "description": "Action: 'status', 'unload', or 'preload'"
+                        "description": "Action: 'status', 'unload', or 'preload'",
                     },
                     "model": {
                         "type": "string",
-                        "description": "Model name for unload/preload (e.g., 'deltai-qwen14b'). Required for unload/preload."
-                    }
+                        "description": "Model name for unload/preload (e.g., 'deltai-qwen14b'). Required for unload/preload.",
+                    },
                 },
-                "required": ["action"]
-            }
-        }
+                "required": ["action"],
+            },
+        },
     },
     {
         "type": "function",
@@ -333,27 +341,25 @@ DIAGNOSTIC_TOOLS = [
                 "properties": {
                     "repair": {
                         "type": "string",
-                        "description": "Repair action: 'restart_watcher', 'clear_vram', 'reindex_knowledge', or 'check_ollama'"
+                        "description": "Repair action: 'restart_watcher', 'clear_vram', 'reindex_knowledge', or 'check_ollama'",
                     }
                 },
-                "required": ["repair"]
-            }
-        }
+                "required": ["repair"],
+            },
+        },
     },
 ]
 
-DIAGNOSTIC_TOOLS.append({
-    "type": "function",
-    "function": {
-        "name": "resource_status",
-        "description": "Get deltai resource self-manager status: current VRAM pressure and tier, loaded models, circuit breaker state, auto-recovery actions taken, sim/session detection. Use to understand system resource health and recent automatic interventions.",
-        "parameters": {
-            "type": "object",
-            "properties": {},
-            "required": []
-        }
+DIAGNOSTIC_TOOLS.append(
+    {
+        "type": "function",
+        "function": {
+            "name": "resource_status",
+            "description": "Get deltai resource self-manager status: current VRAM pressure and tier, loaded models, circuit breaker state, auto-recovery actions taken, sim/session detection. Use to understand system resource health and recent automatic interventions.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
     }
-})
+)
 
 TOOLS.extend(DIAGNOSTIC_TOOLS)
 
@@ -401,8 +407,6 @@ TOOL_MAP = {t["function"]["name"]: t for t in TOOLS}
 # ── CONDITIONAL TELEMETRY TOOLS ───────────────────────────────────────
 # Only available when TELEMETRY_API_URL is configured
 
-import os as _os
-
 _TELEMETRY_API_URL = _os.getenv("TELEMETRY_API_URL", "").strip()
 
 TELEMETRY_TOOLS = []
@@ -413,12 +417,8 @@ if _TELEMETRY_API_URL:
             "function": {
                 "name": "get_session_status",
                 "description": "Get the current session snapshot from the optional telemetry HTTP API (shape depends on your TELEMETRY_API_URL service).",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                    "required": []
-                }
-            }
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
         },
         {
             "type": "function",
@@ -430,24 +430,20 @@ if _TELEMETRY_API_URL:
                     "properties": {
                         "lap_number": {
                             "type": "integer",
-                            "description": "Specific lap number to query. Default: latest lap."
+                            "description": "Specific lap number to query. Default: latest lap.",
                         }
                     },
-                    "required": []
-                }
-            }
+                    "required": [],
+                },
+            },
         },
         {
             "type": "function",
             "function": {
                 "name": "get_tire_status",
                 "description": "Get current tire status: temperatures (inner/middle/outer), pressures, wear percentage, compound for all four tires.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                    "required": []
-                }
-            }
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
         },
         {
             "type": "function",
@@ -459,12 +455,12 @@ if _TELEMETRY_API_URL:
                     "properties": {
                         "remaining_laps": {
                             "type": "integer",
-                            "description": "Estimated remaining laps. If not provided, calculated from fuel and pace."
+                            "description": "Estimated remaining laps. If not provided, calculated from fuel and pace.",
                         }
                     },
-                    "required": []
-                }
-            }
+                    "required": [],
+                },
+            },
         },
     ]
     # Add telemetry tools to main TOOLS list
@@ -477,6 +473,7 @@ if _TELEMETRY_API_URL:
 # ── EXTENSION TOOLS ─────────────────────────────────────────────────────
 # Tools contributed by user extensions (project/extensions/).
 # The extensions loader calls _merge_extension_tools() after load_extensions().
+
 
 def _merge_extension_tools(ext_tools: list) -> None:
     """
@@ -496,8 +493,12 @@ def _merge_extension_tools(ext_tools: list) -> None:
 # and reduce prompt token usage (~1000 tokens saved per call).
 
 # Telemetry tool names (may or may not be loaded)
-_TELEMETRY_TOOL_NAMES = {"get_session_status", "get_lap_summary",
-                          "get_tire_status", "get_strategy_recommendation"}
+_TELEMETRY_TOOL_NAMES = {
+    "get_session_status",
+    "get_lap_summary",
+    "get_tire_status",
+    "get_strategy_recommendation",
+}
 
 # Universal tools always included
 _UNIVERSAL_TOOLS = {"search_knowledge", "calculate"}
@@ -507,37 +508,80 @@ _ARCH_EXT_TOOL_NAMES = {"arch_pending_updates_report", "arch_refresh_news_digest
 
 # Domain-specific tool sets
 TOOL_DOMAIN_MAP = {
-    "racing": {"search_knowledge", "calculate", "solve_math", "lookup_reference",
-               "get_system_info", "summarize_data"} | _TELEMETRY_TOOL_NAMES,
-    "engineering": {"calculate", "solve_math", "lookup_reference", "search_knowledge",
-                    "read_file", "summarize_data", "get_system_info"},
-    "reasoning": {"search_knowledge", "calculate", "solve_math", "summarize_data",
-                  "read_file", "lookup_reference"},
-    "system": {"read_file", "write_file", "list_directory", "run_shell",
-               "get_system_info", "memory_stats", "self_diagnostics",
-               "manage_ollama_models", "repair_subsystem", "resource_status"}
+    "racing": {
+        "search_knowledge",
+        "calculate",
+        "solve_math",
+        "lookup_reference",
+        "get_system_info",
+        "summarize_data",
+    }
+    | _TELEMETRY_TOOL_NAMES,
+    "engineering": {
+        "calculate",
+        "solve_math",
+        "lookup_reference",
+        "search_knowledge",
+        "read_file",
+        "summarize_data",
+        "get_system_info",
+    },
+    "reasoning": {
+        "search_knowledge",
+        "calculate",
+        "solve_math",
+        "summarize_data",
+        "read_file",
+        "lookup_reference",
+    },
+    "system": {
+        "read_file",
+        "write_file",
+        "list_directory",
+        "run_shell",
+        "get_system_info",
+        "memory_stats",
+        "self_diagnostics",
+        "manage_ollama_models",
+        "repair_subsystem",
+        "resource_status",
+    }
     | _ARCH_EXT_TOOL_NAMES,
-    "diagnostics": {"self_diagnostics", "manage_ollama_models", "repair_subsystem",
-                    "resource_status", "get_system_info", "memory_stats"},
+    "diagnostics": {
+        "self_diagnostics",
+        "manage_ollama_models",
+        "repair_subsystem",
+        "resource_status",
+        "get_system_info",
+        "memory_stats",
+    },
 }
 
 # Patterns that indicate system/diagnostic queries
-import re as _re
 _SYSTEM_PATTERNS = _re.compile(
-    r'\b(file|folder|directory|path|run command|bash|command|process|disk|'
-    r'read|write|create|delete|list|open)\b', _re.IGNORECASE)
+    r"\b(file|folder|directory|path|run command|bash|command|process|disk|"
+    r"read|write|create|delete|list|open)\b",
+    _re.IGNORECASE,
+)
 _DIAG_PATTERNS = _re.compile(
-    r'\b(diagnostic|health|status|repair|fix|restart|ollama|model|vram|'
-    r'gpu|subsystem|watcher|circuit.breaker)\b', _re.IGNORECASE)
+    r"\b(diagnostic|health|status|repair|fix|restart|ollama|model|vram|"
+    r"gpu|subsystem|watcher|circuit.breaker)\b",
+    _re.IGNORECASE,
+)
 _ARCH_PATTERNS = _re.compile(
-    r'\b(pacman|checkupdates|pacnew|mkinitcpio|arch\s*linux|system\s*upgrade|'
-    r'kernel\s*upgrade|rolling\s*release)\b',
+    r"\b(pacman|checkupdates|pacnew|mkinitcpio|arch\s*linux|system\s*upgrade|"
+    r"kernel\s*upgrade|rolling\s*release)\b",
     _re.IGNORECASE,
 )
 
 
-def filter_tools(tools: list, domain: str | None = None, tier: int = 1,
-                 category: str = "general", query: str = "") -> list:
+def filter_tools(
+    tools: list,
+    domain: str | None = None,
+    tier: int = 1,
+    category: str = "general",
+    query: str = "",
+) -> list:
     """
     Filter the tool list to the most relevant subset for the current query.
 
@@ -579,9 +623,17 @@ def filter_tools(tools: list, domain: str | None = None, tier: int = 1,
         and not _ARCH_PATTERNS.search(query)
     ):
         # General query: include common tools but skip diagnostics
-        relevant_names = {"search_knowledge", "calculate", "solve_math",
-                         "lookup_reference", "summarize_data", "read_file",
-                         "get_system_info", "web_search", "fetch_url"}
+        relevant_names = {
+            "search_knowledge",
+            "calculate",
+            "solve_math",
+            "lookup_reference",
+            "summarize_data",
+            "read_file",
+            "get_system_info",
+            "web_search",
+            "fetch_url",
+        }
 
     # Always include web_search + fetch_url for non-system queries
     if domain != "system":
@@ -598,8 +650,7 @@ def filter_tools(tools: list, domain: str | None = None, tier: int = 1,
         relevant_names = set(priority)
 
     # Filter the actual tool list
-    filtered = [t for t in tools
-                if t.get("function", t).get("name") in relevant_names]
+    filtered = [t for t in tools if t.get("function", t).get("name") in relevant_names]
 
     # Safety: never return empty — fall back to full list
     if not filtered:

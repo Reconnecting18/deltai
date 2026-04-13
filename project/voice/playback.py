@@ -7,24 +7,23 @@ High-priority audio interrupts current playback.
 
 import asyncio
 import logging
-from typing import Optional
 
 import numpy as np
 
-from .voice_config import VoiceConfig, DEFAULT_CONFIG
+from .voice_config import DEFAULT_CONFIG, VoiceConfig
 
 logger = logging.getLogger("deltai.voice.playback")
 
 # Check for sounddevice
 try:
     import sounddevice as sd
+
     _HAS_SOUNDDEVICE = True
 except ImportError:
     sd = None
     _HAS_SOUNDDEVICE = False
     logger.warning(
-        "sounddevice not installed — audio playback disabled. "
-        "Install with: pip install sounddevice"
+        "sounddevice not installed — audio playback disabled. Install with: pip install sounddevice"
     )
 
 
@@ -47,12 +46,12 @@ class Playback:
     Graceful fallback if sounddevice is not installed or no audio device available.
     """
 
-    def __init__(self, config: Optional[VoiceConfig] = None) -> None:
+    def __init__(self, config: VoiceConfig | None = None) -> None:
         self._config = config or DEFAULT_CONFIG
         self._current_priority: int = PRIORITY_LOW
         self._playing: bool = False
-        self._stop_event: Optional[asyncio.Event] = None
-        self._available: Optional[bool] = None
+        self._stop_event: asyncio.Event | None = None
+        self._available: bool | None = None
 
     @property
     def is_available(self) -> bool:

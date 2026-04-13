@@ -1,40 +1,63 @@
-from contextlib import asynccontextmanager
-from collections import deque
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse, FileResponse, PlainTextResponse, Response, JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-from typing import Optional
-import httpx
-import json
-import re
-import os
-import time as _time
 import asyncio
 import base64
-import psutil
-import platform
+import json
 import logging
-from dotenv import load_dotenv
+import os
+import platform
+import re
+import time as _time
+from collections import deque
+from contextlib import asynccontextmanager
 
+import httpx
+import psutil
 import safe_errors
-
+from anthropic_client import stream_chat as anthropic_stream
+from dotenv import load_dotenv
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import (
+    FileResponse,
+    JSONResponse,
+    PlainTextResponse,
+    Response,
+    StreamingResponse,
+)
+from fastapi.staticfiles import StaticFiles
+from persistence import (
+    _serialize_embedding,
+    find_similar_traces,
+    get_unresolved_gaps,
+    init_db,
+    load_history,
+    prune_old_traces,
+    resolve_knowledge_gap,
+    save_history_pair,
+    save_knowledge_gap,
+    save_quality_score,
+    save_reasoning_trace,
+    save_routing_feedback,
+    trim_history,
+)
+from persistence import clear_history as db_clear_history
+from pydantic import BaseModel
+from router import (
+    _pick_local_model,
+    check_model_exists,
+    check_model_health,
+    get_backup_model,
+    get_budget_status,
+    get_gpu_utilization,
+    get_vram_free_mb,
+    init_budget_from_db,
+    is_cloud_available,
+    is_cloud_available_sync,
+    is_sim_running,
+    record_cloud_usage,
+    route,
+)
 from tools.definitions import TOOLS, filter_tools
 from tools.executor import execute_tool
-from router import (route, is_cloud_available, is_cloud_available_sync,
-                    get_gpu_utilization, get_vram_free_mb, classify_complexity,
-                    is_sim_running, get_budget_status, record_cloud_usage,
-                    _pick_local_model, get_backup_model, check_model_health,
-                    check_model_exists, init_budget_from_db)
-from anthropic_client import stream_chat as anthropic_stream
-from persistence import (init_db, load_history, save_history_pair,
-                         clear_history as db_clear_history, trim_history,
-                         save_reasoning_trace, find_similar_traces, prune_old_traces,
-                         _serialize_embedding,
-                         save_quality_score, save_routing_feedback,
-                         save_knowledge_gap, get_unresolved_gaps, resolve_knowledge_gap,
-                         get_routing_stats)
 
 load_dotenv()
 psutil.cpu_percent(interval=0.1)
@@ -43,6 +66,7 @@ logger = logging.getLogger("deltai")
 
 try:
     import pynvml
+
     pynvml.nvmlInit()
     GPU_AVAILABLE = True
 except Exception:
@@ -51,11 +75,21 @@ except Exception:
 # ── RAG IMPORTS ─────────────────────────────────────────────────────────
 RAG_AVAILABLE = False
 try:
-    from memory import (query_knowledge, ingest_all, get_memory_stats, get_file_details,
-                        remove_file, ingest_context, cleanup_expired, ingest_context_batch,
-                        compact_warm_to_cold, get_cold_stats,
-                        KNOWLEDGE_PATH)
+    from memory import (
+        KNOWLEDGE_PATH,
+        cleanup_expired,
+        compact_warm_to_cold,
+        get_cold_stats,
+        get_file_details,
+        get_memory_stats,
+        ingest_all,
+        ingest_context,
+        ingest_context_batch,
+        query_knowledge,
+        remove_file,
+    )
     from watcher import start_watcher, stop_watcher, watcher_running
+
     RAG_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"RAG system unavailable: {e}")
@@ -64,11 +98,19 @@ except ImportError as e:
 TRAINING_AVAILABLE = False
 try:
     from training import (
-        list_datasets, create_dataset, delete_dataset,
-        get_dataset, add_example, remove_example,
-        export_dataset, get_training_status,
-        start_training, stop_training, auto_capture,
+        add_example,
+        auto_capture,
+        create_dataset,
+        delete_dataset,
+        export_dataset,
+        get_dataset,
+        get_training_status,
+        list_datasets,
+        remove_example,
+        start_training,
+        stop_training,
     )
+
     TRAINING_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"Training system unavailable: {e}")
@@ -77,8 +119,12 @@ except ImportError as e:
 # ── VOICE IMPORTS ─────────────────────────────────────────────────────
 VOICE_AVAILABLE = False
 try:
-    from voice import (transcribe_audio, synthesize_speech, get_voice_status,
-                       record_audio, VOICE_ENABLED)
+    from voice import (
+        get_voice_status,
+        synthesize_speech,
+        transcribe_audio,
+    )
+
     VOICE_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"Voice system unavailable: {e}")
@@ -86,14 +132,15 @@ except ImportError as e:
 # ── EXTENSIONS IMPORTS ─────────────────────────────────────────────────
 EXTENSIONS_AVAILABLE = False
 try:
-    from extensions import load_extensions, get_extension_tools, shutdown_extensions
+    from extensions import get_extension_tools, load_extensions, shutdown_extensions
     from tools.definitions import _merge_extension_tools
+
     EXTENSIONS_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"Extensions system unavailable: {e}")
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-DELTAI_MODEL  = os.getenv("DELTAI_MODEL", "deltai")
+DELTAI_MODEL = os.getenv("DELTAI_MODEL", "deltai")
 BACKUP_MAX_RETRIES = int(os.getenv("BACKUP_MAX_RETRIES", "2"))
 TELEMETRY_API_URL = os.getenv("TELEMETRY_API_URL", "").strip()
 
@@ -101,7 +148,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 
 # ── EMERGENCY BACKUP STATE ────────────────────────────────────────────
 
-_backup_health_status: dict = {}   # {model: {"healthy": bool, "last_check": float}}
+_backup_health_status: dict = {}  # {model: {"healthy": bool, "last_check": float}}
 _backup_last_activated: float = 0  # timestamp of last emergency activation
 
 # ── WEBSOCKET ALERT SYSTEM ──────────────────────────────────────────
@@ -174,8 +221,7 @@ HISTORY_MAX_TURNS = int(os.getenv("CONVERSATION_HISTORY_MAX", "10"))
 _conversation_history: list[dict] = []
 
 
-def _append_to_history(user_message: str, assistant_response: str,
-                       chat_metadata: dict = None):
+def _append_to_history(user_message: str, assistant_response: str, chat_metadata: dict = None):
     """
     Store a clean user-assistant exchange. Skip if either is empty.
     Optional chat_metadata: {tier, domain, tool_calls, tool_results, react_used, model, latency_ms}
@@ -201,6 +247,7 @@ def _append_to_history(user_message: str, assistant_response: str,
     quality_result = None
     try:
         from quality import score_response
+
         quality_result = score_response(user_message, assistant_response, metadata)
         # Persist quality score
         save_quality_score(
@@ -218,6 +265,7 @@ def _append_to_history(user_message: str, assistant_response: str,
     if metadata.get("model") and quality_result:
         try:
             import hashlib
+
             qhash = hashlib.md5(user_message.strip().lower().encode()).hexdigest()
             save_routing_feedback(
                 query_hash=qhash,
@@ -247,8 +295,11 @@ def _append_to_history(user_message: str, assistant_response: str,
     if TRAINING_AVAILABLE:
         try:
             from training import smart_auto_capture
+
             smart_auto_capture(
-                "deltai-auto", user_message, assistant_response,
+                "deltai-auto",
+                user_message,
+                assistant_response,
                 quality_score=quality_result["score"] if quality_result else 0.5,
                 metadata=metadata,
             )
@@ -275,19 +326,30 @@ def _compress_turn(content: str) -> str:
     Extracts sentences with numbers, proper nouns, or conclusions.
     """
     import re as _re
-    sentences = _re.split(r'[.!?]\s+', content)
+
+    sentences = _re.split(r"[.!?]\s+", content)
     key_sentences = []
     for s in sentences:
         s = s.strip()
         if not s or len(s) < 10:
             continue
         # Keep sentences with numbers, units, or technical terms
-        has_numbers = bool(_re.search(r'\d+\.?\d*\s*(?:MB|GB|ms|s|°C|%|rpm|kg|N|Pa)', s))
-        has_code = '`' in s or '```' in s
-        has_conclusion = any(w in s.lower() for w in [
-            "result", "therefore", "conclusion", "answer", "solution",
-            "should", "recommend", "optimal", "best",
-        ])
+        has_numbers = bool(_re.search(r"\d+\.?\d*\s*(?:MB|GB|ms|s|°C|%|rpm|kg|N|Pa)", s))
+        has_code = "`" in s or "```" in s
+        has_conclusion = any(
+            w in s.lower()
+            for w in [
+                "result",
+                "therefore",
+                "conclusion",
+                "answer",
+                "solution",
+                "should",
+                "recommend",
+                "optimal",
+                "best",
+            ]
+        )
         if has_numbers or has_code or has_conclusion:
             key_sentences.append(s)
 
@@ -301,7 +363,7 @@ def _summarize_turn(content: str) -> str:
     """One-line summary of a conversation turn."""
     # Extract the first meaningful sentence
     content = content.strip()
-    first_sentence = content.split('.')[0].split('?')[0].split('!')[0]
+    first_sentence = content.split(".")[0].split("?")[0].split("!")[0]
     if len(first_sentence) > 80:
         first_sentence = first_sentence[:77] + "..."
     return first_sentence
@@ -341,20 +403,28 @@ def _get_smart_history(max_tokens: int = None) -> list[dict]:
             # Middle: compress
             result.append({"role": "user", "content": _compress_turn(user_msg["content"])})
             if assistant_msg:
-                result.append({"role": "assistant", "content": _compress_turn(assistant_msg["content"])})
+                result.append(
+                    {"role": "assistant", "content": _compress_turn(assistant_msg["content"])}
+                )
         else:
             # Old: summarize
             result.append({"role": "user", "content": _summarize_turn(user_msg["content"])})
             if assistant_msg:
-                result.append({"role": "assistant", "content": _summarize_turn(assistant_msg["content"])})
+                result.append(
+                    {"role": "assistant", "content": _summarize_turn(assistant_msg["content"])}
+                )
 
     return result
 
 
-async def _try_ollama_inference(client: httpx.AsyncClient, model: str,
-                                messages: list, tools: list | None = None,
-                                num_gpu: int | None = None,
-                                num_ctx: int | None = None) -> tuple[dict | None, str | None]:
+async def _try_ollama_inference(
+    client: httpx.AsyncClient,
+    model: str,
+    messages: list,
+    tools: list | None = None,
+    num_gpu: int | None = None,
+    num_ctx: int | None = None,
+) -> tuple[dict | None, str | None]:
     """
     Attempt a single Ollama inference call with circuit breaker protection.
     Returns (data, None) on success or (None, error_string) on failure.
@@ -362,7 +432,10 @@ async def _try_ollama_inference(client: httpx.AsyncClient, model: str,
     """
     # Circuit breaker: don't hammer Ollama when it's down
     if not _cb_check():
-        return None, f"Circuit breaker open — Ollama unreachable (backoff {_circuit_breaker['backoff_sec']}s)"
+        return (
+            None,
+            f"Circuit breaker open — Ollama unreachable (backoff {_circuit_breaker['backoff_sec']}s)",
+        )
 
     payload = {"model": model, "messages": messages, "stream": False}
     if tools:
@@ -400,9 +473,13 @@ async def _try_ollama_inference(client: httpx.AsyncClient, model: str,
 
 
 async def _inference_with_emergency_fallback(
-    client: httpx.AsyncClient, model: str, messages: list,
-    tools: list | None, backup_model: str | None,
-    num_gpu: int | None = None, num_ctx: int | None = None,
+    client: httpx.AsyncClient,
+    model: str,
+    messages: list,
+    tools: list | None,
+    backup_model: str | None,
+    num_gpu: int | None = None,
+    num_ctx: int | None = None,
 ) -> tuple[dict | None, str | None, str, bool]:
     """
     Try primary model with retries, then emergency backup as last resort.
@@ -412,20 +489,25 @@ async def _inference_with_emergency_fallback(
     # ── Attempt primary (with retries) ──
     last_error = None
     for attempt in range(1 + BACKUP_MAX_RETRIES):
-        data, err = await _try_ollama_inference(client, model, messages, tools,
-                                                 num_gpu=num_gpu, num_ctx=num_ctx)
+        data, err = await _try_ollama_inference(
+            client, model, messages, tools, num_gpu=num_gpu, num_ctx=num_ctx
+        )
         if data is not None:
             return data, None, model, False
         last_error = err
         if attempt < BACKUP_MAX_RETRIES:
-            logger.warning(f"Primary model {model} failed (attempt {attempt + 1}): {err} — retrying in 3s")
+            logger.warning(
+                f"Primary model {model} failed (attempt {attempt + 1}): {err} — retrying in 3s"
+            )
             await asyncio.sleep(3)
 
     # ── Primary exhausted — engage emergency backup ──
     # Backups run with default settings (no partial offload)
     if backup_model:
-        logger.error(f"PRIMARY MODEL DOWN: {model} failed {1 + BACKUP_MAX_RETRIES} attempts. "
-                     f"Engaging emergency backup: {backup_model}")
+        logger.error(
+            f"PRIMARY MODEL DOWN: {model} failed {1 + BACKUP_MAX_RETRIES} attempts. "
+            f"Engaging emergency backup: {backup_model}"
+        )
         data, err = await _try_ollama_inference(client, backup_model, messages, tools)
         if data is not None:
             global _backup_last_activated
@@ -489,11 +571,17 @@ def _is_react_eligible(decision) -> bool:
     return True
 
 
-async def _react_reasoning_loop(client, model: str, user_message: str,
-                                 rag_context: str, history: list,
-                                 tools: list, execute_fn,
-                                 num_gpu: int | None = None,
-                                 num_ctx: int | None = None) -> tuple[str, list]:
+async def _react_reasoning_loop(
+    client,
+    model: str,
+    user_message: str,
+    rag_context: str,
+    history: list,
+    tools: list,
+    execute_fn,
+    num_gpu: int | None = None,
+    num_ctx: int | None = None,
+) -> tuple[str, list]:
     """
     Execute a ReAct (Think-Act-Observe) reasoning loop.
 
@@ -506,6 +594,7 @@ async def _react_reasoning_loop(client, model: str, user_message: str,
     if os.getenv("REASONING_TRACE_ENABLED", "true").lower() in ("true", "1", "yes"):
         try:
             from memory import get_embeddings
+
             query_emb = get_embeddings([user_message])[0]
             query_emb_bytes = _serialize_embedding(query_emb)
             similar = find_similar_traces(query_emb_bytes, n=3)
@@ -531,10 +620,9 @@ async def _react_reasoning_loop(client, model: str, user_message: str,
         {"role": "user", "content": f"{prior_context}{context_prefix}{user_message}"},
     ]
 
-    for iteration in range(_REACT_MAX_ITERATIONS):
+    for _iteration in range(_REACT_MAX_ITERATIONS):
         data, err = await _try_ollama_inference(
-            client, model, messages, tools,
-            num_gpu=num_gpu, num_ctx=num_ctx
+            client, model, messages, tools, num_gpu=num_gpu, num_ctx=num_ctx
         )
         if data is None:
             return f"Reasoning error: {err}", events
@@ -563,7 +651,9 @@ async def _react_reasoning_loop(client, model: str, user_message: str,
             clarify_text = content.split("CLARIFY:", 1)[1].strip()
             events.append({"t": "clarify", "c": clarify_text})
             # Return clarification request — frontend will handle user input
-            _save_react_trace(user_message, "", content, events, confidence=confidence, success=False)
+            _save_react_trace(
+                user_message, "", content, events, confidence=confidence, success=False
+            )
             return f"[CONFIDENCE: LOW] I need more information: {clarify_text}", events
 
         # Process tool calls if any
@@ -588,8 +678,12 @@ async def _react_reasoning_loop(client, model: str, user_message: str,
             # No tool calls and no FINAL — model is thinking
             messages.append({"role": "assistant", "content": content})
             # Nudge toward conclusion
-            messages.append({"role": "user",
-                           "content": "Continue reasoning. If you have enough information, respond with FINAL: followed by your answer."})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": "Continue reasoning. If you have enough information, respond with FINAL: followed by your answer.",
+                }
+            )
 
     # Max iterations reached — extract best answer from last response
     if content:
@@ -600,21 +694,32 @@ async def _react_reasoning_loop(client, model: str, user_message: str,
             return final_text, events
         _save_react_trace(user_message, content, content, events)
         return content, events
-    _save_react_trace(user_message, "Reasoning loop completed without a clear answer.", content or "", events)
+    _save_react_trace(
+        user_message, "Reasoning loop completed without a clear answer.", content or "", events
+    )
     return "Reasoning loop completed without a clear answer.", events
 
 
-def _save_react_trace(user_message: str, final_text: str, content: str, events: list,
-                       confidence: str = "unknown", success: bool = None):
+def _save_react_trace(
+    user_message: str,
+    final_text: str,
+    content: str,
+    events: list,
+    confidence: str = "unknown",
+    success: bool = None,
+):
     """Save a reasoning trace after a ReAct loop completes."""
     if os.getenv("REASONING_TRACE_ENABLED", "true").lower() not in ("true", "1", "yes"):
         return
     try:
         from memory import get_embeddings
+
         query_emb = get_embeddings([user_message])[0]
         query_emb_bytes = _serialize_embedding(query_emb)
         tool_seq = ",".join(ev.get("n", "") for ev in events if ev.get("t") == "tool")
-        was_success = success if success is not None else ("FINAL:" in (content or "") or bool(final_text))
+        was_success = (
+            success if success is not None else ("FINAL:" in (content or "") or bool(final_text))
+        )
         save_reasoning_trace(
             query_text=user_message,
             domain=None,
@@ -662,27 +767,27 @@ async def _backup_health_loop():
 # Takes automatic corrective actions when resources are constrained.
 
 _resource_state = {
-    "last_vram_action": 0.0,     # timestamp of last VRAM management action
-    "last_recovery": 0.0,        # timestamp of last auto-recovery attempt
-    "vram_warnings": 0,          # consecutive low-VRAM readings
-    "ollama_failures": 0,        # consecutive Ollama connectivity failures
-    "watcher_restarts": 0,       # number of watcher auto-restarts this session
-    "actions_taken": [],         # log of automatic actions (last 50)
-    "last_sim_state": False,     # previous sim running state (for transition detection)
-    "sim_stop_detected_at": 0.0, # when sim stop was first detected
-    "pending_14b_preload": False, # waiting to preload 14B after sim stop
-    "vram_history": [],          # sliding window of (timestamp, vram_free_mb) for prediction
-    "priority_lowered": False,   # whether OS process priority is currently lowered
+    "last_vram_action": 0.0,  # timestamp of last VRAM management action
+    "last_recovery": 0.0,  # timestamp of last auto-recovery attempt
+    "vram_warnings": 0,  # consecutive low-VRAM readings
+    "ollama_failures": 0,  # consecutive Ollama connectivity failures
+    "watcher_restarts": 0,  # number of watcher auto-restarts this session
+    "actions_taken": [],  # log of automatic actions (last 50)
+    "last_sim_state": False,  # previous sim running state (for transition detection)
+    "sim_stop_detected_at": 0.0,  # when sim stop was first detected
+    "pending_14b_preload": False,  # waiting to preload 14B after sim stop
+    "vram_history": [],  # sliding window of (timestamp, vram_free_mb) for prediction
+    "priority_lowered": False,  # whether OS process priority is currently lowered
 }
-_RESOURCE_CHECK_INTERVAL = 30    # seconds between resource checks
-_VRAM_CRITICAL_MB = 1500        # below this, aggressively free VRAM
-_VRAM_WARN_MB = 3000            # below this, start monitoring closely
-_MAX_WATCHER_RESTARTS = 5       # don't restart watcher more than this
-_OLLAMA_FAILURE_THRESHOLD = 3   # consecutive failures before auto-restart attempt
+_RESOURCE_CHECK_INTERVAL = 30  # seconds between resource checks
+_VRAM_CRITICAL_MB = 1500  # below this, aggressively free VRAM
+_VRAM_WARN_MB = 3000  # below this, start monitoring closely
+_MAX_WATCHER_RESTARTS = 5  # don't restart watcher more than this
+_OLLAMA_FAILURE_THRESHOLD = 3  # consecutive failures before auto-restart attempt
 _RESOURCE_ACTION_COOLDOWN = 60  # seconds between automatic VRAM actions
-_VRAM_HISTORY_WINDOW = 60       # seconds of VRAM history to keep for prediction
+_VRAM_HISTORY_WINDOW = 60  # seconds of VRAM history to keep for prediction
 _VRAM_DECLINE_RATE_THRESHOLD = 100  # MB/s — preemptive unload if declining faster
-_GPU_TEMP_THROTTLE = 80         # celsius — switch to smaller model above this
+_GPU_TEMP_THROTTLE = 80  # celsius — switch to smaller model above this
 
 
 def _log_resource_action(action: str):
@@ -703,7 +808,6 @@ def _adjust_process_priority(lower: bool):
         return  # already in desired state
 
     try:
-        import subprocess as _sp
         target = psutil.BELOW_NORMAL_PRIORITY_CLASS if lower else psutil.NORMAL_PRIORITY_CLASS
         label = "BELOW_NORMAL" if lower else "NORMAL"
 
@@ -712,9 +816,9 @@ def _adjust_process_priority(lower: bool):
         own.nice(target)
 
         # Adjust Ollama process(es)
-        for proc in psutil.process_iter(['name', 'pid']):
+        for proc in psutil.process_iter(["name", "pid"]):
             try:
-                if proc.info['name'] and 'ollama' in proc.info['name'].lower():
+                if proc.info["name"] and "ollama" in proc.info["name"].lower():
                     proc.nice(target)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
@@ -758,6 +862,7 @@ def _get_gpu_temp() -> int:
     """Get GPU temperature in celsius, or 0 if unavailable."""
     try:
         import pynvml
+
         handle = pynvml.nvmlDeviceGetHandleByIndex(0)
         return pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
     except Exception:
@@ -802,31 +907,44 @@ async def _resource_manager_loop():
                             if resp.status_code == 200:
                                 for m in resp.json().get("models", []):
                                     if "14b" in m.get("name", "").lower():
-                                        await client.post(f"{OLLAMA_URL}/api/generate",
-                                            json={"model": m["name"], "prompt": "", "keep_alive": 0},
-                                            timeout=10)
-                                        _log_resource_action(f"Unloaded {m['name']} (GPU temp {gpu_temp}°C)")
+                                        await client.post(
+                                            f"{OLLAMA_URL}/api/generate",
+                                            json={
+                                                "model": m["name"],
+                                                "prompt": "",
+                                                "keep_alive": 0,
+                                            },
+                                            timeout=10,
+                                        )
+                                        _log_resource_action(
+                                            f"Unloaded {m['name']} (GPU temp {gpu_temp}°C)"
+                                        )
                                         _resource_state["last_vram_action"] = now
                     except Exception:
                         pass
 
             # ── 0b. PREDICTIVE VRAM — preemptive action on rapid decline ──
             decline_rate = _predict_vram_decline()
-            if (decline_rate > _VRAM_DECLINE_RATE_THRESHOLD and
-                    vram_free < _VRAM_WARN_MB * 1.5 and
-                    now - _resource_state["last_vram_action"] > _RESOURCE_ACTION_COOLDOWN):
+            if (
+                decline_rate > _VRAM_DECLINE_RATE_THRESHOLD
+                and vram_free < _VRAM_WARN_MB * 1.5
+                and now - _resource_state["last_vram_action"] > _RESOURCE_ACTION_COOLDOWN
+            ):
                 try:
                     async with httpx.AsyncClient(timeout=5) as client:
                         resp = await client.get(f"{OLLAMA_URL}/api/ps")
                         if resp.status_code == 200:
                             for m in resp.json().get("models", []):
                                 if "14b" in m.get("name", "").lower():
-                                    await client.post(f"{OLLAMA_URL}/api/generate",
+                                    await client.post(
+                                        f"{OLLAMA_URL}/api/generate",
                                         json={"model": m["name"], "prompt": "", "keep_alive": 0},
-                                        timeout=10)
+                                        timeout=10,
+                                    )
                                     _log_resource_action(
                                         f"Preemptive unload {m['name']} "
-                                        f"(VRAM declining {decline_rate:.0f}MB/s, {vram_free}MB free)")
+                                        f"(VRAM declining {decline_rate:.0f}MB/s, {vram_free}MB free)"
+                                    )
                                     _resource_state["last_vram_action"] = now
                 except Exception:
                     pass
@@ -835,8 +953,10 @@ async def _resource_manager_loop():
             if vram_free < _VRAM_CRITICAL_MB:
                 _resource_state["vram_warnings"] += 1
                 # Critical VRAM — aggressive action after 2 consecutive readings
-                if (_resource_state["vram_warnings"] >= 2 and
-                        now - _resource_state["last_vram_action"] > _RESOURCE_ACTION_COOLDOWN):
+                if (
+                    _resource_state["vram_warnings"] >= 2
+                    and now - _resource_state["last_vram_action"] > _RESOURCE_ACTION_COOLDOWN
+                ):
                     # Check what's loaded and unload non-essential models
                     try:
                         async with httpx.AsyncClient(timeout=5) as client:
@@ -847,20 +967,41 @@ async def _resource_manager_loop():
                                 for m in loaded:
                                     name = m.get("name", "").split(":")[0]
                                     if sim_active and "14b" in name:
-                                        await client.post(f"{OLLAMA_URL}/api/generate",
-                                            json={"model": m["name"], "prompt": "", "keep_alive": 0},
-                                            timeout=10)
-                                        _log_resource_action(f"Unloaded {m['name']} (VRAM critical: {vram_free}MB, sim active)")
+                                        await client.post(
+                                            f"{OLLAMA_URL}/api/generate",
+                                            json={
+                                                "model": m["name"],
+                                                "prompt": "",
+                                                "keep_alive": 0,
+                                            },
+                                            timeout=10,
+                                        )
+                                        _log_resource_action(
+                                            f"Unloaded {m['name']} (VRAM critical: {vram_free}MB, sim active)"
+                                        )
                                     elif vram_free < 1000 and len(loaded) > 1:
                                         # Extreme pressure — unload everything except smallest
-                                        sizes = [(m2.get("name", ""), m2.get("size_vram", m2.get("size", 0)))
-                                                 for m2 in loaded]
+                                        sizes = [
+                                            (
+                                                m2.get("name", ""),
+                                                m2.get("size_vram", m2.get("size", 0)),
+                                            )
+                                            for m2 in loaded
+                                        ]
                                         sizes.sort(key=lambda x: x[1], reverse=True)
                                         for model_name, _ in sizes[:-1]:  # keep smallest
-                                            await client.post(f"{OLLAMA_URL}/api/generate",
-                                                json={"model": model_name, "prompt": "", "keep_alive": 0},
-                                                timeout=10)
-                                            _log_resource_action(f"Unloaded {model_name} (VRAM extreme: {vram_free}MB)")
+                                            await client.post(
+                                                f"{OLLAMA_URL}/api/generate",
+                                                json={
+                                                    "model": model_name,
+                                                    "prompt": "",
+                                                    "keep_alive": 0,
+                                                },
+                                                timeout=10,
+                                            )
+                                            _log_resource_action(
+                                                f"Unloaded {model_name} (VRAM extreme: {vram_free}MB)"
+                                            )
                                         break
                                 _resource_state["last_vram_action"] = now
                     except Exception as e:
@@ -885,20 +1026,38 @@ async def _resource_manager_loop():
                         if ps_resp.status_code == 200:
                             for m in ps_resp.json().get("models", []):
                                 if "14b" in m.get("name", "").lower():
-                                    await mc.post(f"{OLLAMA_URL}/api/generate",
+                                    await mc.post(
+                                        f"{OLLAMA_URL}/api/generate",
                                         json={"model": m["name"], "prompt": "", "keep_alive": 0},
-                                        timeout=10)
+                                        timeout=10,
+                                    )
                                     _log_resource_action(f"Unloaded {m['name']} (sim started)")
-                                    await _emit_health_event("model_unloaded", {"model": m["name"], "reason": "sim_start"})
+                                    await _emit_health_event(
+                                        "model_unloaded",
+                                        {"model": m["name"], "reason": "sim_start"},
+                                    )
                         # Preload 3B if VRAM allows
                         vram_now = get_vram_free_mb()
-                        sim_model = os.getenv("DELTAI_SIM_MODEL", os.getenv("DELTAI_MODEL", "deltai-qwen3b"))
+                        sim_model = os.getenv(
+                            "DELTAI_SIM_MODEL", os.getenv("DELTAI_MODEL", "deltai-qwen3b")
+                        )
                         if vram_now >= 2500:
-                            await mc.post(f"{OLLAMA_URL}/api/generate",
-                                json={"model": sim_model, "prompt": "ping", "keep_alive": "5m",
-                                      "options": {"num_predict": 1}}, timeout=60)
-                            _log_resource_action(f"Preloaded {sim_model} (sim started, {vram_now}MB free)")
-                            await _emit_health_event("model_loaded", {"model": sim_model, "reason": "sim_start"})
+                            await mc.post(
+                                f"{OLLAMA_URL}/api/generate",
+                                json={
+                                    "model": sim_model,
+                                    "prompt": "ping",
+                                    "keep_alive": "5m",
+                                    "options": {"num_predict": 1},
+                                },
+                                timeout=60,
+                            )
+                            _log_resource_action(
+                                f"Preloaded {sim_model} (sim started, {vram_now}MB free)"
+                            )
+                            await _emit_health_event(
+                                "model_loaded", {"model": sim_model, "reason": "sim_start"}
+                            )
                 except Exception as e:
                     logger.debug(f"Sim-start model swap failed: {e}")
                 _resource_state["pending_14b_preload"] = False
@@ -920,12 +1079,22 @@ async def _resource_manager_loop():
                     if vram_now >= 9000:
                         try:
                             async with httpx.AsyncClient(timeout=60) as mc:
-                                await mc.post(f"{OLLAMA_URL}/api/generate",
-                                    json={"model": strong_model, "prompt": "ping",
-                                          "keep_alive": "5m", "options": {"num_predict": 1}},
-                                    timeout=60)
-                                _log_resource_action(f"Preloaded {strong_model} (sim stopped, {vram_now}MB free)")
-                                await _emit_health_event("model_loaded", {"model": strong_model, "reason": "sim_stop"})
+                                await mc.post(
+                                    f"{OLLAMA_URL}/api/generate",
+                                    json={
+                                        "model": strong_model,
+                                        "prompt": "ping",
+                                        "keep_alive": "5m",
+                                        "options": {"num_predict": 1},
+                                    },
+                                    timeout=60,
+                                )
+                                _log_resource_action(
+                                    f"Preloaded {strong_model} (sim stopped, {vram_now}MB free)"
+                                )
+                                await _emit_health_event(
+                                    "model_loaded", {"model": strong_model, "reason": "sim_stop"}
+                                )
                         except Exception as e:
                             logger.debug(f"Post-sim 14B preload failed: {e}")
                     else:
@@ -944,12 +1113,16 @@ async def _resource_manager_loop():
 
             if _resource_state["ollama_failures"] >= _OLLAMA_FAILURE_THRESHOLD:
                 if now - _resource_state["last_recovery"] > 120:  # 2min cooldown
-                    _log_resource_action(f"Ollama unreachable ({_resource_state['ollama_failures']} failures), attempting restart")
+                    _log_resource_action(
+                        f"Ollama unreachable ({_resource_state['ollama_failures']} failures), attempting restart"
+                    )
                     try:
                         import subprocess
+
                         subprocess.Popen(
                             ["ollama", "serve"],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
                         )
                         _resource_state["last_recovery"] = now
                         _resource_state["ollama_failures"] = 0
@@ -960,7 +1133,10 @@ async def _resource_manager_loop():
             # ── 4. WATCHER RECOVERY ──
             if RAG_AVAILABLE:
                 try:
-                    if not watcher_running() and _resource_state["watcher_restarts"] < _MAX_WATCHER_RESTARTS:
+                    if (
+                        not watcher_running()
+                        and _resource_state["watcher_restarts"] < _MAX_WATCHER_RESTARTS
+                    ):
                         _log_resource_action("File watcher died, restarting")
                         stop_watcher()
                         start_watcher()
@@ -979,8 +1155,7 @@ async def _resource_manager_loop():
             if int(now) % 1800 < _RESOURCE_CHECK_INTERVAL:
                 try:
                     prune_old_traces(
-                        max_age_days=30,
-                        max_count=int(os.getenv("REASONING_TRACE_MAX", "500"))
+                        max_age_days=30, max_count=int(os.getenv("REASONING_TRACE_MAX", "500"))
                     )
                 except Exception:
                     pass
@@ -1069,12 +1244,15 @@ async def _ai_self_heal_loop():
 
             try:
                 async with httpx.AsyncClient(timeout=30) as client:
-                    resp = await client.post(f"{OLLAMA_URL}/api/chat", json={
-                        "model": _SELF_HEAL_MODEL,
-                        "messages": messages,
-                        "stream": False,
-                        "options": {"num_predict": 50},
-                    })
+                    resp = await client.post(
+                        f"{OLLAMA_URL}/api/chat",
+                        json={
+                            "model": _SELF_HEAL_MODEL,
+                            "messages": messages,
+                            "stream": False,
+                            "options": {"num_predict": 50},
+                        },
+                    )
                     if resp.status_code != 200:
                         logger.warning(f"Self-heal LLM call failed: HTTP {resp.status_code}")
                         continue
@@ -1104,10 +1282,13 @@ async def _ai_self_heal_loop():
                     continue
 
                 _log_resource_action(f"Self-heal: executing {repair_name} (LLM-decided)")
-                await _emit_health_event("self_heal_action", {
-                    "repair": repair_name,
-                    "diagnostics_summary": diag_output[:200],
-                })
+                await _emit_health_event(
+                    "self_heal_action",
+                    {
+                        "repair": repair_name,
+                        "diagnostics_summary": diag_output[:200],
+                    },
+                )
 
                 # ── Step 4: Execute repair ──
                 result = execute_tool("repair_subsystem", {"repair": repair_name})
@@ -1117,10 +1298,16 @@ async def _ai_self_heal_loop():
                 await asyncio.sleep(5)
                 verify_output = execute_tool("self_diagnostics", {})
                 success = "No issues detected" in verify_output
-                _log_resource_action(f"Self-heal verify: {'passed' if success else 'issues persist'}")
-                await _emit_health_event("repair_attempted", {
-                    "repair": repair_name, "success": success,
-                })
+                _log_resource_action(
+                    f"Self-heal verify: {'passed' if success else 'issues persist'}"
+                )
+                await _emit_health_event(
+                    "repair_attempted",
+                    {
+                        "repair": repair_name,
+                        "success": success,
+                    },
+                )
 
             elif "NO_ACTION" in llm_response.upper():
                 logger.debug("Self-heal: LLM says no action needed")
@@ -1138,10 +1325,10 @@ async def _ai_self_heal_loop():
 # Prevents hammering Ollama when it's down, with exponential backoff.
 
 _circuit_breaker = {
-    "state": "closed",    # closed (normal), open (blocking), half-open (testing)
+    "state": "closed",  # closed (normal), open (blocking), half-open (testing)
     "failures": 0,
     "last_failure": 0.0,
-    "backoff_sec": 5,     # starts at 5s, doubles up to 60s
+    "backoff_sec": 5,  # starts at 5s, doubles up to 60s
 }
 _CB_FAILURE_THRESHOLD = 3
 _CB_MAX_BACKOFF = 60
@@ -1177,17 +1364,20 @@ def _cb_failure():
     if _circuit_breaker["failures"] >= _CB_FAILURE_THRESHOLD:
         prev_state = _circuit_breaker["state"]
         _circuit_breaker["state"] = "open"
-        _circuit_breaker["backoff_sec"] = min(
-            _circuit_breaker["backoff_sec"] * 2, _CB_MAX_BACKOFF
-        )
+        _circuit_breaker["backoff_sec"] = min(_circuit_breaker["backoff_sec"] * 2, _CB_MAX_BACKOFF)
         if prev_state != "open":
-            _record_health_event("circuit_breaker_changed", {
-                "state": "open", "failures": _circuit_breaker["failures"],
-                "backoff_sec": _circuit_breaker["backoff_sec"],
-            })
+            _record_health_event(
+                "circuit_breaker_changed",
+                {
+                    "state": "open",
+                    "failures": _circuit_breaker["failures"],
+                    "backoff_sec": _circuit_breaker["backoff_sec"],
+                },
+            )
 
 
 # ── LIFESPAN ───────────────────────────────────────────────────────────
+
 
 async def _rag_bootstrap() -> None:
     """Initial knowledge ingestion + file watcher (can take a long time)."""
@@ -1232,7 +1422,9 @@ async def _post_startup_cloud_and_models() -> None:
             elif role == "PRIMARY":
                 logger.error(f"Model check: {model} ({role}) — MISSING (system degraded)")
             else:
-                logger.warning(f"Model check: {model} ({role}) — MISSING (emergency generator unavailable)")
+                logger.warning(
+                    f"Model check: {model} ({role}) — MISSING (emergency generator unavailable)"
+                )
     finally:
         elapsed_ms = int((_time.monotonic() - t0) * 1000)
         logger.debug(f"Deferred cloud/model checks finished in {elapsed_ms}ms")
@@ -1301,6 +1493,7 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"Extensions shutdown failed: {e}")
 
+
 app = FastAPI(title="deltai", lifespan=lifespan)
 
 app.add_middleware(
@@ -1323,18 +1516,21 @@ if EXTENSIONS_AVAILABLE:
 
 # ── TEXT-AS-TOOL FALLBACK PARSER ────────────────────────────────────────
 
+
 def _sanitize_python_json(text: str) -> str:
     """Replace Python literals (True/False/None) with JSON equivalents."""
-    text = re.sub(r'(?<=[\s:,\[])True(?=[\s,}\]])', 'true', text)
-    text = re.sub(r'(?<=[\s:,\[])False(?=[\s,}\]])', 'false', text)
-    text = re.sub(r'(?<=[\s:,\[])None(?=[\s,}\]])', 'null', text)
+    text = re.sub(r"(?<=[\s:,\[])True(?=[\s,}\]])", "true", text)
+    text = re.sub(r"(?<=[\s:,\[])False(?=[\s,}\]])", "false", text)
+    text = re.sub(r"(?<=[\s:,\[])None(?=[\s,}\]])", "null", text)
     return text
+
 
 def _fix_windows_paths(text: str) -> str:
     """Fix invalid JSON escape sequences from Windows paths (e.g., unescaped backslashes in JSON strings)."""
     # Replace single backslashes that aren't already valid JSON escapes
     # Valid JSON escapes: \", \\, \/, \b, \f, \n, \r, \t, \uXXXX
-    return re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', text)
+    return re.sub(r'\\(?!["\\/bfnrtu])', r"\\\\", text)
+
 
 def _safe_json_loads(text: str):
     """Parse JSON with fallbacks for Python-style literals, single quotes, and Windows paths."""
@@ -1361,9 +1557,10 @@ def _safe_json_loads(text: str):
     except json.JSONDecodeError:
         return json.loads(_fix_windows_paths(sq))
 
+
 def _extract_balanced_braces(text: str, start: int) -> str:
     """Extract a balanced {...} substring starting at text[start] which must be '{'."""
-    if start >= len(text) or text[start] != '{':
+    if start >= len(text) or text[start] != "{":
         return None
     depth = 0
     in_string = False
@@ -1373,7 +1570,7 @@ def _extract_balanced_braces(text: str, start: int) -> str:
         if escape:
             escape = False
             continue
-        if ch == '\\' and in_string:
+        if ch == "\\" and in_string:
             escape = True
             continue
         if ch == '"' and not escape:
@@ -1381,17 +1578,18 @@ def _extract_balanced_braces(text: str, start: int) -> str:
             continue
         if in_string:
             continue
-        if ch == '{':
+        if ch == "{":
             depth += 1
-        elif ch == '}':
+        elif ch == "}":
             depth -= 1
             if depth == 0:
-                return text[start:i + 1]
+                return text[start : i + 1]
     return None
+
 
 def _extract_balanced_brackets(text: str, start: int) -> str:
     """Extract a balanced [...] substring starting at text[start] which must be '['."""
-    if start >= len(text) or text[start] != '[':
+    if start >= len(text) or text[start] != "[":
         return None
     depth = 0
     in_string = False
@@ -1401,7 +1599,7 @@ def _extract_balanced_brackets(text: str, start: int) -> str:
         if escape:
             escape = False
             continue
-        if ch == '\\' and in_string:
+        if ch == "\\" and in_string:
             escape = True
             continue
         if ch == '"' and not escape:
@@ -1409,13 +1607,14 @@ def _extract_balanced_brackets(text: str, start: int) -> str:
             continue
         if in_string:
             continue
-        if ch == '[':
+        if ch == "[":
             depth += 1
-        elif ch == ']':
+        elif ch == "]":
             depth -= 1
             if depth == 0:
-                return text[start:i + 1]
+                return text[start : i + 1]
     return None
+
 
 def _extract_tool_from_dict(obj: dict):
     """Given a parsed dict, extract (name, params) if it looks like a tool call."""
@@ -1430,6 +1629,7 @@ def _extract_tool_from_dict(obj: dict):
             params = fn.get("arguments", fn.get("parameters", {}))
             return (fn["name"], params if isinstance(params, dict) else {})
     return None
+
 
 def try_parse_text_tool_call(content: str):
     """Parse tool calls from model text output. Returns (name, params) or None.
@@ -1447,7 +1647,7 @@ def try_parse_text_tool_call(content: str):
     text = content.strip()
 
     # 1) Markdown code block — highest confidence signal
-    md_match = re.search(r'```(?:json)?\s*([\[{][\s\S]+?[}\]])\s*```', text, re.DOTALL)
+    md_match = re.search(r"```(?:json)?\s*([\[{][\s\S]+?[}\]])\s*```", text, re.DOTALL)
     if md_match:
         try:
             obj = _safe_json_loads(md_match.group(1))
@@ -1480,7 +1680,7 @@ def try_parse_text_tool_call(content: str):
     #    Scans left-to-right, returns first valid tool call (prevents infinite loops
     #    when multiple calls are present).
     for i, ch in enumerate(text):
-        if ch == '{':
+        if ch == "{":
             blob = _extract_balanced_braces(text, i)
             if blob and len(blob) > 10:
                 try:
@@ -1491,7 +1691,7 @@ def try_parse_text_tool_call(content: str):
                             return result
                 except (json.JSONDecodeError, ValueError):
                     pass
-        elif ch == '[':
+        elif ch == "[":
             blob = _extract_balanced_brackets(text, i)
             if blob and len(blob) > 10:
                 try:
@@ -1573,22 +1773,35 @@ def _check_greeting(message: str) -> str | None:
 
 # ── RAG CONTEXT BUILDER ────────────────────────────────────────────────
 
-def build_rag_context(user_message: str, source_filter: str = None,
-                      max_age_sec: float = None) -> str:
+
+def build_rag_context(
+    user_message: str, source_filter: str = None, max_age_sec: float = None
+) -> str:
     if not RAG_AVAILABLE:
         return ""
     try:
-        from memory import iterative_query_knowledge, generate_sub_queries
+        from memory import generate_sub_queries, iterative_query_knowledge
+
         # Round 1: Standard retrieval
-        matches = query_knowledge(user_message, n_results=3, threshold=0.75,
-                                  source_filter=source_filter, max_age_sec=max_age_sec)
+        matches = query_knowledge(
+            user_message,
+            n_results=3,
+            threshold=0.75,
+            source_filter=source_filter,
+            max_age_sec=max_age_sec,
+        )
         # Round 2: Iterative refinement if first round has results
         if matches and len(matches) >= 1:
             sub_queries = generate_sub_queries(user_message, matches)
             if sub_queries:
                 matches = iterative_query_knowledge(
-                    user_message, sub_queries=sub_queries, n_results=5,
-                    threshold=0.75, source_filter=source_filter, max_age_sec=max_age_sec)
+                    user_message,
+                    sub_queries=sub_queries,
+                    n_results=5,
+                    threshold=0.75,
+                    source_filter=source_filter,
+                    max_age_sec=max_age_sec,
+                )
         if not matches:
             return ""
         context_parts = ["[KNOWLEDGE CONTEXT — from your ingested documents]"]
@@ -1605,17 +1818,21 @@ def build_rag_context(user_message: str, source_filter: str = None,
 
 # ── CHAT (with smart routing) ──────────────────────────────────────────
 
+
 class ChatRequest(BaseModel):
     message: str
     deep: bool = False
     force_local: bool = False
     voice_input: bool = False  # True when input came from speech — helps model correct STT errors
 
+
 MAX_TOOL_ROUNDS = 6
+
 
 @app.get("/")
 def root():
     return FileResponse(os.path.join(_HERE, "static", "index.html"))
+
 
 @app.post("/chat")
 async def chat(req: ChatRequest):
@@ -1644,12 +1861,14 @@ async def chat(req: ChatRequest):
     # ── GREETING SHORT-CIRCUIT ───────────────────────────────
     greeting_response = _check_greeting(req.message)
     if greeting_response:
+
         async def stream_greeting():
             route_data = decision.to_dict()
             route_data["reason"] = "greeting — short-circuit"
             yield json.dumps({"t": "route", **route_data}) + "\n"
             yield json.dumps({"t": "text", "c": greeting_response}) + "\n"
             yield json.dumps({"t": "done"}) + "\n"
+
         logger.info(
             "Greeting short-circuit (message_len=%s reply_len=%s)",
             len(req.message or ""),
@@ -1664,6 +1883,7 @@ async def chat(req: ChatRequest):
     # Phase 1: Local 3B model gathers data via tools (free, fast)
     # Phase 2: Cloud model reasons over the enriched context (premium quality)
     if decision.backend == "anthropic" and decision.split:
+
         async def stream_split():
             # ── Route event with split flag ──
             route_data = decision.to_dict()
@@ -1674,27 +1894,45 @@ async def chat(req: ChatRequest):
                 chunk_count = rag_context.count("[Source:")
                 yield json.dumps({"t": "rag", "n": chunk_count}) + "\n"
 
-            split_message = req.message
             if req.voice_input:
-                split_message = f"[Voice input — may contain transcription errors. Interpret the intended meaning.]\n{req.message}"
+                pass
 
             # ── Phase 1: Local tool gathering ──
-            yield json.dumps({"t": "split_phase", "phase": 1, "c": "Gathering data locally..."}) + "\n"
+            yield (
+                json.dumps({"t": "split_phase", "phase": 1, "c": "Gathering data locally..."})
+                + "\n"
+            )
 
             local_model, cpu_only, backup = _pick_local_model()
             if not local_model:
                 # No local model — fall back to standard cloud with tools
-                yield json.dumps({"t": "split_phase", "phase": 0, "c": "No local model — sending to cloud..."}) + "\n"
+                yield (
+                    json.dumps(
+                        {
+                            "t": "split_phase",
+                            "phase": 0,
+                            "c": "No local model — sending to cloud...",
+                        }
+                    )
+                    + "\n"
+                )
                 full_response = ""
                 async for line in anthropic_stream(
-                    message=req.message, model=decision.model,
-                    rag_context=rag_context, tools=TOOLS, execute_tool_fn=execute_tool,
+                    message=req.message,
+                    model=decision.model,
+                    rag_context=rag_context,
+                    tools=TOOLS,
+                    execute_tool_fn=execute_tool,
                     history=_get_history(),
                 ):
                     if line.strip().startswith('{"t":"_usage"'):
                         try:
                             usage = json.loads(line.strip())
-                            record_cloud_usage(usage.get("input_tokens", 0), usage.get("output_tokens", 0), usage.get("model", decision.model))
+                            record_cloud_usage(
+                                usage.get("input_tokens", 0),
+                                usage.get("output_tokens", 0),
+                                usage.get("model", decision.model),
+                            )
                         except Exception:
                             pass
                         continue
@@ -1704,7 +1942,10 @@ async def chat(req: ChatRequest):
                             full_response += ev.get("c", "")
                         elif ev.get("t") == "done":
                             _append_to_history(req.message, full_response)
-                            yield json.dumps({"t": "done", "turns": len(_conversation_history) // 2}) + "\n"
+                            yield (
+                                json.dumps({"t": "done", "turns": len(_conversation_history) // 2})
+                                + "\n"
+                            )
                             continue
                     except (json.JSONDecodeError, ValueError):
                         pass
@@ -1722,10 +1963,20 @@ async def chat(req: ChatRequest):
 
             try:
                 async with httpx.AsyncClient(timeout=120) as client:
-                    for round_num in range(MAX_TOOL_ROUNDS):
-                        data, err, used_model, is_emergency = await _inference_with_emergency_fallback(
-                            client, local_model, local_messages, TOOLS, backup,
-                            num_gpu=decision.num_gpu, num_ctx=decision.num_ctx
+                    for _round_num in range(MAX_TOOL_ROUNDS):
+                        (
+                            data,
+                            err,
+                            used_model,
+                            is_emergency,
+                        ) = await _inference_with_emergency_fallback(
+                            client,
+                            local_model,
+                            local_messages,
+                            TOOLS,
+                            backup,
+                            num_gpu=decision.num_gpu,
+                            num_ctx=decision.num_ctx,
                         )
 
                         if data is None:
@@ -1768,20 +2019,46 @@ async def chat(req: ChatRequest):
 
             except Exception as e:
                 logger.error(f"Split Phase 1 exception: {e}")
-                yield json.dumps({"t": "retry", "n": "split", "c": "Phase 1 encountered an error, falling back to cloud..."}) + "\n"
+                yield (
+                    json.dumps(
+                        {
+                            "t": "retry",
+                            "n": "split",
+                            "c": "Phase 1 encountered an error, falling back to cloud...",
+                        }
+                    )
+                    + "\n"
+                )
 
             # ── Fallback: no tools called → standard cloud with tools ──
             if not gathered:
-                yield json.dumps({"t": "split_phase", "phase": 0, "c": "No data to gather — sending to cloud..."}) + "\n"
+                yield (
+                    json.dumps(
+                        {
+                            "t": "split_phase",
+                            "phase": 0,
+                            "c": "No data to gather — sending to cloud...",
+                        }
+                    )
+                    + "\n"
+                )
                 full_response = ""
                 async for line in anthropic_stream(
-                    message=req.message, model=decision.model,
-                    rag_context=rag_context, tools=TOOLS, execute_tool_fn=execute_tool,
-                    history=_get_history(),                 ):
+                    message=req.message,
+                    model=decision.model,
+                    rag_context=rag_context,
+                    tools=TOOLS,
+                    execute_tool_fn=execute_tool,
+                    history=_get_history(),
+                ):
                     if line.strip().startswith('{"t":"_usage"'):
                         try:
                             usage = json.loads(line.strip())
-                            record_cloud_usage(usage.get("input_tokens", 0), usage.get("output_tokens", 0), usage.get("model", decision.model))
+                            record_cloud_usage(
+                                usage.get("input_tokens", 0),
+                                usage.get("output_tokens", 0),
+                                usage.get("model", decision.model),
+                            )
                         except Exception:
                             pass
                         continue
@@ -1791,7 +2068,10 @@ async def chat(req: ChatRequest):
                             full_response += ev.get("c", "")
                         elif ev.get("t") == "done":
                             _append_to_history(req.message, full_response)
-                            yield json.dumps({"t": "done", "turns": len(_conversation_history) // 2}) + "\n"
+                            yield (
+                                json.dumps({"t": "done", "turns": len(_conversation_history) // 2})
+                                + "\n"
+                            )
                             continue
                     except (json.JSONDecodeError, ValueError):
                         pass
@@ -1799,7 +2079,12 @@ async def chat(req: ChatRequest):
                 return
 
             # ── Phase 2: Cloud reasoning over gathered data ──
-            yield json.dumps({"t": "split_phase", "phase": 2, "c": "Data gathered, reasoning in cloud..."}) + "\n"
+            yield (
+                json.dumps(
+                    {"t": "split_phase", "phase": 2, "c": "Data gathered, reasoning in cloud..."}
+                )
+                + "\n"
+            )
 
             # Format gathered results into context
             split_context_parts = ["[SPLIT WORKLOAD — Local tool results]"]
@@ -1815,14 +2100,21 @@ async def chat(req: ChatRequest):
 
             full_response = ""
             async for line in anthropic_stream(
-                message=req.message, model=decision.model,
-                rag_context=combined_context, tools=None,
-                split_mode=True,                 history=_get_history(),
+                message=req.message,
+                model=decision.model,
+                rag_context=combined_context,
+                tools=None,
+                split_mode=True,
+                history=_get_history(),
             ):
                 if line.strip().startswith('{"t":"_usage"'):
                     try:
                         usage = json.loads(line.strip())
-                        record_cloud_usage(usage.get("input_tokens", 0), usage.get("output_tokens", 0), usage.get("model", decision.model))
+                        record_cloud_usage(
+                            usage.get("input_tokens", 0),
+                            usage.get("output_tokens", 0),
+                            usage.get("model", decision.model),
+                        )
                     except Exception:
                         pass
                     continue
@@ -1832,7 +2124,10 @@ async def chat(req: ChatRequest):
                         full_response += ev.get("c", "")
                     elif ev.get("t") == "done":
                         _append_to_history(req.message, full_response)
-                        yield json.dumps({"t": "done", "turns": len(_conversation_history) // 2}) + "\n"
+                        yield (
+                            json.dumps({"t": "done", "turns": len(_conversation_history) // 2})
+                            + "\n"
+                        )
                         continue
                 except (json.JSONDecodeError, ValueError):
                     pass
@@ -1842,6 +2137,7 @@ async def chat(req: ChatRequest):
 
     # ── ANTHROPIC PATH ──────────────────────────────────────
     if decision.backend == "anthropic":
+
         async def stream_cloud():
             yield json.dumps({"t": "route", **decision.to_dict()}) + "\n"
 
@@ -1862,7 +2158,7 @@ async def chat(req: ChatRequest):
                 tools=TOOLS,
                 execute_tool_fn=execute_tool,
                 history=_get_history(),
-                            ):
+            ):
                 # Intercept _usage events for cost tracking
                 if line.strip().startswith('{"t":"_usage"'):
                     try:
@@ -1882,7 +2178,10 @@ async def chat(req: ChatRequest):
                         full_response += ev.get("c", "")
                     elif ev.get("t") == "done":
                         _append_to_history(req.message, full_response)
-                        yield json.dumps({"t": "done", "turns": len(_conversation_history) // 2}) + "\n"
+                        yield (
+                            json.dumps({"t": "done", "turns": len(_conversation_history) // 2})
+                            + "\n"
+                        )
                         continue
                 except (json.JSONDecodeError, ValueError):
                     pass
@@ -1893,24 +2192,35 @@ async def chat(req: ChatRequest):
     # ── OLLAMA PATH (with tool calling) ─────────────────────
     voice_prefix = ""
     if req.voice_input:
-        voice_prefix = "[Voice input — may contain transcription errors. Interpret the intended meaning.]\n"
+        voice_prefix = (
+            "[Voice input — may contain transcription errors. Interpret the intended meaning.]\n"
+        )
 
     if rag_context:
         user_content = f"{voice_prefix}{rag_context}\n{req.message}"
     else:
         user_content = f"{voice_prefix}{req.message}" if voice_prefix else req.message
 
-    messages = _get_smart_history(max_tokens=decision.num_ctx) + [{"role": "user", "content": user_content}]
+    messages = _get_smart_history(max_tokens=decision.num_ctx) + [
+        {"role": "user", "content": user_content}
+    ]
 
     # Filter tools based on query domain and complexity
-    relevant_tools = filter_tools(TOOLS, domain=decision.adapter_domain,
-                                  tier=decision.tier, category=decision.query_category,
-                                  query=req.message)
+    relevant_tools = filter_tools(
+        TOOLS,
+        domain=decision.adapter_domain,
+        tier=decision.tier,
+        category=decision.query_category,
+        query=req.message,
+    )
 
     # Track metadata for quality scoring and routing feedback
     _chat_metadata = {
-        "tier": decision.tier, "domain": decision.adapter_domain or "general",
-        "model": decision.model, "tool_calls": [], "tool_results": [],
+        "tier": decision.tier,
+        "domain": decision.adapter_domain or "general",
+        "model": decision.model,
+        "tool_calls": [],
+        "tool_results": [],
         "react_used": False,
     }
     _chat_start_time = _time.time()
@@ -1930,17 +2240,24 @@ async def chat(req: ChatRequest):
             yield json.dumps({"t": "react", "c": "Entering structured reasoning mode..."}) + "\n"
             async with httpx.AsyncClient(timeout=120) as react_client:
                 final_text, tool_events = await _react_reasoning_loop(
-                    react_client, decision.model, req.message,
-                    rag_context, _get_smart_history(max_tokens=decision.num_ctx),
-                    relevant_tools, execute_tool,
-                    num_gpu=decision.num_gpu, num_ctx=decision.num_ctx
+                    react_client,
+                    decision.model,
+                    req.message,
+                    rag_context,
+                    _get_smart_history(max_tokens=decision.num_ctx),
+                    relevant_tools,
+                    execute_tool,
+                    num_gpu=decision.num_gpu,
+                    num_ctx=decision.num_ctx,
                 )
                 for ev in tool_events:
                     yield json.dumps(ev) + "\n"
                     if ev.get("t") == "tool":
                         _chat_metadata["tool_calls"].append(ev.get("n", ""))
                     if ev.get("t") == "result":
-                        _chat_metadata["tool_results"].append({"name": ev.get("n", ""), "success": True})
+                        _chat_metadata["tool_results"].append(
+                            {"name": ev.get("n", ""), "success": True}
+                        )
                 yield json.dumps({"t": "text", "c": final_text}) + "\n"
                 _chat_metadata["latency_ms"] = (_time.time() - _chat_start_time) * 1000
                 _append_to_history(req.message, final_text, chat_metadata=_chat_metadata)
@@ -1959,18 +2276,28 @@ async def chat(req: ChatRequest):
 
                 # ── Inference with retry-first, backup-last ──
                 data, err, used_model, is_emergency = await _inference_with_emergency_fallback(
-                    client, active_model, messages, TOOLS, backup if not emergency_active else None,
-                    num_gpu=decision.num_gpu, num_ctx=decision.num_ctx
+                    client,
+                    active_model,
+                    messages,
+                    TOOLS,
+                    backup if not emergency_active else None,
+                    num_gpu=decision.num_gpu,
+                    num_ctx=decision.num_ctx,
                 )
 
                 if is_emergency and not emergency_active:
                     emergency_active = True
                     active_model = used_model
                     backup = None  # don't cascade further
-                    yield json.dumps({
-                        "t": "emergency",
-                        "c": f"PRIMARY MODEL OFFLINE — Running on backup: {used_model}"
-                    }) + "\n"
+                    yield (
+                        json.dumps(
+                            {
+                                "t": "emergency",
+                                "c": f"PRIMARY MODEL OFFLINE — Running on backup: {used_model}",
+                            }
+                        )
+                        + "\n"
+                    )
 
                 if data is None:
                     # User-friendly error messages
@@ -2003,7 +2330,7 @@ async def chat(req: ChatRequest):
                     if content:
                         chunk_size = 4
                         for i in range(0, len(content), chunk_size):
-                            yield json.dumps({"t": "text", "c": content[i:i+chunk_size]}) + "\n"
+                            yield json.dumps({"t": "text", "c": content[i : i + chunk_size]}) + "\n"
                     _append_to_history(req.message, content)
                     yield json.dumps({"t": "done", "turns": len(_conversation_history) // 2}) + "\n"
                     return
@@ -2020,13 +2347,28 @@ async def chat(req: ChatRequest):
                         safe_errors.log_exception(logger, "Tool execution crashed", tool_err)
                         result = "ERROR: Tool execution crashed"
                     # If tool errored, retry once with sanitized args
-                    if result.startswith("ERROR:") and name in ("run_shell", "read_file", "write_file"):
-                        yield json.dumps({"t": "retry", "n": name, "c": "Retrying with adjusted parameters..."}) + "\n"
+                    if result.startswith("ERROR:") and name in (
+                        "run_shell",
+                        "read_file",
+                        "write_file",
+                    ):
+                        yield (
+                            json.dumps(
+                                {
+                                    "t": "retry",
+                                    "n": name,
+                                    "c": "Retrying with adjusted parameters...",
+                                }
+                            )
+                            + "\n"
+                        )
                         sanitized_args = dict(args)
                         if "path" in sanitized_args:
                             sanitized_args["path"] = os.path.normpath(sanitized_args["path"])
                         if "timeout" in sanitized_args and name == "run_shell":
-                            sanitized_args["timeout"] = min(int(sanitized_args.get("timeout", 15)), 30)
+                            sanitized_args["timeout"] = min(
+                                int(sanitized_args.get("timeout", 15)), 30
+                            )
                         try:
                             result2 = await asyncio.to_thread(execute_tool, name, sanitized_args)
                             if not result2.startswith("ERROR:"):
@@ -2041,18 +2383,28 @@ async def chat(req: ChatRequest):
 
             # ── Max tool rounds — final response ──
             data, err, used_model, is_emergency = await _inference_with_emergency_fallback(
-                client, active_model, messages, None, backup if not emergency_active else None,
-                num_gpu=decision.num_gpu, num_ctx=decision.num_ctx
+                client,
+                active_model,
+                messages,
+                None,
+                backup if not emergency_active else None,
+                num_gpu=decision.num_gpu,
+                num_ctx=decision.num_ctx,
             )
             if is_emergency and not emergency_active:
-                yield json.dumps({
-                    "t": "emergency",
-                    "c": f"PRIMARY MODEL OFFLINE — Running on backup: {used_model}"
-                }) + "\n"
+                yield (
+                    json.dumps(
+                        {
+                            "t": "emergency",
+                            "c": f"PRIMARY MODEL OFFLINE — Running on backup: {used_model}",
+                        }
+                    )
+                    + "\n"
+                )
             if data is not None:
                 content = data.get("message", {}).get("content", "Max tool rounds reached.")
                 for i in range(0, len(content), 4):
-                    yield json.dumps({"t": "text", "c": content[i:i+4]}) + "\n"
+                    yield json.dumps({"t": "text", "c": content[i : i + 4]}) + "\n"
                 _append_to_history(req.message, content)
             else:
                 err_l = (err or "").lower()
@@ -2072,6 +2424,7 @@ async def chat(req: ChatRequest):
 
 # ── CONVERSATION HISTORY ENDPOINTS ─────────────────────────────────────
 
+
 @app.delete("/chat/history")
 def clear_chat_history():
     """Clear conversation history."""
@@ -2082,6 +2435,7 @@ def clear_chat_history():
         logger.warning(f"Failed to clear DB history: {e}")
     return {"ok": True, "message": "History cleared"}
 
+
 @app.get("/chat/history")
 def get_chat_history():
     """Get conversation history metadata."""
@@ -2090,6 +2444,7 @@ def get_chat_history():
 
 
 # ── ROUTER CONFIG ENDPOINTS ────────────────────────────────────────────
+
 
 @app.get("/router/status")
 def router_status():
@@ -2106,8 +2461,10 @@ def router_status():
         "strong_model": os.getenv("DELTAI_STRONG_MODEL", ""),
     }
 
+
 class CloudToggle(BaseModel):
     enabled: bool
+
 
 @app.post("/router/cloud")
 def toggle_cloud(req: CloudToggle):
@@ -2118,6 +2475,7 @@ def toggle_cloud(req: CloudToggle):
 
 # ── CLOUD BUDGET ENDPOINTS ────────────────────────────────────────────
 
+
 @app.get("/budget/status")
 def budget_endpoint():
     """Cloud cost budget status — daily spend, limit, remaining."""
@@ -2125,6 +2483,7 @@ def budget_endpoint():
 
 
 # ── MEMORY ENDPOINTS ────────────────────────────────────────────────────
+
 
 @app.get("/memory/stats")
 def memory_stats_endpoint():
@@ -2136,6 +2495,7 @@ def memory_stats_endpoint():
         return stats
     except Exception as e:
         return {"error": safe_errors.public_error_detail(e)}
+
 
 @app.post("/memory/ingest")
 def memory_ingest_endpoint():
@@ -2152,6 +2512,7 @@ def memory_ingest_endpoint():
     except Exception as e:
         return {"error": safe_errors.public_error_detail(e)}
 
+
 @app.get("/memory/files")
 def memory_files_endpoint():
     """Get detailed per-file info from ChromaDB."""
@@ -2162,6 +2523,7 @@ def memory_files_endpoint():
         return {"files": files}
     except Exception as e:
         return {"error": safe_errors.public_error_detail(e), "files": []}
+
 
 @app.delete("/memory/files/{filepath:path}")
 def memory_delete_file(filepath: str):
@@ -2216,7 +2578,7 @@ async def _ingest_pipeline_worker():
                 try:
                     item = await asyncio.wait_for(_ingest_queue.get(), timeout=timeout)
                     batch.append(item)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     break
 
             if not batch or not RAG_AVAILABLE:
@@ -2225,12 +2587,16 @@ async def _ingest_pipeline_worker():
             # Process batch
             start = _time.time()
             items_for_batch = [
-                {"source": it["source"], "context": it["context"],
-                 "ttl": it["ttl"], "tags": it["tags"]}
+                {
+                    "source": it["source"],
+                    "context": it["context"],
+                    "ttl": it["ttl"],
+                    "tags": it["tags"],
+                }
                 for it in batch
             ]
             try:
-                result = await asyncio.to_thread(ingest_context_batch, items_for_batch)
+                await asyncio.to_thread(ingest_context_batch, items_for_batch)
                 _ingest_metrics["processed"] += len(batch)
                 elapsed = (_time.time() - start) * 1000
                 _ingest_metrics["avg_latency_ms"] = (
@@ -2250,7 +2616,11 @@ async def _ingest_pipeline_worker():
                         "context": it["context"],
                         "tags": it["tags"],
                         "ts": _time.time(),
-                        "priority": "critical" if "critical" in it["tags"] else "high" if "high" in it["tags"] else "normal",
+                        "priority": "critical"
+                        if "critical" in it["tags"]
+                        else "high"
+                        if "high" in it["tags"]
+                        else "normal",
                     }
                     _recent_alerts.append(alert)
                     await _broadcast_alert(alert)
@@ -2265,11 +2635,12 @@ async def _ingest_pipeline_worker():
 # ── INGEST CONNECTOR ──────────────────────────────────────────────────
 # External services push structured context into deltai's RAG memory.
 
+
 class IngestRequest(BaseModel):
-    source: str               # identifies the sender (e.g., "lmu-telemetry")
-    context: str              # human-readable content to embed
-    ttl: int = 0              # seconds until auto-expiry (0 = permanent)
-    tags: list[str] = []      # optional filtering tags
+    source: str  # identifies the sender (e.g., "lmu-telemetry")
+    context: str  # human-readable content to embed
+    ttl: int = 0  # seconds until auto-expiry (0 = permanent)
+    tags: list[str] = []  # optional filtering tags
 
 
 @app.post("/ingest")
@@ -2289,12 +2660,14 @@ async def ingest_endpoint(req: IngestRequest):
     # Try async pipeline first (non-blocking)
     if _ingest_queue is not None:
         try:
-            _ingest_queue.put_nowait({
-                "source": req.source.strip(),
-                "context": req.context.strip(),
-                "ttl": req.ttl,
-                "tags": req.tags,
-            })
+            _ingest_queue.put_nowait(
+                {
+                    "source": req.source.strip(),
+                    "context": req.context.strip(),
+                    "ttl": req.ttl,
+                    "tags": req.tags,
+                }
+            )
             _ingest_metrics["queued"] += 1
             # Immediate alert forwarding (don't wait for pipeline)
             if "alert" in req.tags:
@@ -2303,7 +2676,11 @@ async def ingest_endpoint(req: IngestRequest):
                     "context": req.context,
                     "tags": req.tags,
                     "ts": _time.time(),
-                    "priority": "critical" if "critical" in req.tags else "high" if "high" in req.tags else "normal",
+                    "priority": "critical"
+                    if "critical" in req.tags
+                    else "high"
+                    if "high" in req.tags
+                    else "normal",
                 }
                 _recent_alerts.append(alert)
                 await _broadcast_alert(alert)
@@ -2329,7 +2706,11 @@ async def ingest_endpoint(req: IngestRequest):
                 "context": req.context,
                 "tags": req.tags,
                 "ts": _time.time(),
-                "priority": "critical" if "critical" in req.tags else "high" if "high" in req.tags else "normal",
+                "priority": "critical"
+                if "critical" in req.tags
+                else "high"
+                if "high" in req.tags
+                else "normal",
             }
             _recent_alerts.append(alert)
             await _broadcast_alert(alert)
@@ -2358,7 +2739,11 @@ async def ingest_batch_endpoint(req: IngestBatchRequest):
                     "context": item.get("context", ""),
                     "tags": tags,
                     "ts": _time.time(),
-                    "priority": "critical" if "critical" in tags else "high" if "high" in tags else "normal",
+                    "priority": "critical"
+                    if "critical" in tags
+                    else "high"
+                    if "high" in tags
+                    else "normal",
                 }
                 _recent_alerts.append(alert)
                 await _broadcast_alert(alert)
@@ -2391,6 +2776,7 @@ def ingest_cleanup():
 
 # ── HIERARCHICAL MEMORY ENDPOINTS ─────────────────────────────────────
 
+
 @app.post("/memory/compact")
 async def memory_compact():
     """Manually trigger warm→cold memory compaction."""
@@ -2416,6 +2802,7 @@ def cold_memory_stats():
 
 # ── KNOWLEDGE GAP ENDPOINTS ───────────────────────────────────────────
 
+
 @app.get("/knowledge/gaps")
 def knowledge_gaps():
     """Get unresolved knowledge gaps."""
@@ -2438,6 +2825,7 @@ def resolve_gap(gap_id: int):
 
 # ── TRAINING INTELLIGENCE ENDPOINTS ──────────────────────────────────
 
+
 @app.get("/training/weaknesses")
 def training_weaknesses():
     """Identify domains where deltai performs poorly."""
@@ -2445,6 +2833,7 @@ def training_weaknesses():
         return {"error": "Training not available"}
     try:
         from training import identify_weak_domains
+
         return {"weaknesses": identify_weak_domains()}
     except Exception as e:
         return {"error": safe_errors.public_error_detail(e)}
@@ -2457,6 +2846,7 @@ async def training_improve(domain: str):
         return {"error": "Training not available"}
     try:
         from training import run_improvement_cycle
+
         result = await asyncio.to_thread(run_improvement_cycle, domain)
         return result
     except Exception as e:
@@ -2464,6 +2854,7 @@ async def training_improve(domain: str):
 
 
 # ── WEBSOCKET ALERTS ─────────────────────────────────────────────────
+
 
 @app.websocket("/ws/alerts")
 async def websocket_alerts(websocket: WebSocket):
@@ -2490,6 +2881,7 @@ def recent_alerts():
 
 # ── HEALTH EVENT BUS ENDPOINTS ────────────────────────────────────────
 
+
 @app.websocket("/ws/health")
 async def websocket_health(websocket: WebSocket):
     """WebSocket endpoint for real-time health state events."""
@@ -2515,10 +2907,13 @@ def health_events(limit: int = 50):
 
 # ── SELF-HEAL STATUS ─────────────────────────────────────────────────
 
+
 @app.get("/self-heal/status")
 def self_heal_status():
     """AI self-heal loop status."""
-    heal_actions = [a for a in _resource_state["actions_taken"] if "Self-heal" in a.get("action", "")]
+    heal_actions = [
+        a for a in _resource_state["actions_taken"] if "Self-heal" in a.get("action", "")
+    ]
     return {
         "enabled": _SELF_HEAL_ENABLED,
         "interval_sec": _SELF_HEAL_INTERVAL,
@@ -2531,6 +2926,7 @@ def self_heal_status():
 
 # ── RESOURCE MANAGEMENT STATUS ────────────────────────────────────────
 
+
 @app.get("/resources/status")
 def resource_status():
     """Resource self-manager status — VRAM, circuit breaker, auto-recovery."""
@@ -2542,7 +2938,11 @@ def resource_status():
             "vram_free_mb": vram_free,
             "vram_warnings": _resource_state["vram_warnings"],
             "vram_decline_rate_mb_s": round(decline_rate, 1),
-            "vram_prediction": "declining" if decline_rate > 50 else "stable" if abs(decline_rate) < 20 else "recovering",
+            "vram_prediction": "declining"
+            if decline_rate > 50
+            else "stable"
+            if abs(decline_rate) < 20
+            else "recovering",
             "gpu_temp_c": gpu_temp,
             "process_priority": "below_normal" if _resource_state["priority_lowered"] else "normal",
             "ollama_failures": _resource_state["ollama_failures"],
@@ -2560,6 +2960,7 @@ def resource_status():
 
 
 # ── SUBSYSTEM HEALTH ──────────────────────────────────────────────────
+
 
 @app.get("/api/health")
 async def system_health():
@@ -2633,6 +3034,7 @@ async def system_health():
 
 # ── EMERGENCY BACKUP STATUS ────────────────────────────────────────────
 
+
 @app.get("/backup/status")
 def backup_status():
     """Emergency backup system status."""
@@ -2654,17 +3056,21 @@ def backup_status():
 
 # ── TRAINING ENDPOINTS ─────────────────────────────────────────────────
 
+
 class DatasetCreate(BaseModel):
     name: str
 
+
 class ExampleAdd(BaseModel):
-    input: Optional[str] = ""
+    input: str | None = ""
     output: str
-    instruction: Optional[str] = ""
+    instruction: str | None = ""
     category: str = "general"
+
 
 class ExportRequest(BaseModel):
     format: str = "alpaca"
+
 
 @app.get("/training/datasets")
 def training_list_datasets():
@@ -2672,11 +3078,13 @@ def training_list_datasets():
         return {"error": "Training system unavailable", "datasets": []}
     return {"datasets": list_datasets()}
 
+
 @app.post("/training/datasets")
 def training_create_dataset(req: DatasetCreate):
     if not TRAINING_AVAILABLE:
         return {"error": "Training system unavailable"}
     return create_dataset(req.name)
+
 
 @app.delete("/training/datasets/{name}")
 def training_delete_dataset(name: str):
@@ -2684,11 +3092,13 @@ def training_delete_dataset(name: str):
         return {"error": "Training system unavailable"}
     return delete_dataset(name)
 
+
 @app.get("/training/datasets/{name}")
 def training_get_dataset(name: str):
     if not TRAINING_AVAILABLE:
         return {"error": "Training system unavailable", "examples": []}
     return get_dataset(name)
+
 
 @app.post("/training/datasets/{name}/add")
 def training_add_example(name: str, req: ExampleAdd):
@@ -2700,17 +3110,20 @@ def training_add_example(name: str, req: ExampleAdd):
         input_text = req.instruction + ("\n" + input_text if input_text else "")
     return add_example(name, input_text, req.output, req.category)
 
+
 @app.delete("/training/datasets/{name}/{idx}")
 def training_remove_example(name: str, idx: int):
     if not TRAINING_AVAILABLE:
         return {"error": "Training system unavailable"}
     return remove_example(name, idx)
 
+
 @app.post("/training/datasets/{name}/export")
 def training_export_dataset(name: str, req: ExportRequest):
     if not TRAINING_AVAILABLE:
         return {"error": "Training system unavailable"}
     return export_dataset(name, req.format)
+
 
 @app.get("/training/status")
 def training_status():
@@ -2724,7 +3137,7 @@ class TrainingStart(BaseModel):
     base_model: str = "deltai-qwen3b"
     output_model: str | None = None
     mode: str = "auto"  # "lora", "fewshot", "auto", or "distill"
-    teacher_dataset: str | None = None      # for distill mode
+    teacher_dataset: str | None = None  # for distill mode
     replay_datasets: list[str] | None = None  # for distill mode
 
 
@@ -2755,6 +3168,7 @@ def training_lora_status():
     if not TRAINING_AVAILABLE:
         return {"available": False, "reason": "Training system unavailable"}
     from training import check_lora_deps
+
     ok, reason = check_lora_deps()
     return {"available": ok, "reason": reason if not ok else "ready"}
 
@@ -2772,11 +3186,13 @@ def training_ab_eval(req: ABEvalRequest):
     if not TRAINING_AVAILABLE:
         return {"error": "Training system unavailable"}
     from training import run_ab_eval
+
     return run_ab_eval(req.model_a, req.model_b, req.dataset, req.max_examples)
 
 
 # ── ADAPTER SURGERY ENDPOINTS ────────────────────────────────────────
 # Modular LoRA augmentation slots: train, merge, evaluate, promote.
+
 
 @app.get("/adapters")
 def adapters_list(domain: str = None, status: str = None):
@@ -2784,6 +3200,7 @@ def adapters_list(domain: str = None, status: str = None):
     if not TRAINING_AVAILABLE:
         return {"error": "Training system unavailable"}
     from training import list_adapters
+
     return {"adapters": list_adapters(domain=domain, status=status)}
 
 
@@ -2793,6 +3210,7 @@ def adapters_active():
     if not TRAINING_AVAILABLE:
         return {"error": "Training system unavailable"}
     from training import get_active_adapters
+
     return {"active": get_active_adapters()}
 
 
@@ -2802,6 +3220,7 @@ def adapters_get(name: str):
     if not TRAINING_AVAILABLE:
         return {"error": "Training system unavailable"}
     from training import get_adapter
+
     result = get_adapter(name)
     if not result:
         return JSONResponse({"error": f"Adapter not found: {name}"}, status_code=404)
@@ -2822,6 +3241,7 @@ def adapters_train(req: AdapterTrainRequest):
     if not TRAINING_AVAILABLE:
         return {"error": "Training system unavailable"}
     from training import start_domain_training
+
     return start_domain_training(
         domain=req.domain,
         dataset_name=req.dataset,
@@ -2844,6 +3264,7 @@ def adapters_merge(req: AdapterMergeRequest):
     if not TRAINING_AVAILABLE:
         return {"error": "Training system unavailable"}
     from training import merge_adapters
+
     return merge_adapters(
         adapter_names=req.adapters,
         method=req.method,
@@ -2858,6 +3279,7 @@ def adapters_eval(name: str, dataset: str = None, max_examples: int = 20):
     if not TRAINING_AVAILABLE:
         return {"error": "Training system unavailable"}
     from training import eval_adapter
+
     return eval_adapter(name, eval_dataset=dataset, max_examples=max_examples)
 
 
@@ -2867,6 +3289,7 @@ def adapters_promote(name: str):
     if not TRAINING_AVAILABLE:
         return {"error": "Training system unavailable"}
     from training import get_adapter, set_active_adapter, update_adapter
+
     info = get_adapter(name)
     if not info:
         return JSONResponse({"error": f"Adapter not found: {name}"}, status_code=404)
@@ -2888,6 +3311,7 @@ def adapters_rollback(req: AdapterRollbackRequest):
     if not TRAINING_AVAILABLE:
         return {"error": "Training system unavailable"}
     from training import rollback_adapter
+
     return rollback_adapter(req.domain, target_version=req.version)
 
 
@@ -2897,10 +3321,12 @@ def adapters_delete(name: str, delete_files: bool = False):
     if not TRAINING_AVAILABLE:
         return {"error": "Training system unavailable"}
     from training import remove_adapter
+
     return remove_adapter(name, delete_files=delete_files)
 
 
 # ── KNOWLEDGE DISTILLATION ENDPOINTS ─────────────────────────────────
+
 
 class TeacherGenerateRequest(BaseModel):
     queries: list[str]
@@ -2919,6 +3345,7 @@ def training_generate_teacher(req: TeacherGenerateRequest):
     if not req.queries:
         return {"error": "No queries provided"}
     from training import generate_teacher_data
+
     return generate_teacher_data(
         queries=req.queries,
         teacher=req.teacher,
@@ -2942,6 +3369,7 @@ def training_blend(req: BlendRequest):
     if not req.output:
         return {"error": "No output dataset name provided"}
     from training import blend_datasets
+
     return blend_datasets(sources=req.sources, output_name=req.output)
 
 
@@ -2957,6 +3385,7 @@ def training_verify_retention(req: RetentionRequest):
     if not TRAINING_AVAILABLE:
         return {"error": "Training system unavailable"}
     from training import verify_retention
+
     return verify_retention(
         model_name=req.model,
         baseline_model=req.baseline,
@@ -2966,19 +3395,24 @@ def training_verify_retention(req: RetentionRequest):
 
 # ── VOICE ENDPOINTS ──────────────────────────────────────────────────
 
+
 class TTSRequest(BaseModel):
     text: str
-    voice: Optional[str] = None
-    rate: Optional[str] = None
-    pitch: Optional[str] = None
+    voice: str | None = None
+    rate: str | None = None
+    pitch: str | None = None
 
 
 @app.get("/voice/status")
 def voice_status():
     """Voice subsystem status."""
     if not VOICE_AVAILABLE:
-        return {"enabled": False, "error": "Voice module not loaded",
-                "stt": {"status": "unavailable"}, "tts": {"status": "unavailable"}}
+        return {
+            "enabled": False,
+            "error": "Voice module not loaded",
+            "stt": {"status": "unavailable"},
+            "tts": {"status": "unavailable"},
+        }
     return get_voice_status()
 
 
@@ -2988,7 +3422,10 @@ async def voice_warm():
     if not VOICE_AVAILABLE:
         return {"ok": False, "error": "Voice module not loaded"}
     try:
-        await asyncio.to_thread(transcribe_audio, b"RIFF$\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x80>\x00\x00\x00}\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00")
+        await asyncio.to_thread(
+            transcribe_audio,
+            b"RIFF$\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x80>\x00\x00\x00}\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00",
+        )
         return {"ok": True, "stt": "warmed"}
     except Exception as e:
         return {"ok": False, "error": safe_errors.public_error_detail(e)}
@@ -3058,14 +3495,23 @@ async def voice_chat(request: Request, voice: str = None, rate: str = None):
         response_text = greeting_response
     else:
         rag_context = build_rag_context(user_text)
-        voice_hint = "[Voice input — may contain transcription errors. Interpret the intended meaning.]\n"
-        user_content = f"{voice_hint}{rag_context}\n{user_text}" if rag_context else f"{voice_hint}{user_text}"
+        voice_hint = (
+            "[Voice input — may contain transcription errors. Interpret the intended meaning.]\n"
+        )
+        user_content = (
+            f"{voice_hint}{rag_context}\n{user_text}" if rag_context else f"{voice_hint}{user_text}"
+        )
         msg_list = _get_history() + [{"role": "user", "content": user_content}]
 
         async with httpx.AsyncClient(timeout=120) as client:
             data, err, used_model, is_emergency = await _inference_with_emergency_fallback(
-                client, decision.model, msg_list, TOOLS, decision.backup_model,
-                num_gpu=decision.num_gpu, num_ctx=decision.num_ctx
+                client,
+                decision.model,
+                msg_list,
+                TOOLS,
+                decision.backup_model,
+                num_gpu=decision.num_gpu,
+                num_ctx=decision.num_ctx,
             )
         if data is None:
             response_text = "Systems encountered an error. Try again."
@@ -3087,7 +3533,9 @@ async def voice_chat(request: Request, voice: str = None, rate: str = None):
             "audio_base64": audio_b64,
             "format": tts_result.get("format", "mp3"),
             "duration_estimate": tts_result.get("duration_estimate", 0),
-        } if audio_b64 else {"error": tts_result.get("error", "TTS failed")},
+        }
+        if audio_b64
+        else {"error": tts_result.get("error", "TTS failed")},
         "route": decision.to_dict(),
     }
 
@@ -3095,8 +3543,10 @@ async def voice_chat(request: Request, voice: str = None, rate: str = None):
 # ── NEW VOICE PIPELINE (Phase 1 — Piper + RVC + Effects) ─────────────────
 
 try:
-    from voice import speak as voice_speak, configure as voice_configure
-    from voice.voice_config import DEFAULT_CONFIG as _voice_cfg, VoiceConfig
+    from voice import configure as voice_configure
+    from voice import speak as voice_speak
+    from voice.voice_config import DEFAULT_CONFIG as _voice_cfg
+
     VOICE_PIPELINE_AVAILABLE = True
 except ImportError:
     VOICE_PIPELINE_AVAILABLE = False
@@ -3124,6 +3574,7 @@ async def api_voice_config_get():
     if not VOICE_PIPELINE_AVAILABLE:
         return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
     import dataclasses
+
     return dataclasses.asdict(_voice_cfg)
 
 
@@ -3145,8 +3596,8 @@ async def api_voice_presets_list():
     """List saved voice presets."""
     if not VOICE_PIPELINE_AVAILABLE:
         return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
-    from voice.voice_config import VoiceConfig
     import os
+
     preset_dir = os.path.expanduser("~/.local/share/deltai/voice/presets")
     presets = []
     if os.path.isdir(preset_dir):
@@ -3185,20 +3636,20 @@ async def api_voice_pipeline_status():
     }
     try:
         from voice.tts_engine import PiperTTS
+
         status["tts"]["ready"] = PiperTTS is not None
     except Exception:
         pass
     try:
         from voice.voice_converter import VoiceConverter
+
         vc = VoiceConverter()
         status["rvc"]["model_loaded"] = vc.is_loaded
     except Exception:
         pass
-    try:
-        import sounddevice
-        status["playback"]["ready"] = True
-    except ImportError:
-        status["playback"]["ready"] = False
+    import importlib.util
+
+    status["playback"]["ready"] = importlib.util.find_spec("sounddevice") is not None
     return status
 
 
@@ -3208,12 +3659,14 @@ async def api_voice_test():
     if not VOICE_PIPELINE_AVAILABLE:
         return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
     import time
+
     timings = {}
     test_text = "All systems nominal. Voice pipeline test complete."
     try:
-        from voice.tts_engine import PiperTTS
         from voice.post_processor import PostProcessor
+        from voice.tts_engine import PiperTTS
         from voice.voice_config import DEFAULT_CONFIG
+
         tts = PiperTTS(DEFAULT_CONFIG)
         pp = PostProcessor(DEFAULT_CONFIG)
         t0 = time.time()
@@ -3235,6 +3688,7 @@ async def api_voice_test():
 
 # ── VOICE TRAINING ENDPOINTS ────────────────────────────────────────────
 
+
 @app.post("/api/voice/train/prepare")
 async def api_voice_train_prepare():
     """Prepare training dataset from raw audio files."""
@@ -3242,6 +3696,7 @@ async def api_voice_train_prepare():
         return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
     try:
         from voice.train_rvc import prepare_dataset
+
         stats = await asyncio.to_thread(prepare_dataset)
         return {"ok": True, **stats}
     except Exception as e:
@@ -3255,6 +3710,7 @@ async def api_voice_train_start(req: dict = None):
         return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
     try:
         from voice.train_rvc import train
+
         output_name = (req or {}).get("model_name", None)
         train(output_name=output_name)
         return {"ok": True, "status": "training started"}
@@ -3270,6 +3726,7 @@ async def api_voice_train_status():
     if not VOICE_PIPELINE_AVAILABLE:
         return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
     from voice.train_rvc import get_training_state
+
     return get_training_state()
 
 
@@ -3279,6 +3736,7 @@ async def api_voice_train_stop():
     if not VOICE_PIPELINE_AVAILABLE:
         return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
     from voice.train_rvc import stop_training
+
     stop_training()
     return {"ok": True, "status": "abort requested"}
 
@@ -3290,6 +3748,7 @@ async def api_voice_train_export(req: dict = None):
         return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
     try:
         from voice.train_rvc import export_model
+
         output_name = (req or {}).get("model_name", None)
         result = await asyncio.to_thread(export_model, output_name=output_name)
         return {"ok": True, **result}
@@ -3298,6 +3757,7 @@ async def api_voice_train_export(req: dict = None):
 
 
 # ── STATS ───────────────────────────────────────────────────────────────
+
 
 @app.get("/stats")
 def stats():
@@ -3351,8 +3811,16 @@ def stats():
     try:
         resp = httpx.get(f"{OLLAMA_URL}/api/tags", timeout=2)
         tags = resp.json()
-        DELTAI_MODELS = {"deltai-qwen14b", "deltai-qwen3b", "deltai-nemo", "deltai-fallback", "deltai"}
-        result["models"] = [m["name"] for m in tags.get("models", []) if m["name"].split(":")[0] in DELTAI_MODELS]
+        DELTAI_MODELS = {
+            "deltai-qwen14b",
+            "deltai-qwen3b",
+            "deltai-nemo",
+            "deltai-fallback",
+            "deltai",
+        }
+        result["models"] = [
+            m["name"] for m in tags.get("models", []) if m["name"].split(":")[0] in DELTAI_MODELS
+        ]
     except Exception:
         result["models"] = []
     if RAG_AVAILABLE:
@@ -3369,7 +3837,9 @@ def stats():
         try:
             total = sum(
                 os.path.getsize(os.path.join(dp, f))
-                for dp, dn, fn in os.walk(os.path.expanduser(os.getenv("CHROMADB_PATH", "~/.local/share/deltai/chromadb")))
+                for dp, dn, fn in os.walk(
+                    os.path.expanduser(os.getenv("CHROMADB_PATH", "~/.local/share/deltai/chromadb"))
+                )
                 for f in fn
             )
             result["memory_mb"] = round(total / 1e6, 1)
@@ -3386,7 +3856,11 @@ def stats():
     result["watcher_active"] = watcher_running() if RAG_AVAILABLE else False
     # Backup status — minimal, invisible infrastructure
     backup_enabled = os.getenv("BACKUP_ENABLED", "true").lower() in ("true", "1", "yes")
-    all_healthy = all(s.get("healthy", False) for s in _backup_health_status.values()) if _backup_health_status else True
+    all_healthy = (
+        all(s.get("healthy", False) for s in _backup_health_status.values())
+        if _backup_health_status
+        else True
+    )
     result["backup"] = {"enabled": backup_enabled, "healthy": all_healthy}
     result["budget"] = get_budget_status()
     return result
@@ -3395,7 +3869,7 @@ def stats():
 # ── MODELFILE ───────────────────────────────────────────────────────────
 
 MODELFILE_PATH = r"~/deltai/modelfiles\deltai.modelfile"
-MODULES_DIR = os.path.join(_HERE, '..', 'modelfiles')
+MODULES_DIR = os.path.join(_HERE, "..", "modelfiles")
 MODULE_FILES = {
     "modelfile": MODELFILE_PATH,
     "protocols": os.path.join(MODULES_DIR, "protocols.md"),
@@ -3408,14 +3882,16 @@ _ALLOWED_MODULE_PATHS = frozenset(MODULE_FILES.values())
 @app.get("/modelfile")
 def get_modelfile():
     try:
-        with open(MODELFILE_PATH, "r", encoding="utf-8") as f:
+        with open(MODELFILE_PATH, encoding="utf-8") as f:
             return PlainTextResponse(f.read())
     except Exception as e:
         safe_errors.log_exception(logger, "get_modelfile failed", e)
         return PlainTextResponse("# Error reading modelfile", status_code=500)
 
+
 class ModelfileUpdate(BaseModel):
     content: str
+
 
 @app.post("/modelfile")
 def save_modelfile(update: ModelfileUpdate):
@@ -3426,17 +3902,19 @@ def save_modelfile(update: ModelfileUpdate):
     except Exception as e:
         return {"ok": False, "error": safe_errors.public_error_detail(e)}
 
+
 @app.get("/module/{name}")
 def get_module(name: str):
     path = MODULE_FILES.get(name)
     if not path or path not in _ALLOWED_MODULE_PATHS:
         return PlainTextResponse(f"# Unknown module: {name}", status_code=404)
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return PlainTextResponse(f.read())
     except Exception as e:
         safe_errors.log_exception(logger, f"get_module {name} failed", e)
         return PlainTextResponse(f"# Error reading {name}", status_code=500)
+
 
 @app.post("/module/{name}")
 def save_module(name: str, update: ModelfileUpdate):

@@ -22,13 +22,12 @@ if sys.platform == "win32":
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
 import httpx
+from rich import box
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 from rich.theme import Theme
-from rich import box
 
 # ── CONFIG ─────────────────────────────────────────────────────────────
 
@@ -41,20 +40,22 @@ STREAM_TIMEOUT = 120.0
 # ── THEME ──────────────────────────────────────────────────────────────
 # Matches deltai dashboard palette: militaristic, muted, tactical
 
-DELTAI_THEME = Theme({
-    "deltai":       "#5a8a7a bold",
-    "deltai.bright": "bold white",
-    "accent":    "#5a8a7a",
-    "cmd":       "#5a8a7a",
-    "meta":      "#445060 italic",
-    "meta.tool": "#5a8a7a italic",
-    "warn":      "#c49a3a",
-    "danger":    "#a03030 bold",
-    "ok":        "#5a8a7a",
-    "dim":       "#445060",
-    "text":      "#b8c4cc",
-    "heading":   "#5a8a7a bold",
-})
+DELTAI_THEME = Theme(
+    {
+        "deltai": "#5a8a7a bold",
+        "deltai.bright": "bold white",
+        "accent": "#5a8a7a",
+        "cmd": "#5a8a7a",
+        "meta": "#445060 italic",
+        "meta.tool": "#5a8a7a italic",
+        "warn": "#c49a3a",
+        "danger": "#a03030 bold",
+        "ok": "#5a8a7a",
+        "dim": "#445060",
+        "text": "#b8c4cc",
+        "heading": "#5a8a7a bold",
+    }
+)
 
 console = Console(theme=DELTAI_THEME, highlight=False, force_terminal=True)
 
@@ -63,40 +64,41 @@ console = Console(theme=DELTAI_THEME, highlight=False, force_terminal=True)
 _TITLE = "MODULAR AI EXTENSION"
 _SUB = "Local AI System // v{ver}"
 
-_B = "\u2588"   # full block (letter body)
+_B = "\u2588"  # full block (letter body)
 _LH = "\u258c"  # left half (right-edge shadow)
 _UH = "\u2580"  # upper half (bottom shadow)
-_QUL = "\u2598" # quadrant upper-left (corner shadow)
+_QUL = "\u2598"  # quadrant upper-left (corner shadow)
 
 # 5-row letters + shadow row. Claude Code 3D: ▌ right edge, ▀ bottom, ▘ corner
 # N: 2-wide diagonal, perfectly uniform
 # E=9 wide (8+shadow), 3=9 wide (8+shadow), N=11 wide (10+shadow)
 _GAP = "  "
 _E_ART = (
-    f"{_B*8}{_LH}",
-    f"{_B*3}{_LH}{_UH*4}{_QUL}",
-    f"{_B*6}{_LH}  ",
-    f"{_B*3}{_LH}{_UH*2}{_QUL}  ",
-    f"{_B*8}{_LH}",
-    f"{_UH*8}{_QUL}",
+    f"{_B * 8}{_LH}",
+    f"{_B * 3}{_LH}{_UH * 4}{_QUL}",
+    f"{_B * 6}{_LH}  ",
+    f"{_B * 3}{_LH}{_UH * 2}{_QUL}  ",
+    f"{_B * 8}{_LH}",
+    f"{_UH * 8}{_QUL}",
 )
 _3_ART = (
-    f" {_B*7}{_LH}",
-    f" {_UH*4}{_B*3}{_LH}",
-    f"  {_B*6}{_LH}",
-    f"  {_UH*3}{_B*3}{_LH}",
-    f" {_B*7}{_LH}",
-    f" {_UH*7}{_QUL}",
+    f" {_B * 7}{_LH}",
+    f" {_UH * 4}{_B * 3}{_LH}",
+    f"  {_B * 6}{_LH}",
+    f"  {_UH * 3}{_B * 3}{_LH}",
+    f" {_B * 7}{_LH}",
+    f" {_UH * 7}{_QUL}",
 )
 _N_ART = (
-    f"{_B*3}{_LH}   {_B*3}{_LH}",
-    f"{_B*5}{_LH} {_B*3}{_LH}",
-    f"{_B*3}{_UH}{_B*2}{_LH}{_B*3}{_LH}",
-    f"{_B*3}{_LH}{_UH}{_B*5}{_LH}",
-    f"{_B*3}{_LH}   {_B*3}{_LH}",
-    f"{_UH*3}{_QUL}   {_UH*3}{_QUL}",
+    f"{_B * 3}{_LH}   {_B * 3}{_LH}",
+    f"{_B * 5}{_LH} {_B * 3}{_LH}",
+    f"{_B * 3}{_UH}{_B * 2}{_LH}{_B * 3}{_LH}",
+    f"{_B * 3}{_LH}{_UH}{_B * 5}{_LH}",
+    f"{_B * 3}{_LH}   {_B * 3}{_LH}",
+    f"{_UH * 3}{_QUL}   {_UH * 3}{_QUL}",
 )
 _DELTAI_LINES = tuple(f"{_E_ART[i]}{_GAP}{_3_ART[i]}{_GAP}{_N_ART[i]}" for i in range(6))
+
 
 def _style_art(art: str, is_shadow: bool = False) -> str:
     """Color letter body chars as accent, shadow chars (▌▀▘) as dim."""
@@ -150,6 +152,7 @@ def _build_banner() -> str:
     lines.append("")
     return "\n".join(lines)
 
+
 BANNER = _build_banner()
 
 
@@ -158,6 +161,7 @@ def print_banner():
 
 
 # ── HTTP HELPERS ───────────────────────────────────────────────────────
+
 
 def _url(host: str, port: int, path: str) -> str:
     return f"http://{host}:{port}{path}"
@@ -195,6 +199,7 @@ async def api_delete(client: httpx.AsyncClient, path: str) -> bool:
 
 
 # ── CONNECTION CHECK ───────────────────────────────────────────────────
+
 
 async def check_connection(client: httpx.AsyncClient) -> dict | None:
     """Check backend connection. Returns health dict or None."""
@@ -263,6 +268,7 @@ async def show_startup_status(client: httpx.AsyncClient, health: dict):
 
 # ── CHAT STREAMING ─────────────────────────────────────────────────────
 
+
 async def stream_chat(client: httpx.AsyncClient, message: str):
     """Send a chat message and stream the NDJSON response."""
     full_text = ""
@@ -270,7 +276,8 @@ async def stream_chat(client: httpx.AsyncClient, message: str):
 
     try:
         async with client.stream(
-            "POST", "/chat",
+            "POST",
+            "/chat",
             json={"message": message},
             timeout=httpx.Timeout(STREAM_TIMEOUT, connect=CONNECT_TIMEOUT),
         ) as resp:
@@ -299,7 +306,9 @@ async def stream_chat(client: httpx.AsyncClient, message: str):
                 elif t == "rag":
                     n = ev.get("n", 0)
                     if n > 0:
-                        console.print(f"  [meta]{n} memory chunk{'s' if n != 1 else ''} injected[/]")
+                        console.print(
+                            f"  [meta]{n} memory chunk{'s' if n != 1 else ''} injected[/]"
+                        )
 
                 elif t == "split_phase":
                     phase = ev.get("phase", "?")
@@ -348,12 +357,14 @@ async def stream_chat(client: httpx.AsyncClient, message: str):
                         if any(c in full_text for c in ["#", "```", "**", "- ", "1."]):
                             console.print()
                             md = Markdown(full_text)
-                            console.print(Panel(
-                                md,
-                                border_style="accent",
-                                padding=(0, 1),
-                                expand=False,
-                            ))
+                            console.print(
+                                Panel(
+                                    md,
+                                    border_style="accent",
+                                    padding=(0, 1),
+                                    expand=False,
+                                )
+                            )
                     if turns is not None:
                         console.print(f"  [dim][{turns}T][/]")
                     console.print()
@@ -364,11 +375,13 @@ async def stream_chat(client: httpx.AsyncClient, message: str):
 
                 elif t == "emergency":
                     msg = ev.get("c", "")
-                    console.print(Panel(
-                        f"EMERGENCY: {msg}",
-                        border_style="danger",
-                        title="[danger]BACKUP ACTIVATED[/]",
-                    ))
+                    console.print(
+                        Panel(
+                            f"EMERGENCY: {msg}",
+                            border_style="danger",
+                            title="[danger]BACKUP ACTIVATED[/]",
+                        )
+                    )
 
                 elif t == "session":
                     active = ev.get("active", False)
@@ -389,6 +402,7 @@ async def stream_chat(client: httpx.AsyncClient, message: str):
 
 # ── SLASH COMMANDS ─────────────────────────────────────────────────────
 
+
 async def cmd_help(client, args):
     """Show available commands."""
     table = Table(
@@ -403,21 +417,21 @@ async def cmd_help(client, args):
     table.add_column("Description", style="text")
 
     cmds = [
-        ("/help",           "Show this command list"),
-        ("/health",         "Subsystem health status"),
-        ("/stats",          "System stats (CPU, RAM, GPU, VRAM)"),
-        ("/budget",         "Cloud budget: spent / limit / remaining"),
-        ("/resources",      "VRAM pressure, circuit breaker, recovery log"),
-        ("/memory",         "Knowledge base stats (chunks, files, disk)"),
-        ("/history",        "Conversation history metadata"),
-        ("/clear",          "Clear conversation history"),
-        ("/backup",         "Emergency backup system status"),
-        ("/heal",           "Self-heal loop status"),
-        ("/events [n]",     "Recent health events (default: last 10)"),
-        ("/cls",            "Clear terminal screen"),
-        ("/quit, /exit",    "Exit the terminal"),
-        ("",                ""),
-        ("[dim](any text)[/]",  "[dim]Chat with deltai directly[/]"),
+        ("/help", "Show this command list"),
+        ("/health", "Subsystem health status"),
+        ("/stats", "System stats (CPU, RAM, GPU, VRAM)"),
+        ("/budget", "Cloud budget: spent / limit / remaining"),
+        ("/resources", "VRAM pressure, circuit breaker, recovery log"),
+        ("/memory", "Knowledge base stats (chunks, files, disk)"),
+        ("/history", "Conversation history metadata"),
+        ("/clear", "Clear conversation history"),
+        ("/backup", "Emergency backup system status"),
+        ("/heal", "Self-heal loop status"),
+        ("/events [n]", "Recent health events (default: last 10)"),
+        ("/cls", "Clear terminal screen"),
+        ("/quit, /exit", "Exit the terminal"),
+        ("", ""),
+        ("[dim](any text)[/]", "[dim]Chat with deltai directly[/]"),
     ]
     for cmd, desc in cmds:
         table.add_row(cmd, desc)
@@ -474,27 +488,40 @@ async def cmd_stats(client, args):
     table.add_column("Value", style="text", min_width=30)
 
     cpu = stats.get("cpu", {})
-    table.add_row("CPU", f"{cpu.get('percent', '?')}% @ {cpu.get('freq_mhz', '?')} MHz "
-                         f"({cpu.get('cores_physical', '?')}P/{cpu.get('cores_logical', '?')}T)")
+    table.add_row(
+        "CPU",
+        f"{cpu.get('percent', '?')}% @ {cpu.get('freq_mhz', '?')} MHz "
+        f"({cpu.get('cores_physical', '?')}P/{cpu.get('cores_logical', '?')}T)",
+    )
 
     ram = stats.get("ram", {})
-    table.add_row("RAM", f"{ram.get('used_gb', '?')}/{ram.get('total_gb', '?')} GB "
-                         f"({ram.get('percent', '?')}%)")
+    table.add_row(
+        "RAM",
+        f"{ram.get('used_gb', '?')}/{ram.get('total_gb', '?')} GB ({ram.get('percent', '?')}%)",
+    )
 
     disk = stats.get("disk", {})
-    table.add_row("DISK", f"{disk.get('used_gb', '?')}/{disk.get('total_gb', '?')} GB "
-                          f"({disk.get('percent', '?')}%)")
+    table.add_row(
+        "DISK",
+        f"{disk.get('used_gb', '?')}/{disk.get('total_gb', '?')} GB ({disk.get('percent', '?')}%)",
+    )
 
     gpu = stats.get("gpu", {})
     if "error" not in gpu:
         vram_free = gpu.get("vram_total_mb", 0) - gpu.get("vram_used_mb", 0)
         tier = "A" if vram_free > 9000 else "B" if vram_free > 3000 else "C"
         table.add_row("GPU", f"{gpu.get('name', '?')}")
-        table.add_row("VRAM", f"{gpu.get('vram_used_mb', '?')}/{gpu.get('vram_total_mb', '?')} MB "
-                              f"({vram_free:,} free, Tier {tier})")
-        table.add_row("GPU UTIL", f"{gpu.get('gpu_percent', '?')}%  "
-                                  f"{gpu.get('temp_c', '?')}C  "
-                                  f"{gpu.get('power_w', '?')}/{gpu.get('power_limit_w', '?')}W")
+        table.add_row(
+            "VRAM",
+            f"{gpu.get('vram_used_mb', '?')}/{gpu.get('vram_total_mb', '?')} MB "
+            f"({vram_free:,} free, Tier {tier})",
+        )
+        table.add_row(
+            "GPU UTIL",
+            f"{gpu.get('gpu_percent', '?')}%  "
+            f"{gpu.get('temp_c', '?')}C  "
+            f"{gpu.get('power_w', '?')}/{gpu.get('power_limit_w', '?')}W",
+        )
     else:
         table.add_row("GPU", f"[dim]{gpu.get('error', 'unavailable')}[/]")
 
@@ -507,7 +534,9 @@ async def cmd_stats(client, args):
         limit = budget.get("daily_budget", 5)
         remaining = budget.get("daily_remaining", limit)
         color = "ok" if remaining > limit * 0.3 else "warn" if remaining > limit * 0.1 else "danger"
-        table.add_row("BUDGET", f"[{color}]${spent:.2f} / ${limit:.2f}  (${remaining:.2f} remaining)[/]")
+        table.add_row(
+            "BUDGET", f"[{color}]${spent:.2f} / ${limit:.2f}  (${remaining:.2f} remaining)[/]"
+        )
 
     console.print()
     console.print(table)
@@ -526,7 +555,9 @@ async def cmd_budget(client, args):
     remaining = data.get("daily_remaining", limit)
     ok = data.get("budget_ok", True)
 
-    color = "ok" if ok and remaining > limit * 0.3 else "warn" if remaining > limit * 0.1 else "danger"
+    color = (
+        "ok" if ok and remaining > limit * 0.3 else "warn" if remaining > limit * 0.1 else "danger"
+    )
 
     # Budget bar
     bar_width = 30
@@ -535,9 +566,11 @@ async def cmd_budget(client, args):
     bar = "█" * filled + "░" * (bar_width - filled)
 
     console.print()
-    console.print(f"  [heading]CLOUD BUDGET[/]")
+    console.print("  [heading]CLOUD BUDGET[/]")
     console.print(f"  [{color}]{bar}[/]  [{color}]${spent:.2f} / ${limit:.2f}[/]")
-    console.print(f"  [dim]Remaining: ${remaining:.2f}  |  Status: {'OK' if ok else 'EXHAUSTED'}[/]")
+    console.print(
+        f"  [dim]Remaining: ${remaining:.2f}  |  Status: {'OK' if ok else 'EXHAUSTED'}[/]"
+    )
     console.print()
 
 
@@ -588,14 +621,14 @@ async def cmd_memory(client, args):
         return
 
     console.print()
-    console.print(f"  [heading]KNOWLEDGE BASE[/]")
+    console.print("  [heading]KNOWLEDGE BASE[/]")
     console.print(f"  [dim]Chunks:[/]  [text]{data.get('total_chunks', '?')}[/]")
     console.print(f"  [dim]Files:[/]   [text]{data.get('total_files', '?')}[/]")
     console.print(f"  [dim]Disk:[/]    [text]{data.get('disk_mb', '?')} MB[/]")
 
     sources = data.get("sources", [])
     if sources:
-        console.print(f"  [dim]Sources:[/]")
+        console.print("  [dim]Sources:[/]")
         for s in sources[:15]:
             console.print(f"    [dim]-[/] [text]{s}[/]")
     console.print()
@@ -613,7 +646,7 @@ async def cmd_history(client, args):
     history = data.get("history", [])
 
     console.print()
-    console.print(f"  [heading]CONVERSATION HISTORY[/]")
+    console.print("  [heading]CONVERSATION HISTORY[/]")
     console.print(f"  [dim]Turns:[/] [text]{turns}/{max_turns}[/]")
 
     if history:
@@ -621,8 +654,12 @@ async def cmd_history(client, args):
         for pair in history[-3:]:
             user_msg = pair.get("user", "")[:60]
             deltai_msg = pair.get("assistant", "")[:60]
-            console.print(f"  [dim]>[/]    [text]{user_msg}{'...' if len(pair.get('user', '')) > 60 else ''}[/]")
-            console.print(f"  [deltai]deltai>[/] [text]{deltai_msg}{'...' if len(pair.get('assistant', '')) > 60 else ''}[/]")
+            console.print(
+                f"  [dim]>[/]    [text]{user_msg}{'...' if len(pair.get('user', '')) > 60 else ''}[/]"
+            )
+            console.print(
+                f"  [deltai]deltai>[/] [text]{deltai_msg}{'...' if len(pair.get('assistant', '')) > 60 else ''}[/]"
+            )
             console.print()
     console.print()
 
@@ -644,7 +681,7 @@ async def cmd_backup(client, args):
         return
 
     console.print()
-    console.print(f"  [heading]BACKUP SYSTEM[/]")
+    console.print("  [heading]BACKUP SYSTEM[/]")
 
     if isinstance(data, dict):
         for key, val in data.items():
@@ -665,7 +702,7 @@ async def cmd_heal(client, args):
         return
 
     console.print()
-    console.print(f"  [heading]SELF-HEAL STATUS[/]")
+    console.print("  [heading]SELF-HEAL STATUS[/]")
     console.print(f"  [dim]Enabled:[/]  [text]{data.get('enabled', '?')}[/]")
     console.print(f"  [dim]Interval:[/] [text]{data.get('interval_sec', '?')}s[/]")
     console.print(f"  [dim]Model:[/]    [text]{data.get('model', '?')}[/]")
@@ -673,7 +710,7 @@ async def cmd_heal(client, args):
 
     actions = data.get("recent_actions", [])
     if actions:
-        console.print(f"  [dim]Recent:[/]")
+        console.print("  [dim]Recent:[/]")
         for a in actions[-5:]:
             console.print(f"    [dim]-[/] [text]{a}[/]")
     console.print()
@@ -725,17 +762,17 @@ async def cmd_events(client, args):
 # ── COMMAND DISPATCH ───────────────────────────────────────────────────
 
 COMMANDS = {
-    "/help":      cmd_help,
-    "/health":    cmd_health,
-    "/stats":     cmd_stats,
-    "/budget":    cmd_budget,
+    "/help": cmd_help,
+    "/health": cmd_health,
+    "/stats": cmd_stats,
+    "/budget": cmd_budget,
     "/resources": cmd_resources,
-    "/memory":    cmd_memory,
-    "/history":   cmd_history,
-    "/clear":     cmd_clear,
-    "/backup":    cmd_backup,
-    "/heal":      cmd_heal,
-    "/events":    cmd_events,
+    "/memory": cmd_memory,
+    "/history": cmd_history,
+    "/clear": cmd_clear,
+    "/backup": cmd_backup,
+    "/heal": cmd_heal,
+    "/events": cmd_events,
 }
 
 
@@ -774,6 +811,7 @@ async def dispatch_command(client: httpx.AsyncClient, raw: str) -> bool:
 
 # ── MAIN REPL ──────────────────────────────────────────────────────────
 
+
 async def repl(client: httpx.AsyncClient):
     """Main read-eval-print loop."""
     ctrl_c_count = 0
@@ -800,7 +838,7 @@ async def repl(client: httpx.AsyncClient):
                 if result:
                     continue
                 # Unknown command — treat as chat
-                console.print(f"  [dim]Unknown command. Type /help for available commands.[/]")
+                console.print("  [dim]Unknown command. Type /help for available commands.[/]")
                 continue
 
             # Chat message
@@ -816,6 +854,7 @@ async def repl(client: httpx.AsyncClient):
 
 
 # ── ENTRY POINT ────────────────────────────────────────────────────────
+
 
 async def main():
     # Parse simple CLI args
@@ -853,21 +892,23 @@ async def main():
 
         if health is None:
             console.print()
-            console.print(Panel(
-                f"Cannot reach deltai backend at {base_url}\n\n"
-                "Start the backend first:\n"
-                "  cd ~/deltai/project\n"
-                "  .\\venv\\Scripts\\activate\n"
-                "  uvicorn main:app --port 8000",
-                border_style="danger",
-                title="[danger]CONNECTION FAILED[/]",
-            ))
+            console.print(
+                Panel(
+                    f"Cannot reach deltai backend at {base_url}\n\n"
+                    "Start the backend first:\n"
+                    "  cd ~/deltai/project\n"
+                    "  .\\venv\\Scripts\\activate\n"
+                    "  uvicorn main:app --port 8000",
+                    border_style="danger",
+                    title="[danger]CONNECTION FAILED[/]",
+                )
+            )
             return
 
         # Startup status
         await show_startup_status(client, health)
 
-        console.print(f"  [dim]Type /help for commands. Chat by typing a message.[/]")
+        console.print("  [dim]Type /help for commands. Chat by typing a message.[/]")
         console.print()
 
         # REPL

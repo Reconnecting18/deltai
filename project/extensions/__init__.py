@@ -40,7 +40,8 @@ def load_extensions(app) -> None:
     Called once by main.py after the FastAPI app is created.
     """
     candidates = sorted(
-        name for name in os.listdir(_HERE)
+        name
+        for name in os.listdir(_HERE)
         if not name.startswith("_")
         and os.path.isdir(os.path.join(_HERE, name))
         and os.path.isfile(os.path.join(_HERE, name, "__init__.py"))

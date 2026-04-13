@@ -8,15 +8,16 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import time as _time
+import zlib
 from collections import defaultdict
 
 import chromadb
 import httpx
-from chromadb.config import Settings
-
 import path_guard
 import safe_errors
+from chromadb.config import Settings
 
 logger = logging.getLogger("deltai.memory")
 
@@ -28,15 +29,36 @@ KNOWLEDGE_PATH = os.getenv("KNOWLEDGE_PATH", "~/.local/share/deltai/knowledge")
 # ── CHUNKING ────────────────────────────────────────────────────────────
 
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB — skip files larger than this
-CHUNK_SIZE = 512       # chars per chunk (smaller = more precise retrieval)
-CHUNK_OVERLAP = 64     # overlap between chunks for context continuity
+CHUNK_SIZE = 512  # chars per chunk (smaller = more precise retrieval)
+CHUNK_OVERLAP = 64  # overlap between chunks for context continuity
 
 SUPPORTED_EXTENSIONS = {
-    ".txt", ".md", ".py", ".js", ".ts", ".html", ".css",
-    ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg",
-    ".csv", ".log", ".bat", ".ps1", ".sh",
-    ".c", ".cpp", ".h", ".rs", ".go", ".java",
+    ".txt",
+    ".md",
+    ".py",
+    ".js",
+    ".ts",
+    ".html",
+    ".css",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".ini",
+    ".cfg",
+    ".csv",
+    ".log",
+    ".bat",
+    ".ps1",
+    ".sh",
+    ".c",
+    ".cpp",
+    ".h",
+    ".rs",
+    ".go",
+    ".java",
 }
+
 
 def chunk_text(text: str, source: str) -> list[dict]:
     """Split text into overlapping chunks with metadata."""
@@ -45,12 +67,14 @@ def chunk_text(text: str, source: str) -> list[dict]:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
 
     if len(text) <= CHUNK_SIZE:
-        chunks.append({
-            "text": text.strip(),
-            "source": source,
-            "chunk_index": 0,
-            "total_chunks": 1,
-        })
+        chunks.append(
+            {
+                "text": text.strip(),
+                "source": source,
+                "chunk_index": 0,
+                "total_chunks": 1,
+            }
+        )
         return chunks
 
     start = 0
@@ -73,11 +97,13 @@ def chunk_text(text: str, source: str) -> list[dict]:
 
         chunk_text_str = text[start:end].strip()
         if chunk_text_str:
-            chunks.append({
-                "text": chunk_text_str,
-                "source": source,
-                "chunk_index": idx,
-            })
+            chunks.append(
+                {
+                    "text": chunk_text_str,
+                    "source": source,
+                    "chunk_index": idx,
+                }
+            )
             idx += 1
 
         start = end - CHUNK_OVERLAP
@@ -102,13 +128,13 @@ def file_hash(path: str) -> str:
 
 # ── EMBEDDING ───────────────────────────────────────────────────────────
 
+
 def get_embeddings(texts: list[str]) -> list[list[float]]:
     """Get embeddings from Ollama's embedding API."""
     try:
         with httpx.Client(timeout=60) as client:
             resp = client.post(
-                f"{OLLAMA_URL}/api/embed",
-                json={"model": EMBED_MODEL, "input": texts}
+                f"{OLLAMA_URL}/api/embed", json={"model": EMBED_MODEL, "input": texts}
             )
             resp.raise_for_status()
             data = resp.json()
@@ -125,6 +151,7 @@ def get_embeddings(texts: list[str]) -> list[list[float]]:
 
 _client = None
 _collection = None
+
 
 def get_collection():
     """Get or create the ChromaDB collection (singleton)."""
@@ -147,11 +174,9 @@ def get_collection():
 # Three-tier storage: hot (in-memory, <5min), warm (ChromaDB persistent, 5min-24hr),
 # cold (SQLite compressed, >24hr). Automatic demotion based on age.
 
-import sqlite3
-import zlib
-
-_COLD_DB_PATH = os.getenv("COLD_MEMORY_DB",
-    os.path.join(os.path.dirname(CHROMADB_PATH), "cold_memory.db"))
+_COLD_DB_PATH = os.getenv(
+    "COLD_MEMORY_DB", os.path.join(os.path.dirname(CHROMADB_PATH), "cold_memory.db")
+)
 _WARM_TO_COLD_AGE = int(os.getenv("WARM_TO_COLD_AGE_SEC", str(24 * 3600)))  # 24h
 _COLD_SEARCH_THRESHOLD = 3  # search cold only if hot/warm returns fewer than this
 
@@ -213,9 +238,15 @@ def _demote_to_cold(chunk_ids: list[str], collection) -> int:
             try:
                 conn.execute(
                     "INSERT OR REPLACE INTO cold_chunks VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (cid, meta.get("source", ""),
-                     text_compressed, emb_compressed,
-                     json.dumps(meta), meta.get("ingested_at", 0), now)
+                    (
+                        cid,
+                        meta.get("source", ""),
+                        text_compressed,
+                        emb_compressed,
+                        json.dumps(meta),
+                        meta.get("ingested_at", 0),
+                        now,
+                    ),
                 )
                 demoted += 1
             except Exception:
@@ -232,8 +263,9 @@ def _demote_to_cold(chunk_ids: list[str], collection) -> int:
         return 0
 
 
-def _search_cold_tier(query_embedding: list[float], n_results: int = 3,
-                      source_filter: str = None) -> list[dict]:
+def _search_cold_tier(
+    query_embedding: list[float], n_results: int = 3, source_filter: str = None
+) -> list[dict]:
     """
     Search cold tier using brute-force cosine similarity.
     Only called when hot/warm results are insufficient.
@@ -244,7 +276,7 @@ def _search_cold_tier(query_embedding: list[float], n_results: int = 3,
         if source_filter:
             rows = conn.execute(
                 "SELECT id, source, text_compressed, embedding_compressed, metadata_json FROM cold_chunks WHERE source = ?",
-                (source_filter,)
+                (source_filter,),
             ).fetchall()
         else:
             rows = conn.execute(
@@ -256,8 +288,9 @@ def _search_cold_tier(query_embedding: list[float], n_results: int = 3,
             return []
 
         import math
+
         def cosine_distance(a, b):
-            dot = sum(x * y for x, y in zip(a, b))
+            dot = sum(x * y for x, y in zip(a, b, strict=False))
             norm_a = math.sqrt(sum(x * x for x in a))
             norm_b = math.sqrt(sum(x * x for x in b))
             if norm_a == 0 or norm_b == 0:
@@ -265,19 +298,21 @@ def _search_cold_tier(query_embedding: list[float], n_results: int = 3,
             return 1.0 - (dot / (norm_a * norm_b))
 
         results = []
-        for cid, source, text_c, emb_c, meta_json in rows:
+        for _cid, source, text_c, emb_c, meta_json in rows:
             text = zlib.decompress(text_c).decode("utf-8")
             emb = json.loads(zlib.decompress(emb_c).decode("utf-8"))
             dist = cosine_distance(query_embedding, emb)
             if dist < 0.75:
                 meta = json.loads(meta_json) if meta_json else {}
-                results.append({
-                    "text": text,
-                    "source": source,
-                    "distance": round(dist, 4),
-                    "chunk_index": meta.get("chunk_index", 0),
-                    "tier": "cold",
-                })
+                results.append(
+                    {
+                        "text": text,
+                        "source": source,
+                        "distance": round(dist, 4),
+                        "chunk_index": meta.get("chunk_index", 0),
+                        "tier": "cold",
+                    }
+                )
         results.sort(key=lambda x: x["distance"])
         return results[:n_results]
     except Exception as e:
@@ -328,6 +363,7 @@ def get_cold_stats() -> dict:
 
 
 # ── INGESTION ───────────────────────────────────────────────────────────
+
 
 def ingest_file(filepath: str) -> dict:
     """
@@ -486,23 +522,135 @@ _SYNONYMS = {
 }
 
 # Stop words to filter out during keyword extraction
-_STOP_WORDS = frozenset({
-    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
-    "have", "has", "had", "do", "does", "did", "will", "would", "could",
-    "should", "may", "might", "shall", "can", "need", "dare", "ought",
-    "i", "me", "my", "we", "our", "you", "your", "he", "she", "it",
-    "they", "them", "what", "which", "who", "whom", "this", "that",
-    "these", "those", "am", "in", "on", "at", "to", "for", "of",
-    "with", "by", "from", "as", "into", "about", "between", "through",
-    "during", "before", "after", "above", "below", "up", "down", "out",
-    "off", "over", "under", "again", "then", "once", "here", "there",
-    "when", "where", "why", "how", "all", "each", "every", "both",
-    "few", "more", "most", "other", "some", "such", "no", "not",
-    "only", "own", "same", "so", "than", "too", "very", "just",
-    "if", "or", "and", "but", "nor", "because", "while", "although",
-    "tell", "show", "explain", "describe", "give", "get", "make",
-    "know", "think", "want", "let", "say", "go", "work", "use",
-})
+_STOP_WORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "shall",
+        "can",
+        "need",
+        "dare",
+        "ought",
+        "i",
+        "me",
+        "my",
+        "we",
+        "our",
+        "you",
+        "your",
+        "he",
+        "she",
+        "it",
+        "they",
+        "them",
+        "what",
+        "which",
+        "who",
+        "whom",
+        "this",
+        "that",
+        "these",
+        "those",
+        "am",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "with",
+        "by",
+        "from",
+        "as",
+        "into",
+        "about",
+        "between",
+        "through",
+        "during",
+        "before",
+        "after",
+        "above",
+        "below",
+        "up",
+        "down",
+        "out",
+        "off",
+        "over",
+        "under",
+        "again",
+        "then",
+        "once",
+        "here",
+        "there",
+        "when",
+        "where",
+        "why",
+        "how",
+        "all",
+        "each",
+        "every",
+        "both",
+        "few",
+        "more",
+        "most",
+        "other",
+        "some",
+        "such",
+        "no",
+        "not",
+        "only",
+        "own",
+        "same",
+        "so",
+        "than",
+        "too",
+        "very",
+        "just",
+        "if",
+        "or",
+        "and",
+        "but",
+        "nor",
+        "because",
+        "while",
+        "although",
+        "tell",
+        "show",
+        "explain",
+        "describe",
+        "give",
+        "get",
+        "make",
+        "know",
+        "think",
+        "want",
+        "let",
+        "say",
+        "go",
+        "work",
+        "use",
+    }
+)
 
 
 def _expand_query(query: str) -> list[str]:
@@ -546,9 +694,9 @@ def _expand_query(query: str) -> list[str]:
 # ── RERANKING ──────────────────────────────────────────────────────────
 
 # Source grouping boost: documents with multiple matching chunks are more relevant
-_SOURCE_GROUP_BOOST = 0.03   # distance reduction per extra chunk from same source
-_RECENCY_BOOST = 0.05        # distance reduction for recently ingested context
-_RECENCY_WINDOW = 300        # seconds (5 minutes)
+_SOURCE_GROUP_BOOST = 0.03  # distance reduction per extra chunk from same source
+_RECENCY_BOOST = 0.05  # distance reduction for recently ingested context
+_RECENCY_WINDOW = 300  # seconds (5 minutes)
 
 
 def _rerank_results(matches: list[dict], boost_recent: bool = True) -> list[dict]:
@@ -614,9 +762,15 @@ def _rerank_results(matches: list[dict], boost_recent: bool = True) -> list[dict
 
 # ── QUERY ───────────────────────────────────────────────────────────────
 
-def query_knowledge(query: str, n_results: int = 5, threshold: float = 0.75,
-                    boost_recent: bool = True, source_filter: str = None,
-                    max_age_sec: float = None) -> list[dict]:
+
+def query_knowledge(
+    query: str,
+    n_results: int = 5,
+    threshold: float = 0.75,
+    boost_recent: bool = True,
+    source_filter: str = None,
+    max_age_sec: float = None,
+) -> list[dict]:
     """
     Search the knowledge base for relevant chunks using multi-query expansion,
     source-grouped reranking, and optional recency bias.
@@ -683,15 +837,17 @@ def query_knowledge(query: str, n_results: int = 5, threshold: float = 0.75,
                 if ingested_at > 0 and (_time.time() - ingested_at) > max_age_sec:
                     continue  # Skip old entries
 
-            all_matches.append({
-                "text": results["documents"][0][i],
-                "source": meta.get("source", "?"),
-                "distance": round(dist, 4),
-                "chunk_index": meta.get("chunk_index", 0),
-                # Internal fields for reranking (stripped before return)
-                "_ingested_at": meta.get("ingested_at", 0),
-                "_id": chunk_id,
-            })
+            all_matches.append(
+                {
+                    "text": results["documents"][0][i],
+                    "source": meta.get("source", "?"),
+                    "distance": round(dist, 4),
+                    "chunk_index": meta.get("chunk_index", 0),
+                    # Internal fields for reranking (stripped before return)
+                    "_ingested_at": meta.get("ingested_at", 0),
+                    "_id": chunk_id,
+                }
+            )
 
     # Rerank with source grouping + recency bias
     reranked = _rerank_results(all_matches, boost_recent=boost_recent)
@@ -700,8 +856,10 @@ def query_knowledge(query: str, n_results: int = 5, threshold: float = 0.75,
     if len(reranked) < _COLD_SEARCH_THRESHOLD:
         try:
             cold_results = _search_cold_tier(
-                query_embeddings[0], n_results=n_results - len(reranked),
-                source_filter=source_filter)
+                query_embeddings[0],
+                n_results=n_results - len(reranked),
+                source_filter=source_filter,
+            )
             reranked.extend(cold_results)
         except Exception:
             pass
@@ -718,9 +876,13 @@ _RAR_ENABLED = os.getenv("RAR_ENABLED", "true").lower() in ("true", "1", "yes")
 _RAR_MIN_RESULTS_FOR_SKIP = int(os.getenv("RAR_MIN_RESULTS", "3"))
 
 
-def iterative_query_knowledge(query: str, sub_queries: list[str] | None = None,
-                               n_results: int = 5, threshold: float = 0.75,
-                               **kwargs) -> list[dict]:
+def iterative_query_knowledge(
+    query: str,
+    sub_queries: list[str] | None = None,
+    n_results: int = 5,
+    threshold: float = 0.75,
+    **kwargs,
+) -> list[dict]:
     """
     Two-round retrieval: standard query + follow-up with refined sub-queries.
 
@@ -766,21 +928,61 @@ def generate_sub_queries(query: str, initial_results: list[dict]) -> list[str]:
     Returns up to 3 sub-queries.
     """
     # Extract key terms from the query
-    query_terms = set(re.findall(r'\b[a-zA-Z]{3,}\b', query.lower()))
+    query_terms = set(re.findall(r"\b[a-zA-Z]{3,}\b", query.lower()))
 
     # Extract terms from results
     result_terms = set()
     for r in initial_results:
-        result_terms.update(re.findall(r'\b[a-zA-Z]{3,}\b', r.get("text", "").lower()[:500]))
+        result_terms.update(re.findall(r"\b[a-zA-Z]{3,}\b", r.get("text", "").lower()[:500]))
 
     # Find related terms in results that weren't in the query (context expansion)
     expansion_terms = result_terms - query_terms
     # Filter to meaningful terms (not too common)
-    _common = {"the", "and", "for", "that", "this", "with", "from", "have", "been",
-               "will", "are", "was", "were", "has", "had", "not", "but", "what",
-               "all", "can", "her", "his", "how", "its", "may", "our", "out",
-               "you", "also", "into", "just", "more", "most", "much", "only",
-               "over", "some", "such", "than", "them", "then", "very", "when"}
+    _common = {
+        "the",
+        "and",
+        "for",
+        "that",
+        "this",
+        "with",
+        "from",
+        "have",
+        "been",
+        "will",
+        "are",
+        "was",
+        "were",
+        "has",
+        "had",
+        "not",
+        "but",
+        "what",
+        "all",
+        "can",
+        "her",
+        "his",
+        "how",
+        "its",
+        "may",
+        "our",
+        "out",
+        "you",
+        "also",
+        "into",
+        "just",
+        "more",
+        "most",
+        "much",
+        "only",
+        "over",
+        "some",
+        "such",
+        "than",
+        "them",
+        "then",
+        "very",
+        "when",
+    }
     expansion_terms -= _common
 
     sub_queries = []
@@ -808,6 +1010,7 @@ def generate_sub_queries(query: str, initial_results: list[dict]) -> list[str]:
 
 
 _file_details_cache = {"data": None, "ts": 0}
+
 
 def get_file_details() -> list[dict]:
     """Get per-file details from ChromaDB (source, chunk count). Cached for 30s."""
@@ -838,6 +1041,7 @@ def get_file_details() -> list[dict]:
 _stats_cache = {"data": None, "ts": 0}
 _STATS_CACHE_TTL = 30  # seconds
 
+
 def get_memory_stats() -> dict:
     """Get stats about the knowledge base (cached for 30s)."""
     now = _time.time()
@@ -854,7 +1058,7 @@ def get_memory_stats() -> dict:
     # ChromaDB disk size
     total_bytes = 0
     try:
-        for dp, dn, fn in os.walk(CHROMADB_PATH):
+        for dp, _dn, fn in os.walk(CHROMADB_PATH):
             for f in fn:
                 try:
                     total_bytes += os.path.getsize(os.path.join(dp, f))
@@ -880,6 +1084,7 @@ def get_memory_stats() -> dict:
 
 _DEDUP_THRESHOLD = float(os.getenv("DEDUP_THRESHOLD", "0.15"))  # cosine distance — lower = stricter
 
+
 def _check_semantic_duplicate(collection, embedding, source: str) -> str | None:
     """
     Check if a near-duplicate chunk exists in ChromaDB.
@@ -892,16 +1097,14 @@ def _check_semantic_duplicate(collection, embedding, source: str) -> str | None:
             include=["distances", "metadatas"],
             where={"source": f"ingest:{source}"} if source else None,
         )
-        if (results["ids"] and results["ids"][0] and
-                results["distances"][0][0] < _DEDUP_THRESHOLD):
+        if results["ids"] and results["ids"][0] and results["distances"][0][0] < _DEDUP_THRESHOLD:
             return results["ids"][0][0]
     except Exception:
         pass
     return None
 
 
-def _freshen_metadata(collection, chunk_id: str, tags: list[str] | None = None,
-                      ttl: int = 0):
+def _freshen_metadata(collection, chunk_id: str, tags: list[str] | None = None, ttl: int = 0):
     """Update the timestamp and optionally TTL/tags on an existing chunk."""
     try:
         now = _time.time()
@@ -919,8 +1122,8 @@ def _freshen_metadata(collection, chunk_id: str, tags: list[str] | None = None,
 # Allows external services to push structured context into deltai's RAG memory.
 # Each entry gets a source tag, timestamp, and optional TTL for auto-expiry.
 
-def ingest_context(source: str, context: str, ttl: int = 0,
-                   tags: list[str] | None = None) -> dict:
+
+def ingest_context(source: str, context: str, ttl: int = 0, tags: list[str] | None = None) -> dict:
     """
     Ingest structured context from an external service into ChromaDB.
 
@@ -973,8 +1176,13 @@ def ingest_context(source: str, context: str, ttl: int = 0,
             new_chunks.append(chunks[i])
 
     if not new_texts:
-        return {"status": "ok", "chunks": 0, "deduplicated": dedup_count,
-                "source": source, "expires_at": (now + ttl) if ttl > 0 else None}
+        return {
+            "status": "ok",
+            "chunks": 0,
+            "deduplicated": dedup_count,
+            "source": source,
+            "expires_at": (now + ttl) if ttl > 0 else None,
+        }
 
     # Build IDs with timestamp to allow multiple ingests from same source
     ts_str = str(int(now * 1000))
@@ -1002,8 +1210,13 @@ def ingest_context(source: str, context: str, ttl: int = 0,
         metadatas=metadatas,
     )
 
-    return {"status": "ok", "chunks": len(new_chunks), "deduplicated": dedup_count,
-            "source": source, "expires_at": expires_at if expires_at > 0 else None}
+    return {
+        "status": "ok",
+        "chunks": len(new_chunks),
+        "deduplicated": dedup_count,
+        "source": source,
+        "expires_at": expires_at if expires_at > 0 else None,
+    }
 
 
 def ingest_context_batch(items: list[dict]) -> dict:
@@ -1044,15 +1257,17 @@ def ingest_context_batch(items: list[dict]) -> dict:
         for c in chunks:
             all_texts.append(c["text"])
             all_ids.append(f"ingest::{source}::{ts_str}::chunk_{c['chunk_index']}")
-            all_metadatas.append({
-                "source": f"ingest:{source}",
-                "chunk_index": c["chunk_index"],
-                "total_chunks": c["total_chunks"],
-                "ingested_at": now,
-                "expires_at": expires_at,
-                "tags": json.dumps(tags),
-                "char_count": len(c["text"]),
-            })
+            all_metadatas.append(
+                {
+                    "source": f"ingest:{source}",
+                    "chunk_index": c["chunk_index"],
+                    "total_chunks": c["total_chunks"],
+                    "ingested_at": now,
+                    "expires_at": expires_at,
+                    "tags": json.dumps(tags),
+                    "char_count": len(c["text"]),
+                }
+            )
 
     if not all_texts:
         return {"status": "error", "reason": "no valid items in batch"}
@@ -1083,6 +1298,7 @@ def ingest_context_batch(items: list[dict]) -> dict:
 _cleanup_last_run = 0.0
 _CLEANUP_MIN_INTERVAL = 10  # seconds — avoid hammering ChromaDB on rapid chat requests
 
+
 def cleanup_expired() -> dict:
     """
     Remove TTL-expired ingested entries from ChromaDB.
@@ -1106,10 +1322,12 @@ def cleanup_expired() -> dict:
         # Only query ingested entries (source starts with "ingest:") that have TTL
         # Using $gt filter on expires_at to only fetch entries with active TTL
         ttl_data = collection.get(
-            where={"$and": [
-                {"expires_at": {"$gt": 0}},
-                {"expires_at": {"$lte": now}},
-            ]},
+            where={
+                "$and": [
+                    {"expires_at": {"$gt": 0}},
+                    {"expires_at": {"$lte": now}},
+                ]
+            },
             include=["metadatas"],
         )
 

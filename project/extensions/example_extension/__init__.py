@@ -28,15 +28,10 @@ TOOLS = [
             ),
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "The name to greet."
-                    }
-                },
-                "required": ["name"]
-            }
-        }
+                "properties": {"name": {"type": "string", "description": "The name to greet."}},
+                "required": ["name"],
+            },
+        },
     }
 ]
 

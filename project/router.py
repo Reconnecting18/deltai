@@ -32,24 +32,27 @@ Emergency backup (last resort only):
   deltai-qwen3b  → deltai-fallback → system down
 """
 
+import logging
 import os
 import re
 import time
-import logging
 
 logger = logging.getLogger("deltai.router")
 
 # ── CONFIGURATION ───────────────────────────────────────────────────────
 
+
 def _env_bool(key: str, default: bool = False) -> bool:
     val = os.getenv(key, str(default)).lower().strip()
     return val in ("true", "1", "yes")
+
 
 def _env_int(key: str, default: int) -> int:
     try:
         return int(os.getenv(key, str(default)))
     except ValueError:
         return default
+
 
 def _env_float(key: str, default: float) -> float:
     try:
@@ -65,14 +68,14 @@ def _env_float(key: str, default: float) -> float:
 
 _QUANT_TIERS_14B = [
     # (min_vram_mb, model_name, quant_label)
-    (10000, os.getenv("DELTAI_STRONG_MODEL_Q6", ""), "Q6_K"),       # Best quality
-    (8500,  os.getenv("DELTAI_STRONG_MODEL", "deltai-qwen14b"), "Q4_K_M"),  # Current default
-    (6500,  os.getenv("DELTAI_STRONG_MODEL_Q3", ""), "Q3_K_M"),    # Good quality, less VRAM
+    (10000, os.getenv("DELTAI_STRONG_MODEL_Q6", ""), "Q6_K"),  # Best quality
+    (8500, os.getenv("DELTAI_STRONG_MODEL", "deltai-qwen14b"), "Q4_K_M"),  # Current default
+    (6500, os.getenv("DELTAI_STRONG_MODEL_Q3", ""), "Q3_K_M"),  # Good quality, less VRAM
 ]
 
 _QUANT_TIERS_3B = [
-    (2500, os.getenv("DELTAI_MODEL", "deltai-qwen3b"), "Q4_K_M"),     # Current default
-    (1200, os.getenv("DELTAI_MODEL_Q2", ""), "Q2_K"),               # Emergency minimal
+    (2500, os.getenv("DELTAI_MODEL", "deltai-qwen3b"), "Q4_K_M"),  # Current default
+    (1200, os.getenv("DELTAI_MODEL_Q2", ""), "Q2_K"),  # Emergency minimal
 ]
 
 
@@ -90,6 +93,7 @@ def _pick_best_quant(model_tiers: list, vram_free: int) -> tuple[str, str] | Non
 # ── GPU / VRAM DETECTION ─────────────────────────────────────────────────
 
 _nvml_initialized = False
+
 
 def _load_pynvml():
     """Return pynvml module if available, otherwise None.
@@ -174,9 +178,9 @@ def is_gpu_loaded() -> bool:
 # ── SIM DETECTION ────────────────────────────────────────────────────────
 
 _SIM_PROCESS_NAMES = [
-    "lemansultimate",      # Le Mans Ultimate (main executable)
+    "lemansultimate",  # Le Mans Ultimate (main executable)
     "le mans ultimate",
-    "rfactor2",            # rFactor 2 (same engine)
+    "rfactor2",  # rFactor 2 (same engine)
 ]
 # NOTE: Removed bare "lmu" — too broad, false-matches on other processes.
 # LMU's actual process name is "Le Mans Ultimate.exe" → normalized to "lemansultimate"
@@ -199,9 +203,16 @@ def is_sim_running() -> bool:
 
     try:
         import psutil
+
         for proc in psutil.process_iter(["name"]):
             try:
-                name = (proc.info["name"] or "").lower().replace(".exe", "").replace("_", "").replace(" ", "")
+                name = (
+                    (proc.info["name"] or "")
+                    .lower()
+                    .replace(".exe", "")
+                    .replace("_", "")
+                    .replace(" ", "")
+                )
                 for sim_name in _SIM_PROCESS_NAMES:
                     if sim_name.replace(" ", "") in name:
                         _last_sim_check = now
@@ -358,6 +369,7 @@ def get_routing_adjustment(domain: str) -> int:
 
     try:
         from persistence import get_routing_stats
+
         stats = get_routing_stats(domain, limit=100)
         if len(stats) < 10:
             _routing_adjustment_cache[domain] = (0, now)
@@ -492,7 +504,12 @@ def classify_telemetry_category(message: str) -> str | None:
     """
     text = message.lower().strip()
     # Check in priority order: more specific categories first
-    for category in ("telemetry_debrief", "telemetry_strategy", "telemetry_coaching", "telemetry_lookup"):
+    for category in (
+        "telemetry_debrief",
+        "telemetry_strategy",
+        "telemetry_coaching",
+        "telemetry_lookup",
+    ):
         patterns = TELEMETRY_PATTERNS.get(category, [])
         for pattern in patterns:
             if re.search(pattern, text, re.IGNORECASE):
@@ -558,6 +575,7 @@ ADAPTER_DOMAIN_PATTERNS = {
     # "personality" is always-on (blended into base), not query-triggered
 }
 
+
 def classify_adapter_domain(message: str) -> str | None:
     """
     Classify a query into an adapter domain for augmentation slot routing.
@@ -609,7 +627,8 @@ def resolve_adapter_model(base_model: str, adapter_domain: str | None) -> tuple[
         return base_model, None
 
     try:
-        from training import get_active_adapters, _load_registry
+        from training import _load_registry, get_active_adapters
+
         active = get_active_adapters()
         adapter_name = active.get(adapter_domain)
         if not adapter_name:
@@ -620,7 +639,9 @@ def resolve_adapter_model(base_model: str, adapter_domain: str | None) -> tuple[
         # Check if adapter has an Ollama model registered
         ollama_model = adapter_entry.get("ollama_model")
         if ollama_model:
-            logger.info(f"MoLoRA: routing to domain adapter {adapter_name} ({ollama_model}) for {adapter_domain}")
+            logger.info(
+                f"MoLoRA: routing to domain adapter {adapter_name} ({ollama_model}) for {adapter_domain}"
+            )
             return ollama_model, adapter_name
 
         return base_model, None
@@ -633,6 +654,7 @@ def resolve_adapter_model(base_model: str, adapter_domain: str | None) -> tuple[
 
 _last_connectivity_check = 0
 _last_connectivity_result = False
+
 
 async def is_cloud_available() -> bool:
     """
@@ -653,6 +675,7 @@ async def is_cloud_available() -> bool:
 
     try:
         import httpx
+
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(
                 "https://api.anthropic.com/v1/messages",
@@ -696,6 +719,7 @@ def init_budget_from_db():
     global _daily_cloud_spend, _daily_cloud_reset_date
     try:
         from persistence import load_budget
+
         today = time.strftime("%Y-%m-%d")
         _daily_cloud_spend = load_budget(today)
         _daily_cloud_reset_date = today
@@ -715,6 +739,7 @@ def _check_budget() -> bool:
         # Persist the new day's zero spend
         try:
             from persistence import save_budget
+
             save_budget(today, 0.0)
         except Exception:
             pass
@@ -739,6 +764,7 @@ def record_cloud_usage(input_tokens: int, output_tokens: int, model: str):
     # Persist to SQLite
     try:
         from persistence import save_budget
+
         save_budget(_daily_cloud_reset_date or time.strftime("%Y-%m-%d"), _daily_cloud_spend)
     except Exception as e:
         logger.warning(f"Failed to persist budget: {e}")
@@ -778,9 +804,9 @@ def get_backup_model(primary: str) -> str | None:
     default_model = os.getenv("DELTAI_MODEL", "deltai-qwen3b").strip()
 
     mapping = {
-        strong_model: backup_strong,     # deltai-qwen14b → deltai-nemo
-        default_model: backup_default,   # deltai-qwen3b  → deltai-fallback
-        backup_strong: backup_default,   # deltai-nemo    → deltai-fallback
+        strong_model: backup_strong,  # deltai-qwen14b → deltai-nemo
+        default_model: backup_default,  # deltai-qwen3b  → deltai-fallback
+        backup_strong: backup_default,  # deltai-nemo    → deltai-fallback
     }
     return mapping.get(primary)
 
@@ -792,6 +818,7 @@ async def check_model_health(model: str) -> bool:
     """
     try:
         import httpx
+
         ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
@@ -819,6 +846,7 @@ async def check_model_exists(model: str) -> bool:
     """
     try:
         import httpx
+
         ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(f"{ollama_url}/api/tags")
@@ -833,29 +861,39 @@ async def check_model_exists(model: str) -> bool:
 
 # ── MAIN ROUTER ─────────────────────────────────────────────────────────
 
+
 class RouteDecision:
     """Describes which model to use and why."""
-    def __init__(self, backend: str, model: str, tier: int, reason: str,
-                 split: bool = False, gpu_loaded: bool = False,
-                 sim_running: bool = False, cpu_only: bool = False,
-                 backup_model: str | None = None,
-                 query_category: str = "general",
-                 adapter_domain: str | None = None,
-                 num_gpu: int | None = None,
-                 num_ctx: int | None = None):
-        self.backend = backend      # "ollama" or "anthropic"
-        self.model = model          # model name/id
-        self.tier = tier            # 1, 2, or 3
-        self.reason = reason        # human-readable explanation
-        self.split = split          # whether to use split workload
+
+    def __init__(
+        self,
+        backend: str,
+        model: str,
+        tier: int,
+        reason: str,
+        split: bool = False,
+        gpu_loaded: bool = False,
+        sim_running: bool = False,
+        cpu_only: bool = False,
+        backup_model: str | None = None,
+        query_category: str = "general",
+        adapter_domain: str | None = None,
+        num_gpu: int | None = None,
+        num_ctx: int | None = None,
+    ):
+        self.backend = backend  # "ollama" or "anthropic"
+        self.model = model  # model name/id
+        self.tier = tier  # 1, 2, or 3
+        self.reason = reason  # human-readable explanation
+        self.split = split  # whether to use split workload
         self.gpu_loaded = gpu_loaded
         self.sim_running = sim_running
         self.cpu_only = cpu_only
         self.backup_model = backup_model  # emergency fallback (None = no backup)
         self.query_category = query_category
         self.adapter_domain = adapter_domain  # augmentation slot domain (racing/engineering/etc)
-        self.num_gpu = num_gpu      # number of GPU layers (None = Ollama default / all)
-        self.num_ctx = num_ctx      # context window size (None = model default)
+        self.num_gpu = num_gpu  # number of GPU layers (None = Ollama default / all)
+        self.num_ctx = num_ctx  # context window size (None = model default)
 
     def to_dict(self) -> dict:
         """Serialize for frontend. backup_model excluded — invisible infrastructure."""
@@ -914,7 +952,7 @@ def _calc_num_gpu(model_name: str, vram_free: int) -> int | None:
     if max_layers >= total_layers:
         return None  # full GPU — no need to specify
     if max_layers <= 0:
-        return 0     # full CPU
+        return 0  # full CPU
     return max_layers
 
 
@@ -948,7 +986,7 @@ def _pick_local_model() -> tuple[str, bool, str | None, int | None, int | None]:
     num_ctx: context window size override (None = model default).
     backup_model is the emergency fallback if the primary fails.
     """
-    strong_model = os.getenv("DELTAI_STRONG_MODEL", "deltai-qwen14b")
+    os.getenv("DELTAI_STRONG_MODEL", "deltai-qwen14b")
     default_model = os.getenv("DELTAI_MODEL", "deltai-qwen3b")
     sim_model = os.getenv("DELTAI_SIM_MODEL", default_model)
 
@@ -989,7 +1027,9 @@ def _pick_local_model() -> tuple[str, bool, str | None, int | None, int | None]:
     return default_model, True, get_backup_model(default_model), 0, num_ctx
 
 
-async def route(message: str, force_cloud: bool = False, force_local: bool = False) -> RouteDecision:
+async def route(
+    message: str, force_cloud: bool = False, force_local: bool = False
+) -> RouteDecision:
     """
     Decide which model should handle this message.
 
@@ -1026,8 +1066,7 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
     if active_adapter:
         local_model = resolved_model
 
-    cloud_ready = (cloud_enabled and has_api_key()
-                   and await is_cloud_available() and _check_budget())
+    cloud_ready = cloud_enabled and has_api_key() and await is_cloud_available() and _check_budget()
 
     vram_free = get_vram_free_mb()
 
@@ -1045,99 +1084,172 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
     if force_cloud:
         if cloud_ready:
             model = opus_model if tier == 3 else sonnet_model
-            return RouteDecision("anthropic", model, tier,
-                                 "user requested cloud", split=split,
-                                 sim_running=sim_active, backup_model=backup,
-                                 query_category=query_cat,
-                                 adapter_domain=adapter_domain)
-        return RouteDecision("ollama", local_model, tier,
-                             "cloud requested but unavailable — local fallback",
-                             gpu_loaded=gpu_loaded, sim_running=sim_active,
-                             cpu_only=cpu_only, backup_model=backup,
-                             query_category=query_cat,
-                             adapter_domain=adapter_domain, **_local_kw)
+            return RouteDecision(
+                "anthropic",
+                model,
+                tier,
+                "user requested cloud",
+                split=split,
+                sim_running=sim_active,
+                backup_model=backup,
+                query_category=query_cat,
+                adapter_domain=adapter_domain,
+            )
+        return RouteDecision(
+            "ollama",
+            local_model,
+            tier,
+            "cloud requested but unavailable — local fallback",
+            gpu_loaded=gpu_loaded,
+            sim_running=sim_active,
+            cpu_only=cpu_only,
+            backup_model=backup,
+            query_category=query_cat,
+            adapter_domain=adapter_domain,
+            **_local_kw,
+        )
 
     # ── Force local ──
     if force_local:
-        return RouteDecision("ollama", local_model, tier,
-                             f"user forced local — {local_model}{_offload_note}"
-                             f"{' (focus workload active)' if sim_active else ''}",
-                             gpu_loaded=gpu_loaded, sim_running=sim_active,
-                             cpu_only=cpu_only, backup_model=backup,
-                             query_category=query_cat,
-                             adapter_domain=adapter_domain, **_local_kw)
+        return RouteDecision(
+            "ollama",
+            local_model,
+            tier,
+            f"user forced local — {local_model}{_offload_note}"
+            f"{' (focus workload active)' if sim_active else ''}",
+            gpu_loaded=gpu_loaded,
+            sim_running=sim_active,
+            cpu_only=cpu_only,
+            backup_model=backup,
+            query_category=query_cat,
+            adapter_domain=adapter_domain,
+            **_local_kw,
+        )
 
     # ── Focus workload — VRAM is precious ──
     if sim_active:
         if tier >= 2 and cloud_ready:
             model = opus_model if tier == 3 else sonnet_model
-            return RouteDecision("anthropic", model, tier,
-                                 f"GPU focus workload, VRAM {vram_free}MB free — "
-                                 f"complex task routed to cloud",
-                                 split=split, sim_running=True,
-                                 gpu_loaded=gpu_loaded, backup_model=backup,
-                                 query_category=query_cat,
-                                 adapter_domain=adapter_domain)
-        return RouteDecision("ollama", local_model, tier,
-                             f"GPU focus workload, VRAM {vram_free}MB free — "
-                             f"{local_model}{_offload_note}",
-                             sim_running=True, gpu_loaded=gpu_loaded,
-                             cpu_only=cpu_only, backup_model=backup,
-                             query_category=query_cat,
-                             adapter_domain=adapter_domain, **_local_kw)
+            return RouteDecision(
+                "anthropic",
+                model,
+                tier,
+                f"GPU focus workload, VRAM {vram_free}MB free — complex task routed to cloud",
+                split=split,
+                sim_running=True,
+                gpu_loaded=gpu_loaded,
+                backup_model=backup,
+                query_category=query_cat,
+                adapter_domain=adapter_domain,
+            )
+        return RouteDecision(
+            "ollama",
+            local_model,
+            tier,
+            f"GPU focus workload, VRAM {vram_free}MB free — {local_model}{_offload_note}",
+            sim_running=True,
+            gpu_loaded=gpu_loaded,
+            cpu_only=cpu_only,
+            backup_model=backup,
+            query_category=query_cat,
+            adapter_domain=adapter_domain,
+            **_local_kw,
+        )
 
     # ── GPU loaded (no focus workload flag, but something else using GPU) ──
     if gpu_loaded:
         if cloud_ready:
             model = opus_model if tier == 3 else sonnet_model
-            return RouteDecision("anthropic", model, tier,
-                                 f"GPU loaded ({get_gpu_utilization()}%) — routing to cloud",
-                                 split=split, gpu_loaded=True, backup_model=backup,
-                                 query_category=query_cat,
-                                 adapter_domain=adapter_domain)
-        return RouteDecision("ollama", local_model, tier,
-                             f"GPU loaded ({get_gpu_utilization()}%) — "
-                             f"using {local_model}{_offload_note}",
-                             gpu_loaded=True, cpu_only=cpu_only, backup_model=backup,
-                             query_category=query_cat,
-                             adapter_domain=adapter_domain, **_local_kw)
+            return RouteDecision(
+                "anthropic",
+                model,
+                tier,
+                f"GPU loaded ({get_gpu_utilization()}%) — routing to cloud",
+                split=split,
+                gpu_loaded=True,
+                backup_model=backup,
+                query_category=query_cat,
+                adapter_domain=adapter_domain,
+            )
+        return RouteDecision(
+            "ollama",
+            local_model,
+            tier,
+            f"GPU loaded ({get_gpu_utilization()}%) — using {local_model}{_offload_note}",
+            gpu_loaded=True,
+            cpu_only=cpu_only,
+            backup_model=backup,
+            query_category=query_cat,
+            adapter_domain=adapter_domain,
+            **_local_kw,
+        )
 
     # ── Normal routing by tier ──
     if tier == 1:
-        return RouteDecision("ollama", local_model, 1,
-                             f"simple task — {local_model}{_offload_note}",
-                             backup_model=backup,
-                             query_category=query_cat,
-                             adapter_domain=adapter_domain, **_local_kw)
+        return RouteDecision(
+            "ollama",
+            local_model,
+            1,
+            f"simple task — {local_model}{_offload_note}",
+            backup_model=backup,
+            query_category=query_cat,
+            adapter_domain=adapter_domain,
+            **_local_kw,
+        )
 
     if tier == 2:
         if cloud_ready:
-            return RouteDecision("anthropic", sonnet_model, 2,
-                                 "moderate complexity — Sonnet",
-                                 split=split, backup_model=backup,
-                                 query_category=query_cat,
-                                 adapter_domain=adapter_domain)
-        return RouteDecision("ollama", local_model, 2,
-                             f"moderate complexity — no cloud, using {local_model}{_offload_note}",
-                             backup_model=backup,
-                             query_category=query_cat,
-                             adapter_domain=adapter_domain, **_local_kw)
+            return RouteDecision(
+                "anthropic",
+                sonnet_model,
+                2,
+                "moderate complexity — Sonnet",
+                split=split,
+                backup_model=backup,
+                query_category=query_cat,
+                adapter_domain=adapter_domain,
+            )
+        return RouteDecision(
+            "ollama",
+            local_model,
+            2,
+            f"moderate complexity — no cloud, using {local_model}{_offload_note}",
+            backup_model=backup,
+            query_category=query_cat,
+            adapter_domain=adapter_domain,
+            **_local_kw,
+        )
 
     if tier == 3:
         if cloud_ready:
-            return RouteDecision("anthropic", opus_model, 3,
-                                 "heavy reasoning — Opus",
-                                 split=split, backup_model=backup,
-                                 query_category=query_cat,
-                                 adapter_domain=adapter_domain)
-        return RouteDecision("ollama", local_model, 3,
-                             f"heavy reasoning — no cloud, using {local_model}{_offload_note} (best effort)",
-                             backup_model=backup,
-                             query_category=query_cat,
-                             adapter_domain=adapter_domain, **_local_kw)
+            return RouteDecision(
+                "anthropic",
+                opus_model,
+                3,
+                "heavy reasoning — Opus",
+                split=split,
+                backup_model=backup,
+                query_category=query_cat,
+                adapter_domain=adapter_domain,
+            )
+        return RouteDecision(
+            "ollama",
+            local_model,
+            3,
+            f"heavy reasoning — no cloud, using {local_model}{_offload_note} (best effort)",
+            backup_model=backup,
+            query_category=query_cat,
+            adapter_domain=adapter_domain,
+            **_local_kw,
+        )
 
-    return RouteDecision("ollama", local_model, 1,
-                         f"default — {local_model}{_offload_note}",
-                         backup_model=backup,
-                         query_category=query_cat,
-                         adapter_domain=adapter_domain, **_local_kw)
+    return RouteDecision(
+        "ollama",
+        local_model,
+        1,
+        f"default — {local_model}{_offload_note}",
+        backup_model=backup,
+        query_category=query_cat,
+        adapter_domain=adapter_domain,
+        **_local_kw,
+    )

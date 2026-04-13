@@ -21,7 +21,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
-
 import safe_errors
 
 from .voice_config import DEFAULT_CONFIG, VoiceConfig
@@ -30,19 +29,22 @@ logger = logging.getLogger("deltai.voice.train")
 
 # ── Training State ─────────────────────────────────────────────────────
 
+
 @dataclass
 class RVCTrainingState:
     """Tracks RVC training progress (accessible via API)."""
-    status: str = "idle"           # idle, preparing, training, exporting, complete, error, aborted
-    progress: float = 0.0          # 0.0 to 1.0
+
+    status: str = "idle"  # idle, preparing, training, exporting, complete, error, aborted
+    progress: float = 0.0  # 0.0 to 1.0
     current_epoch: int = 0
     total_epochs: int = 200
-    loss_g: float = 0.0            # Generator loss
-    loss_d: float = 0.0            # Discriminator loss
+    loss_g: float = 0.0  # Generator loss
+    loss_d: float = 0.0  # Discriminator loss
     error: str | None = None
     started_at: float | None = None
     elapsed_sec: float = 0.0
     dataset_stats: dict = field(default_factory=dict)
+
 
 _training_state = RVCTrainingState()
 _training_thread: threading.Thread | None = None
@@ -72,6 +74,7 @@ def is_training() -> bool:
 
 
 # ── Dataset Preparation ────────────────────────────────────────────────
+
 
 def prepare_dataset(
     audio_dir: str = None,
@@ -114,8 +117,8 @@ def prepare_dataset(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     target_sr = config.rvc.training_sample_rate  # 40000 Hz for RVC v2
-    min_dur = config.rvc.min_segment_duration     # 3 seconds
-    max_dur = config.rvc.max_segment_duration     # 15 seconds
+    min_dur = config.rvc.min_segment_duration  # 3 seconds
+    max_dur = config.rvc.max_segment_duration  # 15 seconds
 
     n_segments = 0
     total_duration = 0.0
@@ -150,6 +153,7 @@ def prepare_dataset(
             # Resample to target SR
             if framerate != target_sr:
                 from scipy.signal import resample
+
                 n_target = int(len(audio) * target_sr / framerate)
                 audio = resample(audio, n_target).astype(np.float32)
 
@@ -165,7 +169,7 @@ def prepare_dataset(
             offset = 0
 
             while offset < len(audio):
-                segment = audio[offset:offset + samples_per_seg]
+                segment = audio[offset : offset + samples_per_seg]
                 if len(segment) < min_samples:
                     break
 
@@ -203,17 +207,21 @@ def prepare_dataset(
 
     logger.info(
         "Dataset prepared: %d files -> %d segments (%.1f min)",
-        processed_files, n_segments, total_duration / 60,
+        processed_files,
+        n_segments,
+        total_duration / 60,
     )
     return stats
 
 
 # ── Training ───────────────────────────────────────────────────────────
 
+
 def _check_sim_running() -> bool:
     """Check if a GPU focus workload is active (blocks training)."""
     try:
         from router import is_sim_running
+
         return is_sim_running()
     except ImportError:
         return False
@@ -223,6 +231,7 @@ def _unload_ollama_models() -> None:
     """Unload all Ollama models from VRAM to free space for training."""
     try:
         import httpx
+
         ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
         r = httpx.get(f"{ollama_url}/api/ps", timeout=10)
         if r.status_code == 200:
@@ -310,7 +319,9 @@ def _do_train(dataset_dir: str, output_name: str, config: VoiceConfig) -> None:
 
     logger.info(
         "RVC training: %d segments, %d epochs, model=%s",
-        len(segments), config.rvc.training_epochs, output_name,
+        len(segments),
+        config.rvc.training_epochs,
+        output_name,
     )
 
     _unload_ollama_models()
@@ -337,6 +348,7 @@ def stop_training() -> None:
 
 # ── Model Export ───────────────────────────────────────────────────────
 
+
 def export_model(
     checkpoint_dir: str = None,
     output_name: str = None,
@@ -360,9 +372,9 @@ def export_model(
     output_dir = Path(config.rvc.model_dir) / output_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    checkpoint_dir = Path(checkpoint_dir or str(
-        Path(config.rvc.training_audio_dir).parent / "training_checkpoints"
-    ))
+    checkpoint_dir = Path(
+        checkpoint_dir or str(Path(config.rvc.training_audio_dir).parent / "training_checkpoints")
+    )
 
     if not checkpoint_dir.exists():
         raise FileNotFoundError(f"Checkpoint directory not found: {checkpoint_dir}")
@@ -411,4 +423,4 @@ def export_model(
         return result
 
     except ImportError:
-        raise RuntimeError("PyTorch required for model export")
+        raise RuntimeError("PyTorch required for model export") from None

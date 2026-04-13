@@ -1,18 +1,20 @@
-import uvicorn
-import threading
-import webbrowser
-import time
-import sys
 import os
+import threading
+import time
+import webbrowser
+
+import uvicorn
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 
 def open_browser():
     time.sleep(1.5)
     webbrowser.open("http://127.0.0.1:8000")
 
+
 if __name__ == "__main__":
-    print("") 
+    print("")
     print("  ███████╗██████╗ ███╗   ██╗")
     print("  ██╔════╝╚════██╗████╗  ██║")
     print("  █████╗   █████╔╝██╔██╗ ██║")

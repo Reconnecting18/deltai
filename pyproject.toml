@@ -51,9 +51,18 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
+# Training / app scripts under project/ predate strict 100-col wrapping; lint everything else.
+[tool.ruff.lint.per-file-ignores]
+"project/**" = ["E501"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "project"]
 markers = [
   "slow: long-running or integration tests (excluded from default CI via -m \"not slow\")",
 ]
+
+# POSIX-only asyncio APIs are omitted from Windows stubs; CI runs on Linux.
+[[tool.mypy.overrides]]
+module = "delta.ipc.unix_socket"
+disable_error_code = ["attr-defined"]

@@ -90,9 +90,7 @@ def fetch_arch_news_rss(timeout: float = 30.0) -> tuple[list[dict[str, str]], st
             desc = (el.findtext("description") or "").strip()
             pub = (el.findtext("pubDate") or "").strip()
             if title:
-                items.append(
-                    {"title": title, "link": link, "description": desc, "pubDate": pub}
-                )
+                items.append({"title": title, "link": link, "description": desc, "pubDate": pub})
         return items, None
 
     return [], "No RSS channel/items found (unexpected feed shape)"
@@ -185,8 +183,7 @@ def refresh_news_digest_to_rag(
         return {
             "status": "skipped",
             "reason": (
-                f"rate_limited (min interval {_MIN_REFRESH_INTERVAL}s; "
-                "use force=true to override)"
+                f"rate_limited (min interval {_MIN_REFRESH_INTERVAL}s; use force=true to override)"
             ),
         }
     _last_refresh_ts = now
@@ -234,8 +231,7 @@ async def refresh_news_digest_to_rag_async(
         return {
             "status": "skipped",
             "reason": (
-                f"rate_limited (min interval {_MIN_REFRESH_INTERVAL}s; "
-                "use force=true to override)"
+                f"rate_limited (min interval {_MIN_REFRESH_INTERVAL}s; use force=true to override)"
             ),
         }
     _last_refresh_ts = now
