@@ -39,3 +39,4 @@ src/delta_assistant.egg-info/dependency_links.txt
 src/delta_assistant.egg-info/entry_points.txt
 src/delta_assistant.egg-info/requires.txt
 src/delta_assistant.egg-info/top_level.txt
+tests/test_training_path_safety.py
