@@ -1,5 +1,5 @@
 [Unit]
-Description=DELTA Local AI Daemon
+Description=deltai local AI daemon
 After=network.target
 
 [Service]

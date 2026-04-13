@@ -688,7 +688,7 @@ def _log_resource_action(action: str):
 def _adjust_process_priority(lower: bool):
     """
     Adjust OS-level process priority for deltai and Ollama.
-    When sim is running or VRAM pressure is high, lower priority so games get CPU/IO first.
+    When a GPU focus workload is active or VRAM pressure is high, lower priority so foreground apps get CPU/IO first.
     """
     if _resource_state["priority_lowered"] == lower:
         return  # already in desired state
@@ -1009,7 +1009,7 @@ RULES:
 - If no issues found, respond with exactly: NO_ACTION
 - If repair needed, respond with exactly: REPAIR:<repair_name>
 - Only suggest ONE repair per cycle (most critical first)
-- Never suggest clear_vram during an active racing session
+- Never suggest clear_vram during an active GPU focus session
 - Never suggest repairs for cosmetic warnings
 
 Examples:
@@ -1213,7 +1213,7 @@ async def _post_startup_cloud_and_models() -> None:
         ]
         backup_models = [
             ("BACKUP", os.getenv("DELTAI_BACKUP_STRONG_MODEL", "deltai-nemo")),
-            ("BACKUP", os.getenv("DELTAI_BACKUP_MODEL", "deltai")),
+            ("BACKUP", os.getenv("DELTAI_BACKUP_MODEL", "deltai-fallback")),
         ]
         for role, model in primary_models + backup_models:
             if not model.strip():
@@ -1309,7 +1309,7 @@ def _sanitize_python_json(text: str) -> str:
     return text
 
 def _fix_windows_paths(text: str) -> str:
-    """Fix invalid JSON escape sequences from Windows paths (e.g., ~/deltai → C:\\\\e3n)."""
+    """Fix invalid JSON escape sequences from Windows paths (e.g., unescaped backslashes in JSON strings)."""
     # Replace single backslashes that aren't already valid JSON escapes
     # Valid JSON escapes: \", \\, \/, \b, \f, \n, \r, \t, \uXXXX
     return re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', text)
@@ -2444,7 +2444,7 @@ async def training_improve(domain: str):
 
 @app.websocket("/ws/alerts")
 async def websocket_alerts(websocket: WebSocket):
-    """WebSocket endpoint for proactive racing alerts."""
+    """WebSocket endpoint for proactive alerts (e.g. tagged ingest notifications)."""
     await websocket.accept()
     _alert_clients.append(websocket)
     try:
@@ -2620,7 +2620,7 @@ def backup_status():
         "enabled": backup_enabled,
         "mapping": {
             strong: os.getenv("DELTAI_BACKUP_STRONG_MODEL", "deltai-nemo"),
-            default: os.getenv("DELTAI_BACKUP_MODEL", "deltai"),
+            default: os.getenv("DELTAI_BACKUP_MODEL", "deltai-fallback"),
         },
         "models": _backup_health_status,
         "last_activated": _backup_last_activated if _backup_last_activated > 0 else None,
@@ -3330,7 +3330,7 @@ def stats():
     try:
         resp = httpx.get(f"{OLLAMA_URL}/api/tags", timeout=2)
         tags = resp.json()
-        DELTAI_MODELS = {"deltai-qwen14b", "deltai-qwen3b", "deltai-nemo", "deltai"}
+        DELTAI_MODELS = {"deltai-qwen14b", "deltai-qwen3b", "deltai-nemo", "deltai-fallback", "deltai"}
         result["models"] = [m["name"] for m in tags.get("models", []) if m["name"].split(":")[0] in DELTAI_MODELS]
     except Exception:
         result["models"] = []

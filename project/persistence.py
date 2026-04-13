@@ -5,7 +5,8 @@ Provides durable storage so state survives server restarts.
 In-memory data remains the primary source; SQLite is the backing store.
 Reads happen once at startup, writes happen alongside in-memory updates.
 
-DB location: configured via SQLITE_PATH in .env (default: ~/.local/share/deltai/sqlite/e3n.db)
+DB location: `DELTA_SQLITE_PATH` (canonical, matches systemd) or legacy `SQLITE_PATH`.
+Default: ~/.local/share/deltai/delta.db (same as systemd/user/delta-daemon.service).
 """
 
 import json
@@ -19,7 +20,16 @@ import safe_errors
 
 logger = logging.getLogger("deltai.persistence")
 
-_db_path = os.path.expanduser(os.getenv("SQLITE_PATH", "~/.local/share/deltai/sqlite/e3n.db"))
+
+def _resolve_sqlite_path() -> str:
+    for key in ("DELTA_SQLITE_PATH", "SQLITE_PATH"):
+        raw = os.getenv(key)
+        if raw:
+            return os.path.expanduser(raw)
+    return os.path.expanduser("~/.local/share/deltai/delta.db")
+
+
+_db_path = _resolve_sqlite_path()
 
 
 def _connect() -> sqlite3.Connection:

@@ -3,8 +3,8 @@ deltai Smart Router — decides which model handles each message.
 
 Architecture:
   LOCAL TIER (VRAM-aware):
-    - Tier A: deltai-qwen14b (Qwen2.5-14B Q4, ~8.5GB) → GPU free, no sim running
-    - Tier B: deltai-qwen3b (Qwen2.5-3B Q4, ~2.5GB)   → sim running, GPU contested
+    - Tier A: deltai-qwen14b (Qwen2.5-14B Q4, ~8.5GB) → GPU free, no focus workload
+    - Tier B: deltai-qwen3b (Qwen2.5-3B Q4, ~2.5GB)   → focus workload, GPU contested
     - Tier C: deltai-qwen3b on CPU (0 VRAM)             → GPU maxed, emergency fallback
   CLOUD TIER (dormant until API key is set):
     - Sonnet             → moderate complexity
@@ -12,7 +12,7 @@ Architecture:
 
 Routing signals:
   1. VRAM free   — determines which local model fits
-  2. Sim running — auto-detect Le Mans Ultimate process
+  2. Focus workload — auto-detect configured foreground processes (e.g. sims)
   3. Complexity  — classify Tier 1/2/3
   4. Connectivity — is Anthropic API reachable?
   5. User override — force local, force cloud, or auto
@@ -28,8 +28,8 @@ Model cascade:
 Emergency backup (last resort only):
   If primary model fails after BACKUP_MAX_RETRIES attempts,
   the system engages a backup model as a lifeline.
-  deltai-qwen14b → deltai-nemo → e3n → system down
-  deltai-qwen3b  → e3n      → system down
+  deltai-qwen14b → deltai-nemo → deltai-fallback → system down
+  deltai-qwen3b  → deltai-fallback → system down
 """
 
 import os
@@ -188,8 +188,8 @@ _SIM_CHECK_INTERVAL = 10  # seconds
 
 def is_sim_running() -> bool:
     """
-    Check if Le Mans Ultimate (or compatible sim) is running.
-    Cached for 10 seconds to avoid hammering psutil.
+    True when a configured foreground workload is using the GPU (default: sim process list).
+    Cached for 10 seconds to avoid hammering psutil. Extend SIM_PROCESS_NAMES / detection here.
     """
     global _last_sim_check, _last_sim_result
 
@@ -218,7 +218,7 @@ def is_sim_running() -> bool:
     return False
 
 
-# ── SESSION MODE (GPU protection for active racing) ────────────────────
+# ── SESSION MODE (GPU protection during ingest-marked focus sessions) ─────
 _session_active = False
 _session_started_at = 0.0
 _session_last_ingest = 0.0
@@ -229,7 +229,7 @@ _SESSION_FORCE_CLOUD = _env_bool("SESSION_FORCE_CLOUD", True)
 
 
 def is_session_active() -> bool:
-    """Check if a racing session is active (manual or auto-detected via ingest)."""
+    """True when a GPU focus session is active (manual or auto-detected via ingest)."""
     global _session_active
     if not _session_active:
         return False
@@ -765,22 +765,22 @@ def get_backup_model(primary: str) -> str | None:
     Returns None if backups are disabled or no backup exists.
 
     Chain:
-      deltai-qwen14b → deltai-nemo → e3n → None
-      deltai-qwen3b  → e3n      → None
+      deltai-qwen14b → deltai-nemo → deltai-fallback → None
+      deltai-qwen3b  → deltai-fallback → None
     """
     if not _env_bool("BACKUP_ENABLED", True):
         return None
 
     backup_strong = os.getenv("DELTAI_BACKUP_STRONG_MODEL", "deltai-nemo").strip()
-    backup_default = os.getenv("DELTAI_BACKUP_MODEL", "deltai").strip()
+    backup_default = os.getenv("DELTAI_BACKUP_MODEL", "deltai-fallback").strip()
 
     strong_model = os.getenv("DELTAI_STRONG_MODEL", "deltai-qwen14b").strip()
     default_model = os.getenv("DELTAI_MODEL", "deltai-qwen3b").strip()
 
     mapping = {
         strong_model: backup_strong,     # deltai-qwen14b → deltai-nemo
-        default_model: backup_default,   # deltai-qwen3b  → e3n
-        backup_strong: backup_default,   # deltai-nemo    → e3n (second fallback)
+        default_model: backup_default,   # deltai-qwen3b  → deltai-fallback
+        backup_strong: backup_default,   # deltai-nemo    → deltai-fallback
     }
     return mapping.get(primary)
 
@@ -960,7 +960,7 @@ def _pick_local_model() -> tuple[str, bool, str | None, int | None, int | None]:
     sim_active = is_sim_running()
     num_ctx = _calc_num_ctx(vram_free, sim_active)
 
-    # If sim is running, always prefer the small model to save VRAM
+    # If a focus workload is active, always prefer the small model to save VRAM
     if sim_active:
         if vram_free >= tier_b_min:
             return sim_model, False, get_backup_model(sim_model), None, num_ctx
@@ -1015,7 +1015,7 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
     split = is_split_workload(message)
 
     query_cat = "general"
-    # Classify telemetry queries when session is active or sim is running
+    # Classify telemetry queries when session is active or focus workload is detected
     if is_session_active() or is_sim_running():
         tel_cat = classify_telemetry_category(message)
         if tel_cat:
@@ -1061,32 +1061,32 @@ async def route(message: str, force_cloud: bool = False, force_local: bool = Fal
     if force_local:
         return RouteDecision("ollama", local_model, tier,
                              f"user forced local — {local_model}{_offload_note}"
-                             f"{' (sim active)' if sim_active else ''}",
+                             f"{' (focus workload active)' if sim_active else ''}",
                              gpu_loaded=gpu_loaded, sim_running=sim_active,
                              cpu_only=cpu_only, backup_model=backup,
                              query_category=query_cat,
                              adapter_domain=adapter_domain, **_local_kw)
 
-    # ── Sim running — VRAM is precious ──
+    # ── Focus workload — VRAM is precious ──
     if sim_active:
         if tier >= 2 and cloud_ready:
             model = opus_model if tier == 3 else sonnet_model
             return RouteDecision("anthropic", model, tier,
-                                 f"sim running, VRAM {vram_free}MB free — "
+                                 f"GPU focus workload, VRAM {vram_free}MB free — "
                                  f"complex task routed to cloud",
                                  split=split, sim_running=True,
                                  gpu_loaded=gpu_loaded, backup_model=backup,
                                  query_category=query_cat,
                                  adapter_domain=adapter_domain)
         return RouteDecision("ollama", local_model, tier,
-                             f"sim running, VRAM {vram_free}MB free — "
+                             f"GPU focus workload, VRAM {vram_free}MB free — "
                              f"{local_model}{_offload_note}",
                              sim_running=True, gpu_loaded=gpu_loaded,
                              cpu_only=cpu_only, backup_model=backup,
                              query_category=query_cat,
                              adapter_domain=adapter_domain, **_local_kw)
 
-    # ── GPU loaded (no sim, but something else using GPU) ──
+    # ── GPU loaded (no focus workload flag, but something else using GPU) ──
     if gpu_loaded:
         if cloud_ready:
             model = opus_model if tier == 3 else sonnet_model

@@ -88,8 +88,8 @@ def run():
     orig_func = router.is_sim_running
     router.is_sim_running = lambda: True
     r = training.start_training(test_ds2, mode='lora')
-    check('LoRA blocked when sim running',
-          r['status'] == 'error' and 'sim' in r['reason'].lower(), r.get('reason', ''))
+    check('LoRA blocked when focus workload active',
+          r['status'] == 'error' and 'focus' in r['reason'].lower(), r.get('reason', ''))
     router.is_sim_running = orig_func
 
     # Concurrency guard

@@ -35,7 +35,7 @@ TTS_RATE = os.getenv("TTS_RATE", "+2%")  # Slightly faster — confident, not ru
 TTS_PITCH = os.getenv("TTS_PITCH", "-3Hz")  # Slightly deeper than default — calm, not booming
 VOICE_ENABLED = os.getenv("VOICE_ENABLED", "true").lower() in ("true", "1", "yes")
 
-# Vocabulary hint for Whisper — biases transcription toward expected racing/engineering terms
+# Vocabulary hint for Whisper — biases transcription toward expected domain terms
 # This dramatically reduces misinterpretation of technical jargon
 WHISPER_VOCAB_PROMPT = (
     "deltai, Ethan, thermodynamics, aerodynamics, understeer, oversteer, downforce, drag, "
@@ -132,7 +132,7 @@ def transcribe_audio(audio_bytes: bytes, language: str = "en") -> dict:
             tmp_path,
             language=language,
             beam_size=5,
-            initial_prompt=WHISPER_VOCAB_PROMPT,  # Bias toward racing/engineering vocabulary
+            initial_prompt=WHISPER_VOCAB_PROMPT,  # Domain vocabulary bias for the operator profile
             vad_filter=True,  # Voice activity detection — skip silence
             vad_parameters=dict(
                 min_silence_duration_ms=500,

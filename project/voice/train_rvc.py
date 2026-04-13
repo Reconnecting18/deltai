@@ -211,7 +211,7 @@ def prepare_dataset(
 # ── Training ───────────────────────────────────────────────────────────
 
 def _check_sim_running() -> bool:
-    """Check if a racing sim is running (blocks training)."""
+    """Check if a GPU focus workload is active (blocks training)."""
     try:
         from router import is_sim_running
         return is_sim_running()
@@ -250,7 +250,7 @@ def train(
     """Start RVC training in a background thread.
 
     Training requires the full GPU -- Ollama models are unloaded first.
-    Blocks if sim is running.
+    Blocks if a GPU focus workload is active.
 
     Args:
         dataset_dir: Directory with prepared training segments.
@@ -263,7 +263,7 @@ def train(
         raise RuntimeError("Training already in progress")
 
     if _check_sim_running():
-        raise RuntimeError("Cannot train while racing sim is running")
+        raise RuntimeError("Cannot train while a GPU focus workload is active")
 
     config = config or DEFAULT_CONFIG
     dataset_dir = dataset_dir or str(

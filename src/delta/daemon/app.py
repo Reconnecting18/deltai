@@ -58,7 +58,7 @@ async def lifespan(app: FastAPI):
         await ipc_server.stop()
 
 
-app = FastAPI(title="DELTA Daemon", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="deltai daemon", version="0.1.0", lifespan=lifespan)
 
 
 @app.get("/health")

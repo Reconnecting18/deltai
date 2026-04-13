@@ -30,10 +30,11 @@ It is the open, user-controlled Linux answer to Copilot+Windows — built around
 ## How to run (development)
 
 ```bash
-# Backend
+# Backend (run from project/ — main.py lives here)
 cd deltai
 python -m venv venv && source venv/bin/activate
 pip install -e .[dev]
+cd project
 uvicorn main:app --reload --host 127.0.0.1 --port 8000
 
 # Desktop shell (optional)
@@ -43,11 +44,12 @@ cd app && npm install && npm start
 The main package metadata now includes ChromaDB, so `pip install .` covers
 runtime installs and `pip install -e .[dev]` covers local development.
 
-Or as a systemd user service:
+Or as a systemd user service (unit file in-repo: `systemd/user/delta-daemon.service`):
 ```bash
-cp systemd/user/deltai.service ~/.config/systemd/user/
-systemctl --user daemon-reload && systemctl --user start deltai
-journalctl --user -u deltai -f
+cp systemd/user/delta-daemon.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now delta-daemon
+journalctl --user -u delta-daemon -f
 ```
 
 ## Verify after substantive backend changes

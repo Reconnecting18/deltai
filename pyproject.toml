@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "delta-assistant"
 version = "0.1.0"
-description = "DELTA: Dynamic Execution and Learning Task Assistant"
+description = "deltai — modular Linux-first AI extension layer (local daemon, RAG, tools, optional training)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

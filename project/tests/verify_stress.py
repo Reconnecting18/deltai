@@ -199,7 +199,7 @@ def stress_low_vram():
     with patch.object(router, 'get_vram_free_mb', return_value=1500), \
          patch.object(router, 'is_sim_running', return_value=False), \
          patch.object(router, 'is_gpu_loaded', return_value=False):
-        model, cpu_only, backup = router._pick_local_model()
+        model, cpu_only, backup, _, _ = router._pick_local_model()
         assert cpu_only is True, \
             f"Should be CPU-only with 1500MB free VRAM, got cpu_only={cpu_only}"
         assert model == os.getenv("DELTAI_MODEL", "deltai-qwen3b"), \
@@ -213,7 +213,7 @@ def stress_zero_vram():
     with patch.object(router, 'get_vram_free_mb', return_value=0), \
          patch.object(router, 'is_sim_running', return_value=True), \
          patch.object(router, 'is_gpu_loaded', return_value=True):
-        model, cpu_only, backup = router._pick_local_model()
+        model, cpu_only, backup, _, _ = router._pick_local_model()
         assert cpu_only is True, "Must be CPU-only with 0 VRAM"
         assert backup is not None, "Should have a backup model even at 0 VRAM"
 stress_zero_vram()
@@ -224,14 +224,14 @@ def stress_sim_low_vram():
     import router
     with patch.object(router, 'get_vram_free_mb', return_value=4000), \
          patch.object(router, 'is_sim_running', return_value=True):
-        model, cpu_only, backup = router._pick_local_model()
+        model, cpu_only, backup, _, _ = router._pick_local_model()
         assert cpu_only is False, "4GB VRAM should allow GPU mode for 3B"
         assert "3b" in model.lower() or model == os.getenv("DELTAI_SIM_MODEL", os.getenv("DELTAI_MODEL", "deltai-qwen3b")), \
             f"Should pick sim/small model, got {model}"
 stress_sim_low_vram()
 
 # Stress 4: Emergency backup cascade
-@test("Stress 4: Backup model chain deltai-qwen14b -> deltai-nemo -> e3n")
+@test("Stress 4: Backup model chain deltai-qwen14b -> deltai-nemo -> deltai-fallback")
 def stress_backup_chain():
     import router
     backup1 = router.get_backup_model("deltai-qwen14b")
@@ -306,13 +306,13 @@ stress_greetings()
 def stress_tool_parser():
     import main
     # Standard format
-    r = main.try_parse_text_tool_call('{"name":"read_file","parameters":{"path":"C:\\\\e3n\\\\test.py"}}')
+    r = main.try_parse_text_tool_call('{"name":"read_file","parameters":{"path":"C:\\\\deltai\\\\test.py"}}')
     assert r is not None and r[0] == "read_file"
     # Markdown code block
     r = main.try_parse_text_tool_call('Let me read that:\n```json\n{"name":"read_file","arguments":{"path":"test.py"}}\n```')
     assert r is not None and r[0] == "read_file"
     # Python-style booleans
-    r = main.try_parse_text_tool_call('{"name":"list_directory","parameters":{"path":"C:\\\\e3n","recursive":True}}')
+    r = main.try_parse_text_tool_call('{"name":"list_directory","parameters":{"path":"C:\\\\deltai","recursive":True}}')
     assert r is not None and r[0] == "list_directory"
     # Ollama-style array
     r = main.try_parse_text_tool_call('[{"function":{"name":"get_system_info","arguments":{}}}]')
@@ -380,16 +380,16 @@ stress_history()
 @test("Stress 12: Sim running picks smaller model to save VRAM")
 def stress_sim_model_selection():
     import router
-    # When sim is running, router should prefer smaller model
+    # When focus workload is active, router should prefer smaller model
     with patch.object(router, 'is_sim_running', return_value=True), \
          patch.object(router, 'get_vram_free_mb', return_value=5000):
-        model, cpu_only, backup = router._pick_local_model()
+        model, cpu_only, backup, _, _ = router._pick_local_model()
         assert '3b' in model.lower() or model == os.getenv('DELTAI_SIM_MODEL', os.getenv('DELTAI_MODEL', 'deltai-qwen3b')), \
             f"Sim running should pick small model, got {model}"
     # When sim is NOT running and plenty of VRAM, pick strong model
     with patch.object(router, 'is_sim_running', return_value=False), \
          patch.object(router, 'get_vram_free_mb', return_value=10000):
-        model, cpu_only, backup = router._pick_local_model()
+        model, cpu_only, backup, _, _ = router._pick_local_model()
         assert '14b' in model.lower() or model == os.getenv('DELTAI_STRONG_MODEL', 'deltai-qwen14b'), \
             f"No sim + plenty VRAM should pick strong model, got {model}"
 stress_sim_model_selection()
@@ -414,7 +414,7 @@ def stress_tool_safety():
 stress_tool_safety()
 
 # Stress 14: Training safety — blocks during sim
-@test("Stress 14: Training blocks when sim is running")
+@test("Stress 14: Training blocks when focus workload is active")
 def stress_training_safety():
     import training
     import router
@@ -425,8 +425,10 @@ def stress_training_safety():
     try:
         with patch.object(router, 'is_sim_running', return_value=True):
             result = training.start_training("stress-sim-test", mode="lora")
-            assert result["status"] == "error", "Training should be blocked while sim runs"
-            assert "sim" in result["reason"].lower(), f"Error should mention sim: {result['reason']}"
+            assert result["status"] == "error", "Training should be blocked while focus workload is active"
+            assert "focus" in result["reason"].lower() or "workload" in result["reason"].lower(), (
+                f"Error should mention focus/workload: {result['reason']}"
+            )
     finally:
         training.delete_dataset("stress-sim-test")
 stress_training_safety()
@@ -469,18 +471,18 @@ def stress_vram_tiers():
     with patch.object(router, 'is_sim_running', return_value=False):
         # Tier A: > 9GB
         with patch.object(router, 'get_vram_free_mb', return_value=10000):
-            model_a, cpu_a, _ = router._pick_local_model()
+            model_a, cpu_a, _, _, _ = router._pick_local_model()
             assert not cpu_a, "Tier A should use GPU"
             assert "14b" in model_a.lower() or model_a == os.getenv("DELTAI_STRONG_MODEL", "deltai-qwen14b")
 
         # Tier B: 3-9GB
         with patch.object(router, 'get_vram_free_mb', return_value=5000):
-            model_b, cpu_b, _ = router._pick_local_model()
+            model_b, cpu_b, _, _, _ = router._pick_local_model()
             assert not cpu_b, "Tier B should use GPU"
 
         # Tier C: < 3GB
         with patch.object(router, 'get_vram_free_mb', return_value=1000):
-            model_c, cpu_c, _ = router._pick_local_model()
+            model_c, cpu_c, _, _, _ = router._pick_local_model()
             assert cpu_c, "Tier C should force CPU"
 stress_vram_tiers()
 

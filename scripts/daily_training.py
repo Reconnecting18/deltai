@@ -111,7 +111,7 @@ def _get_vram_free_mb() -> int:
 
 
 def _is_sim_running() -> bool:
-    """Check if LMU (Le Mans Ultimate) is running."""
+    """True if a configured foreground sim / heavy app process is running (VRAM guard)."""
     try:
         import psutil
         SIM_PROCESSES = os.getenv("SIM_PROCESS_NAMES",
@@ -126,7 +126,7 @@ def _is_sim_running() -> bool:
 
 
 def _check_session_active() -> bool:
-    """Check if a racing session is active via deltai API."""
+    """Check if a GPU focus session is active via deltai /session/status API."""
     try:
         import httpx
         base_url = os.getenv("DELTAI_API_URL", "http://localhost:8000")
@@ -159,7 +159,7 @@ def _print_report(report_path: str):
     guards = phases.get("guards", {})
     print(f"\n[Guards]")
     print(f"  VRAM free: {guards.get('vram_free_mb', '?')} MB")
-    print(f"  Sim running: {guards.get('sim_running', '?')}")
+    print(f"  Focus workload: {guards.get('focus_workload_active', guards.get('sim_running', '?'))}")
     print(f"  VRAM OK: {guards.get('vram_ok', '?')}")
 
     web = phases.get("web_collection", {})
@@ -274,7 +274,7 @@ Examples:
     if collect_only:
         logger.info("--collect-only: running web data collection, skipping training")
         if _is_sim_running():
-            logger.warning("Sim is running — collection deferred.")
+            logger.warning("GPU focus workload detected — collection deferred.")
             return 0
         try:
             from collector import run_collection_cycle  # noqa: PLC0415
@@ -305,11 +305,11 @@ Examples:
     min_vram = int(os.getenv("DAILY_TRAIN_MIN_VRAM_MB", "7000"))
 
     if _is_sim_running():
-        logger.warning("Sim is running — daily training deferred. Will retry tomorrow.")
+        logger.warning("GPU focus workload detected — daily training deferred. Will retry tomorrow.")
         return 0
 
     if _check_session_active():
-        logger.warning("Active racing session detected — daily training deferred.")
+        logger.warning("Active GPU focus session detected — daily training deferred.")
         return 0
 
     vram_free = _get_vram_free_mb()

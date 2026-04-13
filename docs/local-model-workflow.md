@@ -30,7 +30,7 @@ Low-quality turns feed **knowledge gaps** and **negative capture**; fixing knowl
 
 ### A.2 Live context (`POST /ingest`, `POST /ingest/batch`)
 
-External services (or scripts) push **short, human-readable** summaries — not raw telemetry dumps.
+External services (or scripts) push **short, human-readable** summaries — not opaque binary dumps. (Below is a stylized example; pick `source` / `tags` that match *your* integrations.)
 
 | Field | Role |
 |--------|------|
@@ -46,10 +46,10 @@ POST http://127.0.0.1:8000/ingest
 Content-Type: application/json
 
 {
-  "source": "lmu-session",
-  "context": "Stint 3: FL/FR mediums, 12 laps, fuel +8s margin. Track temp dropping — watch rear grip T14.",
+  "source": "session-notes",
+  "context": "Sprint 3: medium-term goals met; next block needs dependency audit on pkg X.",
   "ttl": 600,
-  "tags": ["race", "strategy", "stint"]
+  "tags": ["work", "planning", "follow-up"]
 }
 ```
 
@@ -81,16 +81,16 @@ Gaps are logged from low quality scores and related signals (see [project/main.p
 
 ### B.1 Modelfiles and Ollama rebuild
 
-- **Files:** [modelfiles/deltai-qwen14b.modelfile](../modelfiles/deltai-qwen14b.modelfile), [modelfiles/deltai-qwen3b.modelfile](../modelfiles/deltai-qwen3b.modelfile) (and backups: nemo / legacy as applicable).
+- **Files:** [modelfiles/deltai-qwen14b.modelfile](../modelfiles/deltai-qwen14b.modelfile), [modelfiles/deltai-qwen3b.modelfile](../modelfiles/deltai-qwen3b.modelfile), [modelfiles/deltai-nemo.modelfile](../modelfiles/deltai-nemo.modelfile), [modelfiles/deltai-fallback.modelfile](../modelfiles/deltai-fallback.modelfile) (emergency chain tail; optional legacy [deltai.modelfile](../modelfiles/deltai.modelfile)).
 - **Rule:** Keep system prompts aligned across modelfiles; only `FROM` / parameters differ (3B may use a condensed system prompt).
 - **Rebuild after edits:**
 
-```powershell
-ollama create deltai-qwen14b -f modelfiles\deltai-qwen14b.modelfile
-ollama create deltai-qwen3b -f modelfiles\deltai-qwen3b.modelfile
+```bash
+ollama create deltai-qwen14b -f modelfiles/deltai-qwen14b.modelfile
+ollama create deltai-qwen3b -f modelfiles/deltai-qwen3b.modelfile
 ```
 
-Use repo-relative paths on clones: `ollama create deltai-qwen14b -f .\modelfiles\deltai-qwen14b.modelfile`.
+On Windows PowerShell, use backslashes if you prefer: `modelfiles\deltai-qwen14b.modelfile`.
 
 ### B.2 `.env` toggles (project/.env)
 
@@ -105,9 +105,9 @@ Use repo-relative paths on clones: `ollama create deltai-qwen14b -f .\modelfiles
 
 Restart uvicorn after `.env` changes.
 
-### B.3 Session and telemetry behavior
+### B.3 Session and telemetry-style behavior
 
-When a session is active or the sim is detected, the router applies **telemetry query categories** and injects racing/coach templates. No code change needed — ensure **ingest** keeps session context fresh so RAG + templates agree.
+When a **GPU focus session** is active (heavy foreground workload detected or marked via session flags), the router may apply **telemetry-style query categories** and domain templates so RAG + routing stay aligned with live context. Ensure **ingest** stays fresh for whatever session semantics you use; optional adapter domains like `racing` or `telemetry` are **examples** — see `ADAPTER_DOMAINS` in training code for the full list you have enabled.
 
 ---
 
@@ -138,7 +138,7 @@ After each turn, [project/main.py](../project/main.py) calls `smart_auto_capture
 | Promote | `POST /adapters/promote/{name}` |
 | Rollback | `POST /adapters/rollback` |
 
-Domains include `racing`, `engineering`, `personality`, `reasoning`, `telemetry`, `audio` (see `ADAPTER_DOMAINS` in training).
+Example adapter domains include `racing`, `engineering`, `personality`, `reasoning`, `telemetry`, and `audio` — treat niche domains as optional slots; see `ADAPTER_DOMAINS` in [project/training.py](../project/training.py).
 
 ### C.5 DPO (when negatives exist)
 

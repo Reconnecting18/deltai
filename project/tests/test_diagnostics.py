@@ -190,7 +190,7 @@ test_models_allowlist()
 def test_models_deltai_accepted():
     from tools.executor import manage_ollama_models
     # Unload should not fail with allowlist error for deltai models
-    for model in ["deltai-qwen14b", "deltai-qwen3b", "deltai-nemo", "deltai"]:
+    for model in ["deltai-qwen14b", "deltai-qwen3b", "deltai-nemo", "deltai-fallback", "deltai"]:
         result = manage_ollama_models(action="unload", model=model)
         assert "allowlist" not in result.lower(), \
             f"deltai model {model} should be accepted: {result}"

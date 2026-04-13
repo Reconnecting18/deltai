@@ -146,7 +146,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "web_search",
-            "description": "Search the web using DuckDuckGo. Use when the operator asks about current events, recent information, specifications, or topics not in the knowledge base. Returns titles, URLs, and snippets. NOT available during active racing sessions.",
+            "description": "Search the web using DuckDuckGo. Use when the operator asks about current events, recent information, specifications, or topics not in the knowledge base. Returns titles, URLs, and snippets. NOT available during active GPU focus sessions.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -167,7 +167,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "fetch_url",
-            "description": "Fetch a URL and return the clean article text. Use after web_search to read the full content of a specific page — specifications, articles, documentation, research papers. Returns extracted readable text, stripping ads and navigation. NOT available during active racing sessions.",
+            "description": "Fetch a URL and return the clean article text. Use after web_search to read the full content of a specific page — specifications, articles, documentation, research papers. Returns extracted readable text, stripping ads and navigation. NOT available during active GPU focus sessions.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -412,7 +412,7 @@ if _TELEMETRY_API_URL:
             "type": "function",
             "function": {
                 "name": "get_session_status",
-                "description": "Get the current racing session status from the telemetry API: session type, elapsed time, flag status, weather, track conditions.",
+                "description": "Get the current session snapshot from the optional telemetry HTTP API (shape depends on your TELEMETRY_API_URL service).",
                 "parameters": {
                     "type": "object",
                     "properties": {},

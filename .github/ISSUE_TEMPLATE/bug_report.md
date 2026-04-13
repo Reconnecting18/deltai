@@ -12,7 +12,7 @@ assignees: []
 
 ## Environment
 
-- OS (e.g. Windows 11):
+- OS (e.g. Fedora 42, Ubuntu 24.04):
 - Python version:
 - Ollama installed and running? (yes / no)
 - Branch or commit:

@@ -12,7 +12,7 @@
 
 deltai is an open, user-controlled AI layer for Linux. Think of it as the answer to Copilot+Windows, but built around Linux philosophies: it runs as a systemd user service, exposes a clean HTTP/WebSocket API, never touches anything you didn't ask it to, and is heavily configurable. Local LLM inference via Ollama, RAG memory, structured reasoning, a plugin/tool system, and a systemd-native service architecture.
 
-> **Status:** Early development. Core architecture is inherited from a prior personal project (E3N). It is being actively rearchitected for Linux, generality, and modularity. Contributions and feedback welcome.
+> **Status:** Early development. The codebase is actively being generalized for Linux-first deployment, modularity, and user choice. Contributions and feedback welcome.
 
 ---
 
@@ -202,6 +202,10 @@ DELTA_DATA_DIR=~/.local/share/deltai
 DELTA_CONFIG_DIR=~/.config/deltai
 DELTA_CACHE_DIR=~/.cache/deltai
 DELTA_SQLITE_PATH=~/.local/share/deltai/delta.db
+
+# If you still have a legacy SQLite file under ~/.local/share/deltai/sqlite/e3n.db,
+# either set DELTA_SQLITE_PATH to that path or: mv .../e3n.db ~/.local/share/deltai/delta.db
+# (Legacy env SQLITE_PATH is still read if DELTA_SQLITE_PATH is unset.)
 
 # ── Training (optional) ──────────────────────────────────────────────────────
 HF_BASE_MODEL=Qwen/Qwen2.5-3B-Instruct

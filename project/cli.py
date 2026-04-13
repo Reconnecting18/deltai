@@ -60,7 +60,7 @@ console = Console(theme=DELTAI_THEME, highlight=False, force_terminal=True)
 
 # ── ASCII BANNER ───────────────────────────────────────────────────────
 
-_TITLE = "PERSONAL INTELLIGENCE SYSTEM"
+_TITLE = "MODULAR AI EXTENSION"
 _SUB = "Local AI System // v{ver}"
 
 _B = "\u2588"   # full block (letter body)
@@ -334,7 +334,7 @@ async def stream_chat(client: httpx.AsyncClient, message: str):
                         if not response_started:
                             # Print deltai prompt prefix before first text
                             console.print()
-                            console.print("  [e3n]deltai>[/] ", end="")
+                            console.print("  [deltai]deltai>[/] ", end="")
                             response_started = True
                         # Print chunk live (raw, no markup interpretation)
                         console.out(chunk, end="", highlight=False)
@@ -622,7 +622,7 @@ async def cmd_history(client, args):
             user_msg = pair.get("user", "")[:60]
             deltai_msg = pair.get("assistant", "")[:60]
             console.print(f"  [dim]>[/]    [text]{user_msg}{'...' if len(pair.get('user', '')) > 60 else ''}[/]")
-            console.print(f"  [e3n]deltai>[/] [text]{deltai_msg}{'...' if len(pair.get('assistant', '')) > 60 else ''}[/]")
+            console.print(f"  [deltai]deltai>[/] [text]{deltai_msg}{'...' if len(pair.get('assistant', '')) > 60 else ''}[/]")
             console.print()
     console.print()
 
@@ -782,7 +782,7 @@ async def repl(client: httpx.AsyncClient):
         try:
             # Prompt
             try:
-                raw = console.input("[e3n]deltai >[/] ")
+                raw = console.input("[deltai]deltai >[/] ")
             except EOFError:
                 break
 

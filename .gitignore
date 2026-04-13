@@ -69,6 +69,6 @@ voice_tests/
 test_tts.mp3
 test_voice_pipeline.mp3
 project/tests/test_chromadb/
-project/tests/test_e3n.db
+project/tests/test_deltai.db
 project/tests/training_data/
 project/tests/exports/

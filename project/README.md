@@ -1,78 +1,73 @@
-# deltai
+# deltai — FastAPI backend (`project/`)
 
-Local AI intelligence layer running on Windows 11. Named after deltai from COD: Infinite Warfare, with personality blending deltai (dry wit, loyal) and BT-7274 (precise, protocol-driven).
+This directory is the **main HTTP daemon**: FastAPI app (`main.py`), router, RAG, tools, training hooks, and the single-file dashboard under `static/`. User-facing product docs and philosophy live in the repository root [README.md](../README.md). Deep assistant context: [CLAUDE.md](../CLAUDE.md).
 
-deltai is the AI brain — reasoning, memory, tool execution, and model routing. External services connect via the `/ingest` endpoint to push context into its RAG memory.
+## Prerequisites
 
-## Architecture
+- Python 3.11+
+- [Ollama](https://ollama.com/) for local models (optional models per your `modelfiles/`)
+- Repository root: `pip install -e .[dev]` (installs the `delta` package and dev tools)
 
-- **Backend:** FastAPI (Python) on `localhost:8000`
-- **Frontend:** Single-file dashboard (HTML/CSS/JS) with tactical ops center aesthetic
-- **Models:** Ollama — Qwen2.5-14B (primary), Qwen2.5-3B (sim racing fallback), with emergency backup chain
-- **RAG:** ChromaDB with multi-query expansion, source-grouped reranking, and recency bias
-- **Voice:** STT (faster-whisper) + TTS (Piper/edge-tts) + RVC voice conversion
-- **Training:** QLoRA fine-tuning with adapter surgery — 4 domain-specific augmentation slots (racing, engineering, personality, reasoning), TIES merge, selective layer freezing
-- **Routing:** VRAM-aware tier system (A/B/C) with sim process detection, cloud budget enforcement, and adapter domain classification
-- **Tools:** 19 tools — file I/O, PowerShell, RAG search, computation delegation, self-diagnostics, adapter management, conditional telemetry
+## Run locally (Linux)
 
-## Quick Start
+From the **repository root**:
 
-If you need to install dependencies into a virtual environment, run
-`python -m pip install -e .[dev]` from the repository root. ChromaDB is
-declared in `pyproject.toml`, so it is included with the standard package
-install.
-
-```powershell
-# Terminal 1 — Backend
-cd ~/deltai/project
-.\venv\Scripts\activate
-uvicorn main:app --reload --port 8000
-
-# Terminal 2 — Electron
-cd ~/deltai/app
-npm start
+```bash
+cd project
+python -m venv ../venv && source ../venv/bin/activate   # or use your own venv layout
+pip install -e ..[dev]
+uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-## Key Features
+Open the dashboard at `http://127.0.0.1:8000`. API details are in [CLAUDE.md](../CLAUDE.md).
 
-- **VRAM-aware routing** — automatically selects model tier based on GPU availability and sim process detection
-- **Adapter surgery** — modular LoRA augmentation slots with independent training, versioning, evaluation, and TIES merge into production GGUFs
-- **Resource self-management** — background VRAM lifecycle, Ollama auto-restart, circuit breaker, AI-driven self-heal loop
-- **Knowledge base** — drop `.md` files in `data/knowledge/`, watchdog auto-ingests into ChromaDB
-- **Ingest connector** — external services push structured context via `POST /ingest` with TTL and source tags
-- **Session mode** — GPU protection during racing, routes inference to cloud or CPU fallback
-- **Emergency backup chain** — automatic failover: qwen14b -> nemo -> llama 8B
-- **Cloud integration** — Anthropic API support with split workload (local tools + cloud reasoning), daily budget cap
-- **Voice** — full STT/TTS loop with RVC voice conversion
-- **Training pipeline** — QLoRA fine-tuning, knowledge distillation, A/B evaluation, auto-capture of good exchanges
+## systemd (user service)
 
-## Hardware
+The in-repo unit is [../systemd/user/delta-daemon.service](../systemd/user/delta-daemon.service). After installing the package so `delta-daemon` is on `PATH`:
 
-| Component | Spec |
-|-----------|------|
-| GPU | NVIDIA RTX 3060 12GB |
-| CPU | Intel i7-12700K |
-| RAM | 34GB |
-| OS | Windows 11 |
-
-## Project Structure
-
-```
-~/deltai/
-  project/           # FastAPI backend
-    main.py           # App, endpoints, resource manager
-    router.py         # VRAM-aware model routing
-    memory.py         # ChromaDB RAG
-    training.py       # QLoRA + adapter surgery
-    tools/            # Tool definitions + executor
-    voice/            # STT/TTS/RVC package
-    static/           # Dashboard UI
-    tests/            # 4 test suites (139 tests)
-  app/                # Electron wrapper
-  modelfiles/         # Ollama modelfiles (4)
-  data/               # ChromaDB, knowledge, training datasets
+```bash
+cp ../systemd/user/delta-daemon.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now delta-daemon
+journalctl --user -u delta-daemon -f
 ```
 
-## Status
+SQLite and XDG paths are set in the unit file; override with `Environment=` drop-ins if needed.
 
-Personal project. All 7 build phases complete. 139/139 tests passing.
+## Optional: Electron shell
+
+Cross-platform desktop wrapper lives in [../app/](../app/). Not required for headless or browser-only use.
+
+```bash
+cd ../app && npm install && npm start
+```
+
+## Optional: Windows development
+
+If you develop on Windows, use PowerShell equivalents for paths and venv activation. Core documentation and agent rules target **Linux paths** in examples; keep production config portable.
+
+## Verify after backend changes
+
+```bash
+cd project && source ../venv/bin/activate   # adjust venv path
+python tests/verify_full.py
+python tests/verify_stress.py
+python tests/verify_resource_mgmt.py
+# If you touched training/distillation:
+python tests/verify_distill.py
+```
+
+## Layout (this tree)
+
+| Path | Role |
+|------|------|
+| `main.py` | FastAPI app, endpoints, streaming, integrations |
+| `router.py` | VRAM-aware model routing |
+| `memory.py` | ChromaDB RAG |
+| `training.py` / `training_build.py` | Fine-tuning and adapter workflows |
+| `tools/` | Tool definitions and executor |
+| `voice/` | Optional STT/TTS/RVC |
+| `static/` | Single-file dashboard |
+| `tests/` | Verification scripts |
+
+Runtime data (`data/`, SQLite, Chroma) is gitignored; see root README for XDG layout.

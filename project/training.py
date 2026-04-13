@@ -1126,6 +1126,7 @@ _KNOWN_MODELFILES = {
     "deltai-qwen14b": r"~/deltai/modelfiles\deltai-qwen14b.modelfile",
     "deltai-qwen3b": r"~/deltai/modelfiles\deltai-qwen3b.modelfile",
     "deltai-nemo": r"~/deltai/modelfiles\deltai-nemo.modelfile",
+    "deltai-fallback": r"~/deltai/modelfiles\deltai-fallback.modelfile",
     "deltai": r"~/deltai/modelfiles\deltai.modelfile",
 }
 
@@ -1142,7 +1143,7 @@ def _read_system_prompt(ollama_model_name: str) -> str:
                 return match.group(1).strip()
         except Exception:
             pass
-    return "You are deltai, a personal AI assistant. Be direct and precise."
+    return "You are deltai, a modular local AI layer. Be direct, precise, and safety-conscious."
 
 
 # ── FEWSHOT TRAINING (LEGACY) ────────────────────────────────────────
@@ -1444,7 +1445,7 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
             from router import is_sim_running
             if is_sim_running():
                 _update_state(running=False, status="failed",
-                              error="Cannot train while sim is running (VRAM needed)", progress=0)
+                              error="Cannot train while GPU focus workload is active (VRAM needed)", progress=0)
                 return
         except ImportError:
             pass  # router not available, skip sim checks
@@ -1818,6 +1819,18 @@ def start_training(
         if _training_state["running"]:
             return {"status": "error", "reason": "Training already in progress"}
 
+    # VRAM / session guards before dataset or LoRA dep checks (explicit GPU-heavy modes)
+    if mode in ("lora", "distill"):
+        try:
+            from router import is_sim_running, is_session_active
+
+            if is_sim_running():
+                return {"status": "error", "reason": "Cannot train while a GPU focus workload is active"}
+            if is_session_active():
+                return {"status": "error", "reason": "Cannot train during an active GPU focus session"}
+        except ImportError:
+            pass
+
     if output_model is None:
         output_model = f"{base_model}-ft"
 
@@ -1848,17 +1861,6 @@ def start_training(
         if teacher_ds.get("status") != "ok" or not teacher_ds.get("examples"):
             return {"status": "error", "reason": f"Teacher dataset '{teacher_dataset}' not found or empty"}
         actual_mode = "distill"
-
-    # Session + sim check for LoRA/distill mode (VRAM protection)
-    if actual_mode in ("lora", "distill"):
-        try:
-            from router import is_sim_running, is_session_active
-            if is_sim_running():
-                return {"status": "error", "reason": "Cannot train while sim is running"}
-            if is_session_active():
-                return {"status": "error", "reason": "Cannot train during active racing session"}
-        except ImportError:
-            pass
 
     # Reset state and launch
     _training_cancel_flag.clear()
@@ -2141,7 +2143,7 @@ def generate_teacher_data(
         try:
             from router import is_sim_running
             if is_sim_running():
-                return {"status": "error", "reason": "Cannot use 14B teacher while sim is running"}
+                return {"status": "error", "reason": "Cannot use 14B teacher while a GPU focus workload is active"}
         except ImportError:
             pass
 
@@ -2969,7 +2971,7 @@ def run_daily_cycle(
     Full daily training cycle. Safe to call from the 2 AM scheduler.
 
     Phases:
-    0. Guard checks (sim running, VRAM available, training already running)
+    0. Guard checks (focus workload, VRAM available, training already running)
     1. Weakness analysis — find domains with avg quality < 0.6
     2. Targeted distillation — teacher generates examples for weak domains (max 2)
     3. Curriculum generation — daily topic datasets via teacher
@@ -2996,7 +2998,9 @@ def run_daily_cycle(
     guards = {}
     try:
         from router import is_sim_running, _get_vram_info
-        guards["sim_running"] = is_sim_running()
+        _sim = is_sim_running()
+        guards["sim_running"] = _sim  # legacy report key
+        guards["focus_workload_active"] = _sim
         vram_info = _get_vram_info()  # returns (used_mb, total_mb, free_mb)
         guards["vram_free_mb"] = vram_info[2]
         guards["vram_ok"] = guards["vram_free_mb"] >= _DAILY_TRAIN_MIN_VRAM_MB
@@ -3012,8 +3016,8 @@ def run_daily_cycle(
 
     if guards.get("sim_running"):
         report["status"] = "skipped"
-        report["skip_reason"] = "Sim is running — daily training deferred"
-        logger.info("Daily cycle skipped: sim is running")
+        report["skip_reason"] = "GPU focus workload active — daily training deferred"
+        logger.info("Daily cycle skipped: focus workload / sim detected")
         return report
 
     if guards.get("training_running"):

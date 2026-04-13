@@ -322,16 +322,16 @@ def memory_stats() -> str:
 # ── WEB SEARCH TOOL ──────────────────────────────────────────────────
 
 def web_search(query: str, max_results=5) -> str:
-    """Search the web via DuckDuckGo Lite. Blocked during active racing sessions."""
+    """Search the web via DuckDuckGo Lite. Blocked during active GPU focus sessions."""
     try:
-        # Session guard: block during active racing (performance protection)
+        # Session guard: block during focus workload (performance protection)
         try:
             import sys
             if "." not in sys.path:
                 sys.path.insert(0, ".")
             from router import _session_active
             if _session_active:
-                return "ERROR: Web search disabled during active racing sessions (performance protection)"
+                return "ERROR: Web search disabled during active GPU focus sessions (performance protection)"
         except (ImportError, AttributeError):
             pass
 
@@ -411,16 +411,16 @@ def web_search(query: str, max_results=5) -> str:
 
 
 def fetch_url(url: str, max_chars: int = 8000) -> str:
-    """Fetch a URL and return clean article text. Blocked during active racing sessions."""
+    """Fetch a URL and return clean article text. Blocked during active GPU focus sessions."""
     try:
-        # Session guard: block during active racing
+        # Session guard: block during focus workload
         try:
             import sys as _sys
             if "." not in _sys.path:
                 _sys.path.insert(0, ".")
             from router import _session_active
             if _session_active:
-                return "ERROR: fetch_url disabled during active racing sessions (performance protection)"
+                return "ERROR: fetch_url disabled during active GPU focus sessions (performance protection)"
         except (ImportError, AttributeError):
             pass
 
@@ -863,7 +863,7 @@ def _telemetry_get(endpoint: str, params: dict = None) -> str:
 
 
 def get_session_status(**kwargs) -> str:
-    """Get current racing session status."""
+    """Get current session snapshot from the optional telemetry HTTP API."""
     return _telemetry_get("/api/session")
 
 
@@ -891,7 +891,7 @@ def get_strategy_recommendation(remaining_laps=None, **kwargs) -> str:
 # ── SELF-DIAGNOSTIC TOOLS ──────────────────────────────────────────────
 
 _OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-_DELTAI_MODELS = {"deltai-qwen14b", "deltai-qwen3b", "deltai-nemo", "deltai"}
+_DELTAI_MODELS = {"deltai-qwen14b", "deltai-qwen3b", "deltai-nemo", "deltai-fallback", "deltai"}
 _CRITICAL_PATHS = [
     r"~/deltai/data\knowledge",
     r"~/deltai/data\chromadb",
@@ -1013,7 +1013,7 @@ def _diag_full() -> str:
     # Backup models
     backup_ok = []
     backup_fail = []
-    for model in ["deltai-nemo", "deltai"]:
+    for model in ["deltai-nemo", "deltai-fallback", "deltai"]:
         if tags:
             all_names = [m["name"].split(":")[0] for m in tags.get("models", [])]
             if model in all_names:
@@ -1168,7 +1168,7 @@ def _diag_deep(subsystem: str) -> str:
         lines = ["BACKUP SYSTEM DIAGNOSTICS", "=" * 40]
         tags = _ollama_get("/api/tags")
         chains = [
-            ("deltai-qwen14b", "deltai-nemo", "deltai"),
+            ("deltai-qwen14b", "deltai-nemo", "deltai-fallback"),
             ("deltai-qwen3b", "deltai"),
         ]
         if tags:
@@ -1269,12 +1269,12 @@ def manage_ollama_models(action: str, model: str = None) -> str:
         model_base = model.split(":")[0]
         if model_base not in _DELTAI_MODELS:
             return f"ERROR: Can only manage deltai models. '{model}' not in allowlist: {', '.join(sorted(_DELTAI_MODELS))}"
-        # Sim guard: block preloading 14B while sim is running
+        # Focus workload guard: block preloading 14B while foreground app contests VRAM
         if "14b" in model.lower():
             try:
                 from router import is_sim_running
                 if is_sim_running():
-                    return "BLOCKED: Cannot preload 14B model while sim is running — VRAM needed for game"
+                    return "BLOCKED: Cannot preload 14B model during GPU focus workload — VRAM reserved for foreground use"
             except ImportError:
                 pass
         # Check VRAM availability
@@ -1284,7 +1284,13 @@ def manage_ollama_models(action: str, model: str = None) -> str:
             handle = pynvml.nvmlDeviceGetHandleByIndex(0)
             mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
             free_mb = round((mem.total - mem.used) / 1e6)
-            model_sizes = {"deltai-qwen14b": 8500, "deltai-qwen3b": 2500, "deltai-nemo": 7200, "deltai": 4700}
+            model_sizes = {
+                "deltai-qwen14b": 8500,
+                "deltai-qwen3b": 2500,
+                "deltai-nemo": 7200,
+                "deltai-fallback": 4700,
+                "deltai": 4700,
+            }
             needed = model_sizes.get(model_base, 5000)
             if free_mb < needed + 500:
                 return f"WARNING: Only {free_mb} MB VRAM free, {model} needs ~{needed} MB. Unload another model first."
@@ -1441,7 +1447,7 @@ def resource_status() -> str:
     # Sim detection
     try:
         from router import is_session_active, is_sim_running
-        lines.append(f"\nSim running: {is_sim_running()}")
+        lines.append(f"\nFocus workload (sim/heavy app): {is_sim_running()}")
         lines.append(f"Session active: {is_session_active()}")
     except ImportError:
         pass

@@ -116,7 +116,7 @@ Tool categories:
 
 ### Persistence (project/persistence.py)
 
-SQLite (WAL mode, short-lived connections). Tables: `conversation_history`, `cloud_budget`, `reasoning_traces`, `quality_scores`, `routing_feedback`, `knowledge_gaps`.
+SQLite (WAL mode, short-lived connections). Path: **`DELTA_SQLITE_PATH`** (same default as `systemd/user/delta-daemon.service`), else legacy **`SQLITE_PATH`**, else `~/.local/share/deltai/delta.db`. Tables: `conversation_history`, `cloud_budget`, `reasoning_traces`, `quality_scores`, `routing_feedback`, `knowledge_gaps`.
 Python 3.11 typically ships with SQLite 3.39+ (WAL-capable). JSON1 support must also be enabled in the Python `sqlite3` build for reasoning-trace JSON queries.
 
 ### Training (project/training.py)
@@ -289,12 +289,10 @@ The repo is `Reconnecting18/deltai`.
 
 ## Current Status
 
-deltai is in early development. The core FastAPI backend, routing engine, RAG memory, tool system, training pipeline, and voice module are inherited from a prior personal project (E3N, Windows-based racing AI). The active effort is:
+deltai is in early development. The FastAPI backend, router, RAG, tools, training, and voice modules are mature in features but still being **generalized for Linux-first, user-choice operation** (docs, defaults, and naming now target that story).
 
-- [ ] Rearchitecting for Linux (paths, service model, tool names)
-- [ ] systemd user service integration
-- [ ] Linux-appropriate tool set (`run_shell` instead of `run_powershell`, etc.)
+- [x] systemd user service unit in-repo (`systemd/user/delta-daemon.service`) and XDG-style env vars
+- [ ] Linux-appropriate defaults everywhere (`run_shell` vs legacy PowerShell naming on the host)
 - [ ] Plugin API design (tool registration from external services)
-- [ ] General-purpose task automation (not domain-specific)
-- [ ] Documentation and onboarding for Linux users
-- [ ] Removing Windows-specific code (PowerShell scripts, Windows paths, sim detection)
+- [ ] Broader task automation examples beyond optional adapter domains (`racing`, `telemetry`, etc.)
+- [ ] Documentation and onboarding kept aligned with root README / AGENTS.md
