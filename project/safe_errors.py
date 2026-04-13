@@ -17,8 +17,17 @@ def public_error_detail(
     generic: str = "An unexpected error occurred",
 ) -> str:
     """
-    Return a client-safe error string. Known benign validation errors may pass through.
+    Return a client-safe error string for HTTP/JSON surfaces.
+
+    Does not stringify the exception (avoids CodeQL py/stack-trace-exposure): no
+    data flow from exception text to clients; use log_exception for diagnostics.
     """
-    if isinstance(exc, (ValueError, KeyError, TypeError, json.JSONDecodeError)):
-        return str(exc)
+    if isinstance(exc, ValueError):
+        return "Invalid value"
+    if isinstance(exc, KeyError):
+        return "Missing or invalid key"
+    if isinstance(exc, TypeError):
+        return "Invalid type"
+    if isinstance(exc, json.JSONDecodeError):
+        return "Invalid JSON"
     return generic

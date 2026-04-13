@@ -20,6 +20,7 @@ import time
 import httpx
 import safe_errors
 from path_safety import (
+    open_text,
     require_path_under,
     resolve_under,
     safe_dataset_basename,
@@ -155,10 +156,11 @@ def _load_registry() -> dict:
     """Load adapter registry from disk. Creates default if missing."""
     if os.path.exists(REGISTRY_PATH):
         try:
-            with open(REGISTRY_PATH, "r", encoding="utf-8") as f:
+            with open_text(REGISTRY_PATH, TRAINING_PATH, "r") as f:
                 return json.load(f)
         except (json.JSONDecodeError, OSError) as e:
-            logger.warning(f"Registry corrupt, creating fresh: {e}")
+            safe_errors.log_exception(logger, "Registry corrupt, creating fresh", e)
+            logger.warning("Registry corrupt; creating fresh registry")
     return {
         "adapters": {},
         "active_adapters": {d: None for d in ADAPTER_DOMAINS},
@@ -171,7 +173,7 @@ def _save_registry(registry: dict):
     """Save registry to disk atomically (write tmp, rename)."""
     os.makedirs(os.path.dirname(REGISTRY_PATH), exist_ok=True)
     tmp = REGISTRY_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    with open_text(tmp, TRAINING_PATH, "w") as f:
         json.dump(registry, f, indent=2)
     # Atomic rename (Windows: os.replace is atomic on same volume)
     os.replace(tmp, REGISTRY_PATH)
@@ -213,7 +215,7 @@ def register_adapter(name: str, domain: str, adapter_path: str,
     }
     registry["adapters"][name] = entry
     _save_registry(registry)
-    logger.info(f"Registered adapter: {name} (domain={domain}, v{version})")
+    logger.info("Registered adapter: %s (domain=%s, v%s)", name, domain, version)
     return {"status": "ok", "name": name, "version": version, "entry": entry}
 
 
@@ -276,7 +278,7 @@ def set_active_adapter(domain: str, adapter_name: str) -> dict:
         return {"status": "error", "reason": f"Adapter not found: {adapter_name}"}
     registry["active_adapters"][domain] = adapter_name
     _save_registry(registry)
-    logger.info(f"Active adapter for {domain}: {adapter_name}")
+    logger.info("Active adapter for %s: %s", domain, adapter_name)
     return {"status": "ok", "domain": domain, "adapter": adapter_name}
 
 
@@ -301,9 +303,10 @@ def remove_adapter(name: str, delete_files: bool = False) -> dict:
         try:
             ap = require_path_under(entry["adapter_path"], ADAPTERS_PATH)
             shutil.rmtree(ap)
-            logger.info(f"Deleted adapter files: {ap}")
+            logger.info("Deleted adapter files: %s", ap)
         except OSError as e:
-            logger.warning(f"Failed to delete adapter files: {e}")
+            safe_errors.log_exception(logger, "Failed to delete adapter files", e)
+            logger.warning("Failed to delete adapter files")
     return {"status": "ok", "removed": name}
 
 
@@ -426,13 +429,19 @@ def merge_adapters(adapter_names: list = None, method: str = None,
         if not os.path.exists(ap):
             return {"status": "error", "reason": f"Adapter files missing: {name}"}
 
-    logger.info(f"Merging adapters: {adapter_names} via {method} (density={density})")
+    logger.info(
+        "Merging adapters (count=%s) via %s (density=%s)",
+        len(adapter_names),
+        method,
+        density,
+    )
 
     try:
         merged_dir = resolve_under(ADAPTERS_PATH, f"{output_model}-merged")
         gguf_file = resolve_under(GGUF_PATH, f"{output_model}.gguf")
     except ValueError as e:
-        return {"status": "error", "reason": str(e)}
+        safe_errors.log_exception(logger, "Adapter merge path invalid", e)
+        return {"status": "error", "reason": safe_errors.public_error_detail(e)}
 
     try:
         # Load base model on CPU
@@ -450,7 +459,7 @@ def merge_adapters(adapter_names: list = None, method: str = None,
         for name in adapter_names:
             raw_ap = registry["adapters"][name]["adapter_path"]
             adapter_path = require_path_under(raw_ap, ADAPTERS_PATH)
-            logger.info(f"Loading adapter: {name} from {adapter_path}")
+            logger.info("Loading adapter: %s from %s", name, adapter_path)
             adapted = PeftModel.from_pretrained(base_model, adapter_path)
             adapted = adapted.merge_and_unload()
             # Compute delta (what the adapter changed)
@@ -473,7 +482,7 @@ def merge_adapters(adapter_names: list = None, method: str = None,
                 )
 
         # Merge deltas
-        logger.info(f"Merging {len(deltas)} adapter deltas via {method}...")
+        logger.info("Merging %s adapter deltas via %s...", len(deltas), method)
         if method == "ties":
             merged_delta = _ties_merge(deltas, density=density)
         elif method == "linear":
@@ -505,7 +514,7 @@ def merge_adapters(adapter_names: list = None, method: str = None,
         final_model.save_pretrained(merged_dir)
         tokenizer = AutoTokenizer.from_pretrained(HF_BASE_MODEL, trust_remote_code=True)
         tokenizer.save_pretrained(merged_dir)
-        logger.info(f"Merged model saved to {merged_dir}")
+        logger.info("Merged model saved to %s", merged_dir)
 
         del final_model
         gc.collect()
@@ -532,7 +541,7 @@ def merge_adapters(adapter_names: list = None, method: str = None,
             registry["merged_models"].append(output_model)
         _save_registry(registry)
 
-        logger.info(f"Merge complete: {output_model} registered in Ollama")
+        logger.info("Merge complete: %s registered in Ollama", output_model)
         return {
             "status": "ok",
             "output_model": output_model,
@@ -542,7 +551,8 @@ def merge_adapters(adapter_names: list = None, method: str = None,
         }
 
     except Exception as e:
-        logger.error(f"Adapter merge failed: {e}", exc_info=True)
+        safe_errors.log_exception(logger, "Adapter merge failed", e)
+        logger.error("Adapter merge failed", exc_info=True)
         # Cleanup
         try:
             shutil.rmtree(merged_dir)
@@ -612,9 +622,16 @@ def start_domain_training(domain: str, dataset_name: str = None,
     version = max(existing_versions, default=0) + 1
     adapter_name = f"{domain}-v{version}"
 
-    logger.info(f"Starting domain training: {adapter_name} "
-                f"(dataset={dataset_name}, freeze={freeze_layers}, r={lora_r}, "
-                f"alpha={lora_alpha}, lr={lr}, epochs={epochs})")
+    logger.info(
+        "Starting domain training: %s (dataset=%s, freeze=%s, r=%s, alpha=%s, lr=%s, epochs=%s)",
+        adapter_name,
+        dataset_name,
+        freeze_layers,
+        lora_r,
+        lora_alpha,
+        lr,
+        epochs,
+    )
 
     # Reset training state
     _training_state = {
@@ -702,7 +719,7 @@ def eval_adapter(adapter_name: str, eval_dataset: str = None,
     # Load eval examples
     examples = []
     try:
-        with open(ds_path, "r", encoding="utf-8") as f:
+        with open_text(ds_path, DATASETS_PATH, "r") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -805,7 +822,7 @@ def eval_adapter(adapter_name: str, eval_dataset: str = None,
             "timestamp": int(time.time()),
             "results": results,
         }
-        with open(eval_file, "w", encoding="utf-8") as f:
+        with open_text(eval_file, EVAL_PATH, "w") as f:
             json.dump(eval_data, f, indent=2)
 
         # Update registry
@@ -822,7 +839,12 @@ def eval_adapter(adapter_name: str, eval_dataset: str = None,
                 if avg_score > current_score:
                     set_active_adapter(domain, adapter_name)
                     update_adapter(adapter_name, promoted=True)
-                    logger.info(f"Auto-promoted {adapter_name} (score {avg_score:.3f} > {current_score:.3f})")
+                    logger.info(
+                        "Auto-promoted %s (score %s > %s)",
+                        adapter_name,
+                        round(avg_score, 3),
+                        current_score,
+                    )
             else:
                 set_active_adapter(domain, adapter_name)
                 update_adapter(adapter_name, promoted=True)
@@ -838,7 +860,8 @@ def eval_adapter(adapter_name: str, eval_dataset: str = None,
         }
 
     except Exception as e:
-        logger.error(f"Adapter eval failed: {e}", exc_info=True)
+        safe_errors.log_exception(logger, "Adapter eval failed", e)
+        logger.error("Adapter eval failed", exc_info=True)
         try:
             import torch
             torch.cuda.empty_cache()
@@ -916,7 +939,7 @@ def list_datasets() -> list[dict]:
         name = safe_fname[:-6]  # strip .jsonl
         count = 0
         try:
-            with open(fpath, "r", encoding="utf-8") as f:
+            with open_text(fpath, DATASETS_PATH, "r") as f:
                 for line in f:
                     if line.strip():
                         count += 1
@@ -940,7 +963,7 @@ def create_dataset(name: str) -> dict:
     if os.path.exists(path):
         return {"status": "error", "reason": "Dataset already exists"}
     try:
-        with open(path, "w", encoding="utf-8") as f:
+        with open_text(path, DATASETS_PATH, "w") as f:
             pass  # empty file
         return {"status": "ok", "name": name}
     except Exception as e:
@@ -966,7 +989,7 @@ def get_dataset(name: str) -> dict:
         return {"status": "error", "reason": "Dataset not found", "examples": []}
     examples = []
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open_text(path, DATASETS_PATH, "r") as f:
             for i, line in enumerate(f):
                 line = line.strip()
                 if not line:
@@ -996,7 +1019,7 @@ def add_example(name: str, input_text: str, output_text: str, category: str = "g
         "created": int(time.time()),
     }
     try:
-        with open(path, "a", encoding="utf-8") as f:
+        with open_text(path, DATASETS_PATH, "a") as f:
             f.write(json.dumps(example, ensure_ascii=False) + "\n")
         return {"status": "ok"}
     except Exception as e:
@@ -1009,12 +1032,12 @@ def remove_example(name: str, index: int) -> dict:
     if not os.path.exists(path):
         return {"status": "error", "reason": "Dataset not found"}
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open_text(path, DATASETS_PATH, "r") as f:
             lines = f.readlines()
         if index < 0 or index >= len(lines):
             return {"status": "error", "reason": f"Index {index} out of range"}
         lines.pop(index)
-        with open(path, "w", encoding="utf-8") as f:
+        with open_text(path, DATASETS_PATH, "w") as f:
             f.writelines(lines)
         return {"status": "ok"}
     except Exception as e:
@@ -1039,7 +1062,8 @@ def export_dataset(name: str, fmt: str = "alpaca") -> dict:
     try:
         out_name = safe_export_filename(name, fmt)
     except ValueError as e:
-        return {"status": "error", "reason": str(e)}
+        safe_errors.log_exception(logger, "Export filename invalid", e)
+        return {"status": "error", "reason": safe_errors.public_error_detail(e)}
     try:
         out_path = resolve_under(EXPORTS_PATH, out_name)
     except ValueError:
@@ -1075,7 +1099,7 @@ def export_dataset(name: str, fmt: str = "alpaca") -> dict:
         else:
             return {"status": "error", "reason": f"Unknown format: {fmt}"}
 
-        with open(out_path, "w", encoding="utf-8") as f:
+        with open_text(out_path, EXPORTS_PATH, "w") as f:
             json.dump(exported, f, indent=2, ensure_ascii=False)
 
         return {
@@ -1164,9 +1188,10 @@ def _unload_ollama_models_sync():
                 httpx.post(f"{ollama_url}/api/generate", json={
                     "model": model_name, "prompt": "", "keep_alive": 0
                 }, timeout=10)
-                logger.info(f"Unloaded {model_name} from VRAM for training")
+                logger.info("Unloaded %s from VRAM for training", model_name)
     except Exception as e:
-        logger.warning(f"Failed to unload Ollama models: {e}")
+        safe_errors.log_exception(logger, "Failed to unload Ollama models", e)
+        logger.warning("Failed to unload Ollama models")
 
 
 # ── SYSTEM PROMPT EXTRACTION ────────────────────────────────────────
@@ -1192,7 +1217,7 @@ def _read_system_prompt(ollama_model_name: str) -> str:
             path = None
         if path and os.path.exists(path):
             try:
-                with open(path, "r", encoding="utf-8") as f:
+                with open_text(path, mf_root, "r") as f:
                     content = f.read()
                 match = re.search(r'SYSTEM\s+"""(.*?)"""', content, re.DOTALL)
                 if match:
@@ -1236,7 +1261,7 @@ def _build_fewshot_modelfile(base_model: str, examples: list[dict], output_path:
         f'SYSTEM """\n{full_system}\n"""\n'
     )
 
-    with open(output_path, "w", encoding="utf-8") as f:
+    with open_text(output_path, MODELFILES_PATH, "w") as f:
         f.write(modelfile_content)
 
     return output_path
@@ -1276,7 +1301,12 @@ def _run_fewshot_training(dataset_name: str, base_model: str, output_model: str)
         _build_fewshot_modelfile(base_model, examples, modelfile_path)
 
         _update_state(progress=60, status="creating model via ollama")
-        logger.info(f"Fewshot training: creating {output_model} from {base_model} with {len(examples)} examples")
+        logger.info(
+            "Fewshot training: creating %s from %s with %s examples",
+            output_model,
+            base_model,
+            len(examples),
+        )
 
         proc = subprocess.Popen(
             ["ollama", "create", output_model, "-f", modelfile_path],
@@ -1296,14 +1326,18 @@ def _run_fewshot_training(dataset_name: str, base_model: str, output_model: str)
                 error=f"ollama create failed (rc={proc.returncode}): {error_msg}",
                 progress=0,
             )
-            logger.error(f"Fewshot training failed: {error_msg}")
+            logger.error("Fewshot training failed (ollama create returned nonzero)")
             return
 
         _update_state(
             running=False, progress=100, status="completed",
             completed=int(time.time()), error=None,
         )
-        logger.info(f"Fewshot training complete: {output_model} created with {len(examples)} examples")
+        logger.info(
+            "Fewshot training complete: %s created with %s examples",
+            output_model,
+            len(examples),
+        )
 
     except subprocess.TimeoutExpired:
         if _training_process:
@@ -1321,7 +1355,8 @@ def _run_fewshot_training(dataset_name: str, base_model: str, output_model: str)
             running=False, status="failed",
             error=safe_errors.public_error_detail(e), progress=0,
         )
-        logger.error(f"Fewshot training error: {e}")
+        safe_errors.log_exception(logger, "Fewshot training error", e)
+        logger.error("Fewshot training error", exc_info=True)
 
 
 # ── LORA TRAINING ────────────────────────────────────────────────────
@@ -1406,7 +1441,7 @@ def _convert_to_gguf(merged_dir: str, output_gguf: str, quant_method: str = "Q4_
 
     # Step 1: Convert HF → F16 GGUF
     f16_gguf = output_gguf.replace(".gguf", "-f16.gguf")
-    logger.info(f"Converting merged model to F16 GGUF: {f16_gguf}")
+    logger.info("Converting merged model to F16 GGUF: %s", f16_gguf)
 
     proc = subprocess.run(
         ["python", convert_script, merged_dir,
@@ -1419,7 +1454,7 @@ def _convert_to_gguf(merged_dir: str, output_gguf: str, quant_method: str = "Q4_
     # Step 2: Quantize F16 → target quantization
     quantize_bin = _find_quantize_binary()
     if quantize_bin:
-        logger.info(f"Quantizing to {quant_method}: {output_gguf}")
+        logger.info("Quantizing to %s: %s", quant_method, output_gguf)
         proc = subprocess.run(
             [quantize_bin, f16_gguf, output_gguf, quant_method],
             capture_output=True, text=True, timeout=600
@@ -1447,7 +1482,7 @@ def _register_ollama_model(model_name: str, gguf_path: str, system_prompt: str):
         f'SYSTEM """\n{system_prompt}\n"""\n'
     )
 
-    with open(modelfile_path, "w", encoding="utf-8") as f:
+    with open_text(modelfile_path, MODELFILES_PATH, "w") as f:
         f.write(modelfile_content)
 
     proc = subprocess.run(
@@ -1456,7 +1491,7 @@ def _register_ollama_model(model_name: str, gguf_path: str, system_prompt: str):
     )
     if proc.returncode != 0:
         raise RuntimeError(f"ollama create failed: {proc.stderr[:500]}")
-    logger.info(f"Registered {model_name} in Ollama from {gguf_path}")
+    logger.info("Registered %s in Ollama from %s", model_name, gguf_path)
 
 
 def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
@@ -1496,8 +1531,13 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
         gguf_file = resolve_under(GGUF_PATH, f"{output_model}.gguf")
         checkpoint_dir = resolve_under(CHECKPOINTS_PATH, output_model)
     except ValueError as e:
-        _update_state(running=False, status="failed", error=str(e), progress=0)
-        logger.error(f"LoRA training invalid paths: {e}")
+        safe_errors.log_exception(logger, "LoRA training invalid paths", e)
+        _update_state(
+            running=False,
+            status="failed",
+            error=safe_errors.public_error_detail(e),
+            progress=0,
+        )
         return
 
     try:
@@ -1527,8 +1567,14 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
         train_ds, eval_ds = _prepare_hf_dataset(dataset_name, system_prompt)
         examples_count = len(train_ds)
         _update_state(examples_used=examples_count)
-        logger.info(f"LoRA: {examples_count} training examples prepared"
-                     + (f", {len(eval_ds)} eval" if eval_ds else ""))
+        if eval_ds:
+            logger.info(
+                "LoRA: %s training examples prepared, %s eval",
+                examples_count,
+                len(eval_ds),
+            )
+        else:
+            logger.info("LoRA: %s training examples prepared", examples_count)
 
         # ── Step 4: Load tokenizer ──
         _update_state(progress=15, status="loading tokenizer")
@@ -1564,8 +1610,10 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
                 for param in model.model.layers[i].parameters():
                     param.requires_grad = False
                 frozen_count += 1
-            logger.info(f"Frozen bottom {frozen_count} transformer layers "
-                        f"(preserving universal knowledge)")
+            logger.info(
+                "Frozen bottom %s transformer layers (preserving universal knowledge)",
+                frozen_count,
+            )
             _update_state(status=f"frozen {frozen_count} bottom layers")
 
         # ── Step 6: Apply LoRA ──
@@ -1585,8 +1633,8 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
         trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
         total = sum(p.numel() for p in model.parameters())
         _update_state(trainable_params=trainable)
-        logger.info(f"LoRA: {trainable:,} trainable / {total:,} total "
-                     f"({100 * trainable / total:.2f}%)")
+        pct = 100 * trainable / total if total else 0.0
+        logger.info("LoRA: %s trainable / %s total (%s%%)", trainable, total, format(pct, ".2f"))
 
         # ── Step 7: Training ──
         _update_state(progress=35, status="training (this takes a while)")
@@ -1660,7 +1708,7 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
         )
 
         train_result = trainer.train()
-        logger.info(f"LoRA training done: {train_result.metrics}")
+        logger.info("LoRA training done: %s", train_result.metrics)
 
         # Check if cancelled
         if _training_cancel_flag.is_set():
@@ -1677,7 +1725,7 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
         model.save_pretrained(adapter_dir)
         tokenizer.save_pretrained(adapter_dir)
         _update_state(adapter_path=adapter_dir)
-        logger.info(f"LoRA adapter saved to {adapter_dir}")
+        logger.info("LoRA adapter saved to %s", adapter_dir)
 
         # ── Step 8b: Adapter-only mode (domain training) ──
         if adapter_only:
@@ -1700,7 +1748,7 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
                 running=False, progress=100, status="completed (adapter saved)",
                 completed=int(time.time()), error=None,
             )
-            logger.info(f"Domain adapter saved: {output_model} (domain={domain})")
+            logger.info("Domain adapter saved: %s (domain=%s)", output_model, domain)
             return
 
         # ── Step 9: Free VRAM, merge on CPU ──
@@ -1724,7 +1772,7 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
         merged_model.save_pretrained(merged_dir)
         tokenizer = AutoTokenizer.from_pretrained(HF_BASE_MODEL, trust_remote_code=True)
         tokenizer.save_pretrained(merged_dir)
-        logger.info(f"Merged model saved to {merged_dir}")
+        logger.info("Merged model saved to %s", merged_dir)
 
         del base_model_fp16, merged_model
         gc.collect()
@@ -1735,7 +1783,14 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
             _convert_to_gguf(merged_dir, gguf_file, LORA_QUANT_METHOD)
             _update_state(gguf_path=gguf_file)
         except RuntimeError as e:
-            logger.warning(f"GGUF conversion failed: {e}. Adapter saved but model not registered in Ollama.")
+            safe_errors.log_exception(
+                logger,
+                "GGUF conversion failed; adapter saved but model not registered in Ollama",
+                e,
+            )
+            logger.warning(
+                "GGUF conversion failed. Adapter saved but model not registered in Ollama.",
+            )
             _update_state(
                 running=False, progress=90, status="partial — adapter saved, GGUF conversion failed",
                 error=safe_errors.public_error_detail(e), completed=int(time.time()),
@@ -1749,7 +1804,7 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
         # ── Step 12: Cleanup merged dir (large, no longer needed) ──
         try:
             shutil.rmtree(merged_dir)
-            logger.info(f"Cleaned up merged model dir: {merged_dir}")
+            logger.info("Cleaned up merged model dir: %s", merged_dir)
         except Exception:
             pass
 
@@ -1758,10 +1813,11 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
             running=False, progress=100, status="completed",
             completed=int(time.time()), error=None,
         )
-        logger.info(f"LoRA training complete: {output_model} registered in Ollama")
+        logger.info("LoRA training complete: %s registered in Ollama", output_model)
 
     except Exception as e:
-        logger.error(f"LoRA training failed: {e}", exc_info=True)
+        safe_errors.log_exception(logger, "LoRA training failed", e)
+        logger.error("LoRA training failed", exc_info=True)
         _update_state(running=False, status="failed", error=safe_errors.public_error_detail(e), progress=0)
         try:
             import torch
@@ -1807,7 +1863,7 @@ def _run_distill_training(teacher_dataset: str, replay_datasets: list[str],
             )
             return
 
-        logger.info(f"Distill blend created: {blend_result}")
+        logger.info("Distill blend created: %s", blend_result)
         _update_state(
             status="training with distill hyperparameters",
             progress=10,
@@ -1834,20 +1890,26 @@ def _run_distill_training(teacher_dataset: str, replay_datasets: list[str],
             retention = verify_retention(output_model, baseline_model=base_model.replace("-ft", ""))
             if not retention.get("passed", False):
                 logger.warning(
-                    f"Retention check WARNING: pass_rate={retention.get('pass_rate', 0)} "
-                    f"< threshold={retention.get('threshold', 0.7)}"
+                    "Retention check WARNING: pass_rate=%s < threshold=%s",
+                    retention.get("pass_rate", 0),
+                    retention.get("threshold", 0.7),
                 )
                 _update_state(
                     status="completed_with_warning",
                     error=f"Retention below threshold: {retention.get('pass_rate', 0):.0%}",
                 )
             else:
-                logger.info(f"Retention check passed: {retention.get('pass_rate', 0):.0%}")
+                logger.info(
+                    "Retention check passed: %s",
+                    format(retention.get("pass_rate", 0), ".0%"),
+                )
         except Exception as e:
-            logger.warning(f"Retention verification failed (non-blocking): {e}")
+            safe_errors.log_exception(logger, "Retention verification failed (non-blocking)", e)
+            logger.warning("Retention verification failed (non-blocking)")
 
     except Exception as e:
-        logger.error(f"Distill training error: {e}")
+        safe_errors.log_exception(logger, "Distill training error", e)
+        logger.error("Distill training error", exc_info=True)
         _update_state(running=False, status="failed", error=safe_errors.public_error_detail(e), progress=0)
     finally:
         # Cleanup temporary blend dataset
@@ -1855,7 +1917,7 @@ def _run_distill_training(teacher_dataset: str, replay_datasets: list[str],
             blend_path = _dataset_path(blend_name)
             if os.path.exists(blend_path):
                 os.remove(blend_path)
-                logger.info(f"Cleaned up temporary blend dataset: {blend_name}")
+                logger.info("Cleaned up temporary blend dataset: %s", blend_name)
         except Exception:
             pass
 
@@ -2043,7 +2105,12 @@ def run_ab_eval(
         input_text = ex["input"]
         expected = ex["output"]
 
-        logger.info(f"A/B eval {i + 1}/{len(examples)}: {input_text[:60]}...")
+        logger.info(
+            "A/B eval %s/%s (input_len=%s)",
+            i + 1,
+            len(examples),
+            len(input_text),
+        )
 
         a_resp, a_time = _run_eval_inference(model_a, input_text)
         b_resp, b_time = _run_eval_inference(model_b, input_text)
@@ -2071,7 +2138,7 @@ def run_ab_eval(
         eval_path = resolve_under(EVAL_PATH, eval_file)
     except ValueError:
         return {"status": "error", "reason": "Invalid evaluation file path"}
-    with open(eval_path, "w", encoding="utf-8") as f:
+    with open_text(eval_path, EVAL_PATH, "w") as f:
         json.dump({
             "model_a": model_a,
             "model_b": model_b,
@@ -2307,7 +2374,11 @@ def generate_teacher_data(
             generated += 1
 
         except Exception as e:
-            logger.warning(f"Teacher generation failed for query '{query[:50]}': {e}")
+            safe_errors.log_exception(logger, "Teacher generation failed for query", e)
+            logger.warning(
+                "Teacher generation failed (query_len=%s)",
+                len(query),
+            )
             filtered += 1
             continue
 
@@ -2343,7 +2414,7 @@ def blend_datasets(
 
         ds_result = get_dataset(ds_name)
         if ds_result.get("status") != "ok":
-            logger.warning(f"Blend: skipping missing dataset '{ds_name}'")
+            logger.warning("Blend: skipping missing dataset (name omitted from log)")
             continue
 
         examples = ds_result.get("examples", [])
@@ -2785,7 +2856,8 @@ def start_dpo_training(
         try:
             _dpo_train_impl(positive_dataset, negative_dataset, effective_base, effective_output)
         except Exception as e:
-            logger.error(f"DPO training failed: {e}", exc_info=True)
+            safe_errors.log_exception(logger, "DPO training failed", e)
+            logger.error("DPO training failed", exc_info=True)
             _update_state(running=False, status="failed", error=safe_errors.public_error_detail(e))
 
     t = threading.Thread(target=_run_dpo, daemon=True)
@@ -2886,7 +2958,8 @@ def _dpo_train_impl(
     try:
         adapter_dir = resolve_under(ADAPTERS_PATH, output_model)
     except ValueError as e:
-        _update_state(running=False, status="failed", error=str(e))
+        safe_errors.log_exception(logger, "DPO adapter path invalid", e)
+        _update_state(running=False, status="failed", error=safe_errors.public_error_detail(e))
         return
     os.makedirs(adapter_dir, exist_ok=True)
 
@@ -2927,7 +3000,7 @@ def _dpo_train_impl(
 
     _update_state(running=False, progress=100, status="DPO training complete",
                   completed=int(time.time()), error=None)
-    logger.info(f"DPO training complete: {output_model} ({len(pairs)} pairs)")
+    logger.info("DPO training complete: %s (%s pairs)", output_model, len(pairs))
 
 
 # ── SESSION KNOWLEDGE SYNTHESIS ───────────────────────────────────────────
@@ -3006,7 +3079,12 @@ def synthesize_session_knowledge(
         return {"status": "error", "reason": "Synthesis returned insufficient content"}
 
     words = len(knowledge_text.split())
-    logger.info(f"Session synthesis complete: session={session_id}, words={words}, model={model_name}")
+    logger.info(
+        "Session synthesis complete: session=%s, words=%s, model=%s",
+        session_id,
+        words,
+        model_name,
+    )
     return {
         "status": "ok",
         "knowledge_text": knowledge_text,
@@ -3106,7 +3184,7 @@ def run_daily_cycle(
             f"Insufficient VRAM ({guards.get('vram_free_mb', 0)}MB < "
             f"{_DAILY_TRAIN_MIN_VRAM_MB}MB required)"
         )
-        logger.info(f"Daily cycle skipped: {report['skip_reason']}")
+        logger.info("Daily cycle skipped: %s", report["skip_reason"])
         return report
 
     # Ensure SQLite schema (routing_feedback, knowledge_gaps, etc.) exists before any phase
@@ -3128,14 +3206,16 @@ def run_daily_cycle(
             from collector import run_collection_cycle  # noqa: PLC0415
             collect_report = run_collection_cycle(dry_run=dry_run)
             logger.info(
-                f"Web collection: written={collect_report.get('total_written', 0)}, "
-                f"skipped={collect_report.get('total_skipped', 0)}, "
-                f"status={collect_report.get('status')}"
+                "Web collection: written=%s, skipped=%s, status=%s",
+                collect_report.get("total_written", 0),
+                collect_report.get("total_skipped", 0),
+                collect_report.get("status"),
             )
         except Exception as e:
             collect_report = {"status": "error", "error": safe_errors.public_error_detail(e)}
             report["errors"].append(f"Web collection error: {safe_errors.public_error_detail(e)}")
-            logger.warning(f"Web collection failed (non-fatal): {e}")
+            safe_errors.log_exception(logger, "Web collection failed (non-fatal)", e)
+            logger.warning("Web collection failed (non-fatal)")
     report["phases"]["web_collection"] = collect_report
 
     # ── Phase 1: Weakness analysis ──
@@ -3144,7 +3224,7 @@ def run_daily_cycle(
         "weak_domains": [{"domain": w["domain"], "avg_score": w["avg_score"],
                           "samples": w["sample_count"]} for w in weak_domains]
     }
-    logger.info(f"Daily cycle: weak domains = {[w['domain'] for w in weak_domains]}")
+    logger.info("Daily cycle: weak_domain_count=%s", len(weak_domains))
 
     # ── Phase 2: Targeted distillation (max 2 weak domains) ──
     distill_results = []
@@ -3242,9 +3322,14 @@ def run_daily_cycle(
         gap_summary["error"] = safe_errors.public_error_detail(e)
     report["phases"]["knowledge_gaps"] = gap_summary
 
-    logger.info(f"Daily cycle complete: {report['status']} — "
-                f"weak={len(weak_domains)}, distilled={len(distill_results)}, "
-                f"train_domain={train_domain}, dry_run={dry_run}")
+    logger.info(
+        "Daily cycle complete: status=%s weak=%s distilled=%s train_domain=%s dry_run=%s",
+        report["status"],
+        len(weak_domains),
+        len(distill_results),
+        train_domain,
+        dry_run,
+    )
 
     # Write report to disk
     try:
@@ -3254,7 +3339,7 @@ def run_daily_cycle(
             reports_dir,
             f"{datetime.datetime.now().strftime('%Y-%m-%d')}.json",
         )
-        with open(report_file, "w", encoding="utf-8") as f:
+        with open_text(report_file, TRAINING_PATH, "w") as f:
             json.dump(report, f, indent=2, ensure_ascii=False)
         report["report_file"] = report_file
     except Exception as e:

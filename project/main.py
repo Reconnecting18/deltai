@@ -579,8 +579,8 @@ async def _react_reasoning_loop(client, model: str, user_message: str,
                     result = execute_fn(name, args)
                     result_str = str(result)[:4000]
                 except Exception as e:
-                    safe_errors.log_exception(logger, f"ReAct tool {name} failed", e)
-                    result_str = f"Error: {safe_errors.public_error_detail(e)}"
+                    safe_errors.log_exception(logger, "ReAct tool execution failed", e)
+                    result_str = "Error: tool execution failed"
 
                 events.append({"t": "result", "n": name, "s": result_str[:200]})
                 messages.append({"role": "tool", "content": result_str})
@@ -2014,10 +2014,7 @@ async def chat(req: ChatRequest):
                         result = await asyncio.to_thread(execute_tool, name, args)
                     except Exception as tool_err:
                         safe_errors.log_exception(logger, "Tool execution crashed", tool_err)
-                        result = (
-                            "ERROR: Tool execution crashed: "
-                            f"{safe_errors.public_error_detail(tool_err)}"
-                        )
+                        result = "ERROR: Tool execution crashed"
                     # If tool errored, retry once with sanitized args
                     if result.startswith("ERROR:") and name in ("run_shell", "read_file", "write_file"):
                         yield json.dumps({"t": "retry", "n": name, "c": "Retrying with adjusted parameters..."}) + "\n"
@@ -3017,10 +3014,8 @@ async def voice_tts(req: TTSRequest):
         return JSONResponse({"error": "Voice module not available"}, status_code=503)
     result = await synthesize_speech(req.text, voice=req.voice, rate=req.rate, pitch=req.pitch)
     if "error" in result:
-        return JSONResponse(
-            {"error": safe_errors.public_error_detail(Exception(result["error"]))},
-            status_code=500,
-        )
+        logger.error("Voice TTS failed (detail omitted from logs and response)")
+        return JSONResponse({"error": "Voice synthesis failed"}, status_code=500)
     return Response(
         content=result["audio"],
         media_type=f"audio/{result['format']}",

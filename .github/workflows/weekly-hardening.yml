@@ -2,14 +2,26 @@ name: Weekly hardening
 
 # Weekly verify + diagnostics; opens a bot PR when Ruff can apply safe fixes.
 # Offset from CodeQL (Sat 05:22 UTC) to spread load.
+#
+# Repo prerequisite (one-time): Settings → Actions → General → Workflow permissions:
+# enable "Allow GitHub Actions to create and approve pull requests". Otherwise
+# peter-evans/create-pull-request fails with "GitHub Actions is not permitted to
+# create or approve pull requests" (org policy can override).
 on:
   schedule:
     - cron: "35 6 * * 1"
   workflow_dispatch:
 
+# Explicit token scope (CodeQL actions/missing-workflow-permissions). Jobs narrow where possible.
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   verify:
     name: Verify
+    permissions:
+      contents: read
     uses: ./.github/workflows/python-verify.yml
     with:
       pytest_args: "-q"
@@ -22,6 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: read
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -75,7 +88,7 @@ jobs:
         run: echo "name=chore/ruff-auto-fixes-$(date -u +%Y%m%d)-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
 
       - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v8
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
         with:
           commit-message: "chore: apply Ruff lint fixes and format"
           branch: ${{ steps.branch.outputs.name }}

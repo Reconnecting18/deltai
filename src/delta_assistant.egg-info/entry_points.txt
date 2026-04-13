@@ -1,2 +1,0 @@
-[console_scripts]
-delta-daemon = delta.daemon.server:main

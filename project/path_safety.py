@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
+from typing import IO, Literal
 
 # Export formats allowed by export_dataset()
 _EXPORT_FORMATS = frozenset({"alpaca", "sharegpt", "chatml"})
@@ -77,3 +78,18 @@ def require_path_under(path: str, root: str) -> str:
     except ValueError as e:
         raise ValueError("path is outside allowed directory") from e
     return os.fspath(p)
+
+
+def open_text(
+    path: str,
+    root: str,
+    mode: Literal["r", "w", "a"] = "r",
+    *,
+    encoding: str = "utf-8",
+) -> IO[str]:
+    """
+    Open a text file only after verifying ``path`` resolves under ``root``.
+    Helps CodeQL py/path-injection recognize ``require_path_under`` before ``open``.
+    """
+    safe = require_path_under(path, root)
+    return open(safe, mode, encoding=encoding)
