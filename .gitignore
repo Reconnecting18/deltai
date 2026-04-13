@@ -62,6 +62,13 @@ data/knowledge/
 # External tools (cloned repos)
 tools/llama.cpp/
 
+# Extensions — personal extensions are git-ignored by default.
+# To track an extension: git add -f project/extensions/my_feature/
+project/extensions/*/
+!project/extensions/example_extension/
+!project/extensions/__init__.py
+!project/extensions/README.md
+
 # Temp
 *.tmp
 *.bak

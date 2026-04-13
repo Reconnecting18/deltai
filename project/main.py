@@ -83,6 +83,15 @@ try:
 except ImportError as e:
     logger.warning(f"Voice system unavailable: {e}")
 
+# ── EXTENSIONS IMPORTS ─────────────────────────────────────────────────
+EXTENSIONS_AVAILABLE = False
+try:
+    from extensions import load_extensions, get_extension_tools, shutdown_extensions
+    from tools.definitions import _merge_extension_tools
+    EXTENSIONS_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Extensions system unavailable: {e}")
+
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 DELTAI_MODEL  = os.getenv("DELTAI_MODEL", "deltai")
 BACKUP_MAX_RETRIES = int(os.getenv("BACKUP_MAX_RETRIES", "2"))
@@ -1287,6 +1296,12 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"Watcher shutdown failed: {e}")
 
+    if EXTENSIONS_AVAILABLE:
+        try:
+            await shutdown_extensions()
+        except Exception as e:
+            logger.error(f"Extensions shutdown failed: {e}")
+
 app = FastAPI(title="deltai", lifespan=lifespan)
 
 app.add_middleware(
@@ -1297,6 +1312,14 @@ app.add_middleware(
 )
 
 app.mount("/static", StaticFiles(directory=os.path.join(_HERE, "static")), name="static")
+
+# ── EXTENSIONS ──────────────────────────────────────────────────────────
+if EXTENSIONS_AVAILABLE:
+    try:
+        load_extensions(app)
+        _merge_extension_tools(get_extension_tools())
+    except Exception as _ext_err:
+        logger.warning(f"Extensions failed to initialise: {_ext_err}")
 
 
 # ── TEXT-AS-TOOL FALLBACK PARSER ────────────────────────────────────────
