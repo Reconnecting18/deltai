@@ -7,8 +7,8 @@ import logging
 
 
 def log_exception(logger: logging.Logger, message: str, exc: BaseException) -> None:
-    """Log full traceback server-side."""
-    logger.error("%s", message, exc_info=(type(exc), exc, exc.__traceback__))
+    """Log exception category without embedding exception text (CodeQL py/log-injection)."""
+    logger.error("%s [%s]", message, type(exc).__name__, exc_info=False)
 
 
 def public_error_detail(

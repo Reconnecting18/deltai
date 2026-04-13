@@ -20,7 +20,10 @@ import time
 import httpx
 import safe_errors
 from path_safety import (
+    exists_under,
+    getsize_under,
     open_text,
+    remove_under,
     require_path_under,
     resolve_under,
     safe_dataset_basename,
@@ -215,7 +218,7 @@ def register_adapter(name: str, domain: str, adapter_path: str,
     }
     registry["adapters"][name] = entry
     _save_registry(registry)
-    logger.info("Registered adapter: %s (domain=%s, v%s)", name, domain, version)
+    logger.info("Registered adapter in registry")
     return {"status": "ok", "name": name, "version": version, "entry": entry}
 
 
@@ -278,7 +281,7 @@ def set_active_adapter(domain: str, adapter_name: str) -> dict:
         return {"status": "error", "reason": f"Adapter not found: {adapter_name}"}
     registry["active_adapters"][domain] = adapter_name
     _save_registry(registry)
-    logger.info("Active adapter for %s: %s", domain, adapter_name)
+    logger.info("Active adapter updated for domain slot")
     return {"status": "ok", "domain": domain, "adapter": adapter_name}
 
 
@@ -303,7 +306,7 @@ def remove_adapter(name: str, delete_files: bool = False) -> dict:
         try:
             ap = require_path_under(entry["adapter_path"], ADAPTERS_PATH)
             shutil.rmtree(ap)
-            logger.info("Deleted adapter files: %s", ap)
+            logger.info("Deleted adapter files from disk")
         except OSError as e:
             safe_errors.log_exception(logger, "Failed to delete adapter files", e)
             logger.warning("Failed to delete adapter files")
@@ -426,19 +429,16 @@ def merge_adapters(adapter_names: list = None, method: str = None,
             ap = require_path_under(entry["adapter_path"], ADAPTERS_PATH)
         except ValueError:
             return {"status": "error", "reason": f"Invalid adapter path for {name}"}
-        if not os.path.exists(ap):
+        if not exists_under(ap, ADAPTERS_PATH):
             return {"status": "error", "reason": f"Adapter files missing: {name}"}
 
-    logger.info(
-        "Merging adapters (count=%s) via %s (density=%s)",
-        len(adapter_names),
-        method,
-        density,
-    )
+    logger.info("Merging adapters (multi-adapter merge started)")
 
     try:
         merged_dir = resolve_under(ADAPTERS_PATH, f"{output_model}-merged")
         gguf_file = resolve_under(GGUF_PATH, f"{output_model}.gguf")
+        merged_dir = require_path_under(merged_dir, ADAPTERS_PATH)
+        gguf_file = require_path_under(gguf_file, GGUF_PATH)
     except ValueError as e:
         safe_errors.log_exception(logger, "Adapter merge path invalid", e)
         return {"status": "error", "reason": safe_errors.public_error_detail(e)}
@@ -459,7 +459,7 @@ def merge_adapters(adapter_names: list = None, method: str = None,
         for name in adapter_names:
             raw_ap = registry["adapters"][name]["adapter_path"]
             adapter_path = require_path_under(raw_ap, ADAPTERS_PATH)
-            logger.info("Loading adapter: %s from %s", name, adapter_path)
+            logger.info("Loading adapter for merge (next delta)")
             adapted = PeftModel.from_pretrained(base_model, adapter_path)
             adapted = adapted.merge_and_unload()
             # Compute delta (what the adapter changed)
@@ -482,7 +482,7 @@ def merge_adapters(adapter_names: list = None, method: str = None,
                 )
 
         # Merge deltas
-        logger.info("Merging %s adapter deltas via %s...", len(deltas), method)
+        logger.info("Merging adapter deltas")
         if method == "ties":
             merged_delta = _ties_merge(deltas, density=density)
         elif method == "linear":
@@ -514,7 +514,7 @@ def merge_adapters(adapter_names: list = None, method: str = None,
         final_model.save_pretrained(merged_dir)
         tokenizer = AutoTokenizer.from_pretrained(HF_BASE_MODEL, trust_remote_code=True)
         tokenizer.save_pretrained(merged_dir)
-        logger.info("Merged model saved to %s", merged_dir)
+        logger.info("Merged model saved under adapters root")
 
         del final_model
         gc.collect()
@@ -541,7 +541,7 @@ def merge_adapters(adapter_names: list = None, method: str = None,
             registry["merged_models"].append(output_model)
         _save_registry(registry)
 
-        logger.info("Merge complete: %s registered in Ollama", output_model)
+        logger.info("Merge complete; production model registered in Ollama")
         return {
             "status": "ok",
             "output_model": output_model,
@@ -552,7 +552,7 @@ def merge_adapters(adapter_names: list = None, method: str = None,
 
     except Exception as e:
         safe_errors.log_exception(logger, "Adapter merge failed", e)
-        logger.error("Adapter merge failed", exc_info=True)
+        logger.error("Adapter merge failed")
         # Cleanup
         try:
             shutil.rmtree(merged_dir)
@@ -593,7 +593,7 @@ def start_domain_training(domain: str, dataset_name: str = None,
         for ds_name, ds_domain in DATASET_DOMAIN_MAP.items():
             if ds_domain == domain:
                 ds_path = _dataset_path(ds_name)
-                if os.path.exists(ds_path):
+                if exists_under(ds_path, DATASETS_PATH):
                     dataset_name = ds_name
                     break
         if dataset_name is None:
@@ -601,7 +601,7 @@ def start_domain_training(domain: str, dataset_name: str = None,
 
     # Verify dataset exists and has examples
     ds_path = _dataset_path(dataset_name)
-    if not os.path.exists(ds_path):
+    if not exists_under(ds_path, DATASETS_PATH):
         return {"status": "error", "reason": f"Dataset not found: {dataset_name}"}
 
     # Auto-select freeze layers and LoRA config
@@ -622,16 +622,7 @@ def start_domain_training(domain: str, dataset_name: str = None,
     version = max(existing_versions, default=0) + 1
     adapter_name = f"{domain}-v{version}"
 
-    logger.info(
-        "Starting domain training: %s (dataset=%s, freeze=%s, r=%s, alpha=%s, lr=%s, epochs=%s)",
-        adapter_name,
-        dataset_name,
-        freeze_layers,
-        lora_r,
-        lora_alpha,
-        lr,
-        epochs,
-    )
+    logger.info("Starting domain-targeted LoRA training (hyperparameters omitted from log)")
 
     # Reset training state
     _training_state = {
@@ -703,8 +694,8 @@ def eval_adapter(adapter_name: str, eval_dataset: str = None,
         adapter_path = require_path_under(adapter_path, ADAPTERS_PATH)
     except ValueError:
         return {"status": "error", "reason": "Invalid adapter path"}
-    if not os.path.exists(adapter_path):
-        return {"status": "error", "reason": f"Adapter files missing: {adapter_path}"}
+    if not exists_under(adapter_path, ADAPTERS_PATH):
+        return {"status": "error", "reason": "Adapter files missing"}
 
     # Auto-select eval dataset
     if eval_dataset is None:
@@ -713,7 +704,7 @@ def eval_adapter(adapter_name: str, eval_dataset: str = None,
         return {"status": "error", "reason": "No eval dataset specified or available for domain"}
 
     ds_path = _dataset_path(eval_dataset)
-    if not os.path.exists(ds_path):
+    if not exists_under(ds_path, DATASETS_PATH):
         return {"status": "error", "reason": f"Eval dataset not found: {eval_dataset}"}
 
     # Load eval examples
@@ -839,12 +830,7 @@ def eval_adapter(adapter_name: str, eval_dataset: str = None,
                 if avg_score > current_score:
                     set_active_adapter(domain, adapter_name)
                     update_adapter(adapter_name, promoted=True)
-                    logger.info(
-                        "Auto-promoted %s (score %s > %s)",
-                        adapter_name,
-                        round(avg_score, 3),
-                        current_score,
-                    )
+                    logger.info("Auto-promoted adapter after eval (score improved)")
             else:
                 set_active_adapter(domain, adapter_name)
                 update_adapter(adapter_name, promoted=True)
@@ -861,7 +847,7 @@ def eval_adapter(adapter_name: str, eval_dataset: str = None,
 
     except Exception as e:
         safe_errors.log_exception(logger, "Adapter eval failed", e)
-        logger.error("Adapter eval failed", exc_info=True)
+        logger.error("Adapter eval failed")
         try:
             import torch
             torch.cuda.empty_cache()
@@ -946,7 +932,7 @@ def list_datasets() -> list[dict]:
         except Exception:
             pass
         try:
-            size_kb = round(os.path.getsize(fpath) / 1024, 1)
+            size_kb = round(getsize_under(fpath, DATASETS_PATH) / 1024, 1)
         except OSError:
             size_kb = 0
         datasets.append({
@@ -960,7 +946,7 @@ def list_datasets() -> list[dict]:
 def create_dataset(name: str) -> dict:
     """Create a new empty dataset."""
     path = _dataset_path(name)
-    if os.path.exists(path):
+    if exists_under(path, DATASETS_PATH):
         return {"status": "error", "reason": "Dataset already exists"}
     try:
         with open_text(path, DATASETS_PATH, "w") as f:
@@ -973,10 +959,10 @@ def create_dataset(name: str) -> dict:
 def delete_dataset(name: str) -> dict:
     """Delete a dataset file."""
     path = _dataset_path(name)
-    if not os.path.exists(path):
+    if not exists_under(path, DATASETS_PATH):
         return {"status": "error", "reason": "Dataset not found"}
     try:
-        os.remove(path)
+        remove_under(path, DATASETS_PATH)
         return {"status": "ok", "name": name}
     except Exception as e:
         return {"status": "error", "reason": safe_errors.public_error_detail(e)}
@@ -985,7 +971,7 @@ def delete_dataset(name: str) -> dict:
 def get_dataset(name: str) -> dict:
     """Get all examples from a dataset."""
     path = _dataset_path(name)
-    if not os.path.exists(path):
+    if not exists_under(path, DATASETS_PATH):
         return {"status": "error", "reason": "Dataset not found", "examples": []}
     examples = []
     try:
@@ -1008,7 +994,7 @@ def get_dataset(name: str) -> dict:
 def add_example(name: str, input_text: str, output_text: str, category: str = "general") -> dict:
     """Append a training example to a dataset."""
     path = _dataset_path(name)
-    if not os.path.exists(path):
+    if not exists_under(path, DATASETS_PATH):
         return {"status": "error", "reason": "Dataset not found"}
     if not output_text.strip():
         return {"status": "error", "reason": "Output cannot be empty"}
@@ -1029,7 +1015,7 @@ def add_example(name: str, input_text: str, output_text: str, category: str = "g
 def remove_example(name: str, index: int) -> dict:
     """Remove an example by line index from a dataset."""
     path = _dataset_path(name)
-    if not os.path.exists(path):
+    if not exists_under(path, DATASETS_PATH):
         return {"status": "error", "reason": "Dataset not found"}
     try:
         with open_text(path, DATASETS_PATH, "r") as f:
@@ -1188,7 +1174,7 @@ def _unload_ollama_models_sync():
                 httpx.post(f"{ollama_url}/api/generate", json={
                     "model": model_name, "prompt": "", "keep_alive": 0
                 }, timeout=10)
-                logger.info("Unloaded %s from VRAM for training", model_name)
+                logger.info("Unloaded Ollama model from VRAM for training")
     except Exception as e:
         safe_errors.log_exception(logger, "Failed to unload Ollama models", e)
         logger.warning("Failed to unload Ollama models")
@@ -1209,13 +1195,14 @@ def _read_system_prompt(ollama_model_name: str) -> str:
     """Extract SYSTEM prompt from an existing Ollama modelfile."""
     raw = _KNOWN_MODELFILES.get(ollama_model_name)
     if raw:
+        mf_root = os.path.realpath(os.path.expanduser("~/deltai/modelfiles"))
+        path = None
         try:
-            mf_root = os.path.realpath(os.path.expanduser("~/deltai/modelfiles"))
             base = os.path.basename(os.path.expanduser(raw))
             path = resolve_under(mf_root, base)
         except ValueError:
             path = None
-        if path and os.path.exists(path):
+        if path and exists_under(path, mf_root):
             try:
                 with open_text(path, mf_root, "r") as f:
                     content = f.read()
@@ -1356,7 +1343,7 @@ def _run_fewshot_training(dataset_name: str, base_model: str, output_model: str)
             error=safe_errors.public_error_detail(e), progress=0,
         )
         safe_errors.log_exception(logger, "Fewshot training error", e)
-        logger.error("Fewshot training error", exc_info=True)
+        logger.error("Fewshot training error")
 
 
 # ── LORA TRAINING ────────────────────────────────────────────────────
@@ -1432,6 +1419,8 @@ def _convert_to_gguf(merged_dir: str, output_gguf: str, quant_method: str = "Q4_
     Convert a HuggingFace model directory to quantized GGUF.
     Uses llama.cpp convert_hf_to_gguf.py → f16 GGUF → llama-quantize → quantized GGUF.
     """
+    merged_dir = require_path_under(merged_dir, ADAPTERS_PATH)
+    output_gguf = require_path_under(output_gguf, GGUF_PATH)
     convert_script = _find_convert_script()
     if not convert_script:
         raise RuntimeError(
@@ -1440,8 +1429,8 @@ def _convert_to_gguf(merged_dir: str, output_gguf: str, quant_method: str = "Q4_
         )
 
     # Step 1: Convert HF → F16 GGUF
-    f16_gguf = output_gguf.replace(".gguf", "-f16.gguf")
-    logger.info("Converting merged model to F16 GGUF: %s", f16_gguf)
+    f16_gguf = require_path_under(output_gguf.replace(".gguf", "-f16.gguf"), GGUF_PATH)
+    logger.info("Converting merged model to F16 GGUF")
 
     proc = subprocess.run(
         ["python", convert_script, merged_dir,
@@ -1454,7 +1443,7 @@ def _convert_to_gguf(merged_dir: str, output_gguf: str, quant_method: str = "Q4_
     # Step 2: Quantize F16 → target quantization
     quantize_bin = _find_quantize_binary()
     if quantize_bin:
-        logger.info("Quantizing to %s: %s", quant_method, output_gguf)
+        logger.info("Quantizing GGUF weights")
         proc = subprocess.run(
             [quantize_bin, f16_gguf, output_gguf, quant_method],
             capture_output=True, text=True, timeout=600
@@ -1462,17 +1451,21 @@ def _convert_to_gguf(merged_dir: str, output_gguf: str, quant_method: str = "Q4_
         if proc.returncode != 0:
             raise RuntimeError(f"Quantization failed: {proc.stderr[:500]}")
         # Clean up f16 intermediate
-        if os.path.exists(f16_gguf):
-            os.remove(f16_gguf)
+        if exists_under(f16_gguf, GGUF_PATH):
+            remove_under(f16_gguf, GGUF_PATH)
     else:
         # No quantize binary — rename f16 as final (larger but functional)
-        os.rename(f16_gguf, output_gguf)
+        os.rename(
+            require_path_under(f16_gguf, GGUF_PATH),
+            require_path_under(output_gguf, GGUF_PATH),
+        )
         logger.warning("llama-quantize not found — using f16 GGUF (larger file size)")
 
 
 def _register_ollama_model(model_name: str, gguf_path: str, system_prompt: str):
     """Create an Ollama model from a GGUF file. Writes Modelfile, runs `ollama create`."""
     model_name = _sanitize_model_name(model_name)
+    gguf_path = require_path_under(gguf_path, GGUF_PATH)
     modelfile_path = resolve_under(MODELFILES_PATH, f"{model_name}.modelfile")
 
     modelfile_content = (
@@ -1491,7 +1484,7 @@ def _register_ollama_model(model_name: str, gguf_path: str, system_prompt: str):
     )
     if proc.returncode != 0:
         raise RuntimeError(f"ollama create failed: {proc.stderr[:500]}")
-    logger.info("Registered %s in Ollama from %s", model_name, gguf_path)
+    logger.info("Registered GGUF-backed model in Ollama")
 
 
 def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
@@ -1708,7 +1701,7 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
         )
 
         train_result = trainer.train()
-        logger.info("LoRA training done: %s", train_result.metrics)
+        logger.info("LoRA training epoch loop finished")
 
         # Check if cancelled
         if _training_cancel_flag.is_set():
@@ -1725,7 +1718,7 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
         model.save_pretrained(adapter_dir)
         tokenizer.save_pretrained(adapter_dir)
         _update_state(adapter_path=adapter_dir)
-        logger.info("LoRA adapter saved to %s", adapter_dir)
+        logger.info("LoRA adapter saved under training root")
 
         # ── Step 8b: Adapter-only mode (domain training) ──
         if adapter_only:
@@ -1748,7 +1741,7 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
                 running=False, progress=100, status="completed (adapter saved)",
                 completed=int(time.time()), error=None,
             )
-            logger.info("Domain adapter saved: %s (domain=%s)", output_model, domain)
+            logger.info("Domain adapter saved to registry")
             return
 
         # ── Step 9: Free VRAM, merge on CPU ──
@@ -1772,7 +1765,7 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
         merged_model.save_pretrained(merged_dir)
         tokenizer = AutoTokenizer.from_pretrained(HF_BASE_MODEL, trust_remote_code=True)
         tokenizer.save_pretrained(merged_dir)
-        logger.info("Merged model saved to %s", merged_dir)
+        logger.info("Merged model saved under adapters root")
 
         del base_model_fp16, merged_model
         gc.collect()
@@ -1804,7 +1797,7 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
         # ── Step 12: Cleanup merged dir (large, no longer needed) ──
         try:
             shutil.rmtree(merged_dir)
-            logger.info("Cleaned up merged model dir: %s", merged_dir)
+            logger.info("Cleaned up merged model working directory")
         except Exception:
             pass
 
@@ -1813,11 +1806,11 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
             running=False, progress=100, status="completed",
             completed=int(time.time()), error=None,
         )
-        logger.info("LoRA training complete: %s registered in Ollama", output_model)
+        logger.info("LoRA training complete; model registered in Ollama")
 
     except Exception as e:
         safe_errors.log_exception(logger, "LoRA training failed", e)
-        logger.error("LoRA training failed", exc_info=True)
+        logger.error("LoRA training failed")
         _update_state(running=False, status="failed", error=safe_errors.public_error_detail(e), progress=0)
         try:
             import torch
@@ -1863,7 +1856,7 @@ def _run_distill_training(teacher_dataset: str, replay_datasets: list[str],
             )
             return
 
-        logger.info("Distill blend created: %s", blend_result)
+        logger.info("Distill blend created")
         _update_state(
             status="training with distill hyperparameters",
             progress=10,
@@ -1889,35 +1882,28 @@ def _run_distill_training(teacher_dataset: str, replay_datasets: list[str],
         try:
             retention = verify_retention(output_model, baseline_model=base_model.replace("-ft", ""))
             if not retention.get("passed", False):
-                logger.warning(
-                    "Retention check WARNING: pass_rate=%s < threshold=%s",
-                    retention.get("pass_rate", 0),
-                    retention.get("threshold", 0.7),
-                )
+                logger.warning("Retention check below configured threshold")
                 _update_state(
                     status="completed_with_warning",
                     error=f"Retention below threshold: {retention.get('pass_rate', 0):.0%}",
                 )
             else:
-                logger.info(
-                    "Retention check passed: %s",
-                    format(retention.get("pass_rate", 0), ".0%"),
-                )
+                logger.info("Retention check passed")
         except Exception as e:
             safe_errors.log_exception(logger, "Retention verification failed (non-blocking)", e)
             logger.warning("Retention verification failed (non-blocking)")
 
     except Exception as e:
         safe_errors.log_exception(logger, "Distill training error", e)
-        logger.error("Distill training error", exc_info=True)
+        logger.error("Distill training error")
         _update_state(running=False, status="failed", error=safe_errors.public_error_detail(e), progress=0)
     finally:
         # Cleanup temporary blend dataset
         try:
             blend_path = _dataset_path(blend_name)
-            if os.path.exists(blend_path):
-                os.remove(blend_path)
-                logger.info("Cleaned up temporary blend dataset: %s", blend_name)
+            if exists_under(blend_path, DATASETS_PATH):
+                remove_under(blend_path, DATASETS_PATH)
+                logger.info("Cleaned up temporary blend dataset")
         except Exception:
             pass
 
@@ -2207,7 +2193,7 @@ def auto_capture(
 
     # Ensure dataset exists (auto-create if needed)
     ds_path = _dataset_path(dataset_name)
-    if not os.path.exists(ds_path):
+    if not exists_under(ds_path, DATASETS_PATH):
         create_dataset(dataset_name)
 
     # Determine capture category
@@ -2292,7 +2278,7 @@ def generate_teacher_data(
 
     # Ensure dataset exists
     ds_path = _dataset_path(dataset_name)
-    if not os.path.exists(ds_path):
+    if not exists_under(ds_path, DATASETS_PATH):
         create_dataset(dataset_name)
 
     generated = 0
@@ -2375,10 +2361,7 @@ def generate_teacher_data(
 
         except Exception as e:
             safe_errors.log_exception(logger, "Teacher generation failed for query", e)
-            logger.warning(
-                "Teacher generation failed (query_len=%s)",
-                len(query),
-            )
+            logger.warning("Teacher generation failed for one query (detail omitted)")
             filtered += 1
             continue
 
@@ -2400,7 +2383,7 @@ def blend_datasets(
 
     # Check output doesn't already exist
     out_path = _dataset_path(output_name)
-    if os.path.exists(out_path):
+    if exists_under(out_path, DATASETS_PATH):
         return {"status": "error", "reason": f"Output dataset '{output_name}' already exists"}
 
     # Load and sample from each source
@@ -2657,7 +2640,7 @@ def smart_auto_capture(
     if quality_score >= 0.8:
         # Exemplary — always capture
         ds_path = _dataset_path(dataset_name)
-        if not os.path.exists(ds_path):
+        if not exists_under(ds_path, DATASETS_PATH):
             create_dataset(dataset_name)
         result = add_example(dataset_name, capture_input, assistant_msg, category=category)
         return {"captured": True, "dataset": dataset_name, "tier": "exemplary",
@@ -2667,7 +2650,7 @@ def smart_auto_capture(
         # Good — capture with 50% probability to prevent dataset bloat
         if _random.random() < 0.5:
             ds_path = _dataset_path(dataset_name)
-            if not os.path.exists(ds_path):
+            if not exists_under(ds_path, DATASETS_PATH):
                 create_dataset(dataset_name)
             result = add_example(dataset_name, capture_input, assistant_msg, category=category)
             return {"captured": True, "dataset": dataset_name, "tier": "good",
@@ -2678,7 +2661,7 @@ def smart_auto_capture(
         # Poor — capture as negative example for potential DPO training
         neg_dataset = f"{dataset_name}-negative"
         ds_path = _dataset_path(neg_dataset)
-        if not os.path.exists(ds_path):
+        if not exists_under(ds_path, DATASETS_PATH):
             create_dataset(neg_dataset)
         result = add_example(neg_dataset, capture_input, assistant_msg,
                            category=f"negative:{category}")
@@ -2756,7 +2739,7 @@ def distill_targeted(domain: str, n_queries: int = 50,
     # Generate teacher data for these queries
     dataset_name = f"distill-{domain}-targeted"
     ds_path = _dataset_path(dataset_name)
-    if not os.path.exists(ds_path):
+    if not exists_under(ds_path, DATASETS_PATH):
         create_dataset(dataset_name)
 
     generated = 0
@@ -2837,9 +2820,9 @@ def start_dpo_training(
     pos_path = _dataset_path(positive_dataset)
     neg_path = _dataset_path(negative_dataset)
 
-    if not os.path.exists(pos_path):
+    if not exists_under(pos_path, DATASETS_PATH):
         return {"status": "error", "reason": f"Positive dataset not found: {positive_dataset}"}
-    if not os.path.exists(neg_path):
+    if not exists_under(neg_path, DATASETS_PATH):
         return {"status": "error", "reason": f"Negative dataset not found: {negative_dataset}"}
 
     effective_base = base_model or HF_BASE_MODEL
@@ -2857,7 +2840,7 @@ def start_dpo_training(
             _dpo_train_impl(positive_dataset, negative_dataset, effective_base, effective_output)
         except Exception as e:
             safe_errors.log_exception(logger, "DPO training failed", e)
-            logger.error("DPO training failed", exc_info=True)
+            logger.error("DPO training failed")
             _update_state(running=False, status="failed", error=safe_errors.public_error_detail(e))
 
     t = threading.Thread(target=_run_dpo, daemon=True)
@@ -2884,7 +2867,8 @@ def _dpo_train_impl(
         from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
         from trl import DPOConfig, DPOTrainer
     except ImportError as e:
-        logger.error("DPO training dependencies missing: %s", e)
+        safe_errors.log_exception(logger, "DPO training dependencies missing", e)
+        logger.error("DPO training dependencies missing")
         _update_state(
             running=False,
             status="failed",
@@ -3000,7 +2984,7 @@ def _dpo_train_impl(
 
     _update_state(running=False, progress=100, status="DPO training complete",
                   completed=int(time.time()), error=None)
-    logger.info("DPO training complete: %s (%s pairs)", output_model, len(pairs))
+    logger.info("DPO training complete (%s preference pairs)", len(pairs))
 
 
 # ── SESSION KNOWLEDGE SYNTHESIS ───────────────────────────────────────────
@@ -3184,7 +3168,7 @@ def run_daily_cycle(
             f"Insufficient VRAM ({guards.get('vram_free_mb', 0)}MB < "
             f"{_DAILY_TRAIN_MIN_VRAM_MB}MB required)"
         )
-        logger.info("Daily cycle skipped: %s", report["skip_reason"])
+        logger.info("Daily cycle skipped (reason recorded in report JSON)")
         return report
 
     # Ensure SQLite schema (routing_feedback, knowledge_gaps, etc.) exists before any phase
@@ -3196,7 +3180,8 @@ def run_daily_cycle(
     except Exception as e:
         report["status"] = "error"
         report["errors"].append(f"Persistence init failed: {safe_errors.public_error_detail(e)}")
-        logger.exception("Daily cycle: persistence init failed")
+        safe_errors.log_exception(logger, "Daily cycle: persistence init failed", e)
+        logger.error("Daily cycle: persistence init failed")
         return report
 
     # ── Phase 0.5: Web training data collection ──
@@ -3205,12 +3190,7 @@ def run_daily_cycle(
         try:
             from collector import run_collection_cycle  # noqa: PLC0415
             collect_report = run_collection_cycle(dry_run=dry_run)
-            logger.info(
-                "Web collection: written=%s, skipped=%s, status=%s",
-                collect_report.get("total_written", 0),
-                collect_report.get("total_skipped", 0),
-                collect_report.get("status"),
-            )
+            logger.info("Web collection phase finished")
         except Exception as e:
             collect_report = {"status": "error", "error": safe_errors.public_error_detail(e)}
             report["errors"].append(f"Web collection error: {safe_errors.public_error_detail(e)}")
@@ -3274,7 +3254,7 @@ def run_daily_cycle(
     domain_examples = sum(
         len((get_dataset(ds) or {}).get("examples", []))
         for ds in domain_datasets
-        if os.path.exists(_dataset_path(ds))
+        if exists_under(_dataset_path(ds), DATASETS_PATH)
     )
 
     training_result = {"domain": train_domain, "status": "skipped", "reason": ""}
@@ -3290,7 +3270,7 @@ def run_daily_cycle(
         # Blend domain datasets for training
         blend_name = f"daily-blend-{train_domain}-{datetime.datetime.now().strftime('%Y%m%d')}"
         sources = [{"dataset": ds, "weight": 1.0}
-                   for ds in domain_datasets if os.path.exists(_dataset_path(ds))]
+                   for ds in domain_datasets if exists_under(_dataset_path(ds), DATASETS_PATH)]
         if sources:
             blend_result = blend_datasets(blend_name, sources)
             if blend_result.get("status") == "ok":

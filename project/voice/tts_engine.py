@@ -108,22 +108,21 @@ class PiperTTS:
             chunks = list(self._model.synthesize(text))
 
             if not chunks:
-                logger.warning("Piper produced no audio chunks for: '%.40s...'", text)
+                logger.warning("Piper produced no audio chunks for input")
                 return None
 
             # Concatenate all sentence chunks into one continuous array
             audio = np.concatenate([c.audio_float_array for c in chunks])
 
             logger.debug(
-                "Synthesized %d samples (%.2fs) for text: '%.40s...'",
+                "Synthesized %d samples (%.2fs)",
                 len(audio),
                 len(audio) / self.sample_rate,
-                text,
             )
             return audio
 
-        except Exception as e:
-            logger.error("TTS synthesis failed: %s", e)
+        except Exception:
+            logger.error("TTS synthesis failed")
             return None
 
     def unload(self) -> None:

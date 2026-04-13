@@ -1650,7 +1650,11 @@ async def chat(req: ChatRequest):
             yield json.dumps({"t": "route", **route_data}) + "\n"
             yield json.dumps({"t": "text", "c": greeting_response}) + "\n"
             yield json.dumps({"t": "done"}) + "\n"
-        logger.info(f"Greeting short-circuit: '{req.message}' → '{greeting_response}'")
+        logger.info(
+            "Greeting short-circuit (message_len=%s reply_len=%s)",
+            len(req.message or ""),
+            len(greeting_response or ""),
+        )
         return StreamingResponse(stream_greeting(), media_type="application/x-ndjson")
 
     # ── RAG CONTEXT ─────────────────────────────────────────

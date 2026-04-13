@@ -10,10 +10,20 @@ from pathlib import Path
 from typing import Optional
 import json
 import logging
+import os
+
+from path_safety import resolve_under, safe_dataset_basename
 
 logger = logging.getLogger("deltai.voice.config")
 
 PRESETS_DIR = Path(r"~/deltai/data\voice\presets")
+
+
+def _preset_json_path(name: str) -> Path:
+    """Single-segment JSON path under expanded PRESETS_DIR (CodeQL py/path-injection)."""
+    stem = safe_dataset_basename(name)
+    root = os.path.realpath(os.path.expanduser(str(PRESETS_DIR)))
+    return Path(resolve_under(root, f"{stem}.json"))
 VOICE_DATA_DIR = Path(r"~/deltai/data\voice")
 
 
@@ -167,13 +177,17 @@ class VoiceConfig:
         Returns:
             Path to the saved preset file.
         """
-        PRESETS_DIR.mkdir(parents=True, exist_ok=True)
-        path = PRESETS_DIR / f"{name}.json"
+        try:
+            path = _preset_json_path(name)
+        except ValueError as e:
+            logger.error("Invalid voice preset name")
+            raise ValueError("Invalid voice preset name") from e
+        path.parent.mkdir(parents=True, exist_ok=True)
         try:
             path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
-            logger.info("Saved voice preset: %s -> %s", name, path)
-        except Exception as e:
-            logger.error("Failed to save preset '%s': %s", name, e)
+            logger.info("Saved voice preset")
+        except Exception:
+            logger.error("Failed to save voice preset")
         return path
 
     @classmethod
@@ -186,16 +200,20 @@ class VoiceConfig:
         Returns:
             VoiceConfig populated from the preset, or DEFAULT_CONFIG if not found.
         """
-        path = PRESETS_DIR / f"{name}.json"
+        try:
+            path = _preset_json_path(name)
+        except ValueError:
+            logger.warning("Invalid voice preset name — using defaults")
+            return cls()
         if not path.exists():
-            logger.warning("Preset '%s' not found at %s — using defaults", name, path)
+            logger.warning("Voice preset not found — using defaults")
             return cls()
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            logger.info("Loaded voice preset: %s", name)
+            logger.info("Loaded voice preset")
             return cls.from_dict(data)
-        except Exception as e:
-            logger.error("Failed to load preset '%s': %s — using defaults", name, e)
+        except Exception:
+            logger.error("Failed to load voice preset — using defaults")
             return cls()
 
 

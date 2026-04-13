@@ -80,6 +80,21 @@ def require_path_under(path: str, root: str) -> str:
     return os.fspath(p)
 
 
+def exists_under(path: str, root: str) -> bool:
+    """``os.path.exists`` after ``require_path_under`` (CodeQL py/path-injection)."""
+    return os.path.exists(require_path_under(path, root))
+
+
+def remove_under(path: str, root: str) -> None:
+    """``os.remove`` after ``require_path_under``."""
+    os.remove(require_path_under(path, root))
+
+
+def getsize_under(path: str, root: str) -> int:
+    """``os.path.getsize`` after ``require_path_under``."""
+    return os.path.getsize(require_path_under(path, root))
+
+
 def open_text(
     path: str,
     root: str,
@@ -89,7 +104,6 @@ def open_text(
 ) -> IO[str]:
     """
     Open a text file only after verifying ``path`` resolves under ``root``.
-    Helps CodeQL py/path-injection recognize ``require_path_under`` before ``open``.
+    Uses ``Path.open`` so CodeQL can connect ``require_path_under`` to the sink.
     """
-    safe = require_path_under(path, root)
-    return open(safe, mode, encoding=encoding)
+    return Path(require_path_under(path, root)).open(mode, encoding=encoding)

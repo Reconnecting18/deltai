@@ -102,7 +102,7 @@ async def speak(text: str, priority: str = "normal") -> bool:
     # Step 1: TTS — text to raw audio
     audio = _tts.synthesize(text)
     if audio is None:
-        logger.warning("TTS produced no audio for: '%.50s...' — pipeline aborted", text)
+        logger.warning("TTS produced no audio — pipeline aborted")
         return False
 
     sample_rate = _tts.sample_rate
@@ -117,9 +117,9 @@ async def speak(text: str, priority: str = "normal") -> bool:
     played = await _player.play(audio, sample_rate, priority)
 
     if played:
-        logger.debug("Spoke: '%.50s...' (priority=%s)", text, priority)
+        logger.debug("Voice playback completed (priority=%s)", priority)
     else:
-        logger.debug("Playback skipped for: '%.50s...'", text)
+        logger.debug("Voice playback skipped")
 
     return played
 

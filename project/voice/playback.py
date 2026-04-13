@@ -125,8 +125,8 @@ class Playback:
         try:
             await self._play_async(audio, sample_rate)
             return True
-        except Exception as e:
-            logger.error("Playback failed: %s", e)
+        except Exception:
+            logger.error("Playback failed")
             return False
         finally:
             self._playing = False
