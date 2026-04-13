@@ -74,7 +74,7 @@ test_execute_dispatch()
 def test_tool_count():
     from tools.definitions import TOOLS
     # Count non-telemetry tools (telemetry tools are conditional)
-    core_names = {"read_file", "write_file", "list_directory", "run_powershell",
+    core_names = {"read_file", "write_file", "list_directory", "run_shell",
                   "get_system_info", "search_knowledge", "memory_stats",
                   "self_diagnostics", "manage_ollama_models", "repair_subsystem"}
     found = {t["function"]["name"] for t in TOOLS if t["function"]["name"] in core_names}

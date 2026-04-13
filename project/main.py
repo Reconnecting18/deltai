@@ -941,7 +941,6 @@ async def _resource_manager_loop():
                         subprocess.Popen(
                             ["ollama", "serve"],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
                         )
                         _resource_state["last_recovery"] = now
                         _resource_state["ollama_failures"] = 0
@@ -1997,12 +1996,12 @@ async def chat(req: ChatRequest):
                             f"{safe_errors.public_error_detail(tool_err)}"
                         )
                     # If tool errored, retry once with sanitized args
-                    if result.startswith("ERROR:") and name in ("run_powershell", "read_file", "write_file"):
+                    if result.startswith("ERROR:") and name in ("run_shell", "read_file", "write_file"):
                         yield json.dumps({"t": "retry", "n": name, "c": "Retrying with adjusted parameters..."}) + "\n"
                         sanitized_args = dict(args)
                         if "path" in sanitized_args:
                             sanitized_args["path"] = os.path.normpath(sanitized_args["path"])
-                        if "timeout" in sanitized_args and name == "run_powershell":
+                        if "timeout" in sanitized_args and name == "run_shell":
                             sanitized_args["timeout"] = min(int(sanitized_args.get("timeout", 15)), 30)
                         try:
                             result2 = await asyncio.to_thread(execute_tool, name, sanitized_args)

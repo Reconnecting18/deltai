@@ -399,18 +399,18 @@ stress_sim_model_selection()
 def stress_tool_safety():
     from tools.executor import _is_command_safe, _is_path_safe_write
     # Should block
-    assert not _is_command_safe("Remove-Item -Recurse C:\\")
-    assert not _is_command_safe("Invoke-Expression 'malicious'")
-    assert not _is_command_safe("cmd /c del *")
-    assert not _is_command_safe("net user hacker /add")
-    assert not _is_command_safe("-ExecutionPolicy Bypass")
+    assert not _is_command_safe("rm -rf /"), "rm -rf / should be blocked"
+    assert not _is_command_safe("sudo apt install evil"), "sudo should be blocked"
+    assert not _is_command_safe("shutdown now"), "shutdown should be blocked"
+    assert not _is_command_safe("useradd hacker"), "useradd should be blocked"
+    assert not _is_command_safe("reboot"), "reboot should be blocked"
     # Should allow
-    assert _is_command_safe("Get-Process")
     assert _is_command_safe("ls ~/deltai")
+    assert _is_command_safe("ps aux | grep python")
     # Path safety
-    assert not _is_path_safe_write("C:\\Windows\\System32\\test.txt")
-    assert not _is_path_safe_write("C:\\Program Files\\test.txt")
-    assert _is_path_safe_write("~/deltai/data\\test.txt")
+    assert not _is_path_safe_write("/etc/test.txt"), "/etc should be protected"
+    assert not _is_path_safe_write("/boot/grub/test.txt"), "/boot should be protected"
+    assert _is_path_safe_write(os.path.expanduser("~/deltai/test.txt"))
 stress_tool_safety()
 
 # Stress 14: Training safety — blocks during sim

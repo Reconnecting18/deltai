@@ -24,31 +24,32 @@ def _tool_error(exc: BaseException, log_message: str) -> str:
 
 # ── SAFETY ──────────────────────────────────────────────────────────────
 PROTECTED_PATHS = [
-    "C:\\Windows",
-    "C:\\Program Files",
-    "C:\\Program Files (x86)",
-    "C:\\ProgramData",
+    "/etc",
+    "/boot",
+    "/proc",
+    "/sys",
+    "/root",
+    "/usr/bin",
+    "/usr/sbin",
+    "/sbin",
+    "/bin",
 ]
 
 BLOCKED_COMMANDS = [
-    "format-volume", "format ", "remove-item -recurse c:\\",
-    "stop-computer", "restart-computer",
-    "del c:\\windows", "rd c:\\windows",
-    "reg delete hklm",
-    # PowerShell code execution / bypass
-    "invoke-expression", "iex ", "iex(", "iex(",
-    "-encodedcommand", "-enc ",
-    "start-process", "invoke-webrequest", "invoke-restmethod",
-    "downloadstring", "downloadfile",
-    "new-object net.webclient", "bitstransfer",
-    # cmd escape
-    "cmd /c", "cmd.exe", "cmd /k",
+    # Filesystem destruction
+    "rm -rf /", "rm -rf /*", "mkfs", "dd if=",
+    # Privilege escalation
+    "sudo ", "su -", "sudo -i",
+    "chmod 777 /", "chown root",
     # User/group manipulation
-    "net user", "net localgroup",
-    # Registry via PowerShell
-    "set-itemproperty hklm", "new-itemproperty hklm",
-    # Script execution bypass
-    "-executionpolicy bypass", "-ep bypass", "-exec bypass",
+    "useradd", "userdel", "usermod", "groupadd", "groupdel",
+    "passwd ",
+    # System shutdown/reboot
+    "shutdown", "reboot", "halt", "poweroff", "init 0", "init 6",
+    # Dangerous network ops
+    "wget ", "curl ", "nc -",
+    # Fork bomb and shell escape patterns
+    ":(){ :|:& };:", "> /dev/sda",
 ]
 
 def _is_path_safe_write(path: str) -> bool:
@@ -193,18 +194,18 @@ def _fmt_size(b: int) -> str:
     return f"{b/1_048_576:.1f} MB"
 
 
-def run_powershell(command: str, timeout=15) -> str:
+def run_shell(command: str, timeout=15) -> str:
     try:
         timeout = _coerce_int(timeout, 15)
         timeout = min(timeout, 30)
         if not _is_command_safe(command):
             return f"ERROR: Command blocked for safety: {command}"
         result = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", command],
+            ["bash", "-c", command],
             capture_output=True,
             text=True,
             timeout=timeout,
-            cwd="~/deltai"
+            cwd=os.path.expanduser("~/deltai"),
         )
         output = ""
         if result.stdout.strip():
@@ -223,7 +224,7 @@ def run_powershell(command: str, timeout=15) -> str:
     except subprocess.TimeoutExpired:
         return f"ERROR: Command timed out after {timeout}s"
     except Exception as e:
-        return _tool_error(e, "run_powershell failed")
+        return _tool_error(e, "run_shell failed")
 
 
 def get_system_info(include_processes=False) -> str:
@@ -236,8 +237,8 @@ def get_system_info(include_processes=False) -> str:
         info.append(f"     {psutil.cpu_count(logical=False)}P/{psutil.cpu_count()} threads")
         ram = psutil.virtual_memory()
         info.append(f"RAM: {ram.used/1e9:.1f}/{ram.total/1e9:.1f} GB ({ram.percent}%)")
-        disk = psutil.disk_usage("C:\\")
-        info.append(f"Disk C: {disk.used/1e9:.0f}/{disk.total/1e9:.0f} GB ({disk.percent}%)")
+        disk = psutil.disk_usage("/")
+        info.append(f"Disk /: {disk.used/1e9:.0f}/{disk.total/1e9:.0f} GB ({disk.percent}%)")
         try:
             import pynvml
             pynvml.nvmlInit()
@@ -311,7 +312,7 @@ def memory_stats() -> str:
                 lines.append(f"    - {s}")
         else:
             lines.append("  No files ingested yet.")
-            lines.append("  Drop files in ~/deltai/data\\knowledge\\ to ingest.")
+            lines.append("  Drop files in ~/deltai/data/knowledge/ to ingest.")
         return "\n".join(lines)
     except ImportError:
         return "ERROR: Memory system not available (chromadb not installed)"
@@ -1371,7 +1372,6 @@ def repair_subsystem(repair: str) -> str:
                 ["ollama", "serve"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
             )
             import time
             time.sleep(5)
@@ -1547,7 +1547,7 @@ EXECUTORS = {
     "read_file": read_file,
     "write_file": write_file,
     "list_directory": list_directory,
-    "run_powershell": run_powershell,
+    "run_shell": run_shell,
     "get_system_info": get_system_info,
     "search_knowledge": search_knowledge,
     "memory_stats": memory_stats,

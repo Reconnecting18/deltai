@@ -67,7 +67,7 @@ LORA_MAX_SEQ_LEN = int(os.getenv("LORA_MAX_SEQ_LEN", "1024"))
 LORA_WARMUP_RATIO = float(os.getenv("LORA_WARMUP_RATIO", "0.05"))
 LORA_QUANT_METHOD = os.getenv("LORA_QUANT_METHOD", "Q4_K_M")
 HF_BASE_MODEL = os.getenv("HF_BASE_MODEL", "Qwen/Qwen2.5-3B-Instruct")
-LLAMA_CPP_PATH = os.getenv("LLAMA_CPP_PATH", r"~/deltai/tools\llama.cpp")
+LLAMA_CPP_PATH = os.path.expanduser(os.getenv("LLAMA_CPP_PATH", "~/deltai/tools/llama.cpp"))
 
 # ── DISTILLATION HYPERPARAMETERS (from .env) ──────────────────────────
 
@@ -746,7 +746,14 @@ def eval_adapter(adapter_name: str, eval_dataset: str = None,
         avg_latency = sum(r["latency"] for r in results) / len(results)
 
         # Save eval results
-        eval_file = os.path.join(EVAL_PATH, f"{adapter_name}_eval.json")
+        safe_adapter_name = _sanitize_model_name(adapter_name)
+        eval_root = os.path.realpath(EVAL_PATH)
+        eval_file = os.path.realpath(os.path.join(eval_root, f"{safe_adapter_name}_eval.json"))
+        try:
+            if os.path.commonpath([eval_root, eval_file]) != eval_root:
+                return {"status": "error", "reason": "Invalid adapter name for eval path"}
+        except ValueError:
+            return {"status": "error", "reason": "Invalid adapter name for eval path"}
         eval_data = {
             "adapter": adapter_name,
             "domain": domain,
@@ -1123,11 +1130,11 @@ def _unload_ollama_models_sync():
 # ── SYSTEM PROMPT EXTRACTION ────────────────────────────────────────
 
 _KNOWN_MODELFILES = {
-    "deltai-qwen14b": r"~/deltai/modelfiles\deltai-qwen14b.modelfile",
-    "deltai-qwen3b": r"~/deltai/modelfiles\deltai-qwen3b.modelfile",
-    "deltai-nemo": r"~/deltai/modelfiles\deltai-nemo.modelfile",
-    "deltai-fallback": r"~/deltai/modelfiles\deltai-fallback.modelfile",
-    "deltai": r"~/deltai/modelfiles\deltai.modelfile",
+    "deltai-qwen14b": "~/deltai/modelfiles/deltai-qwen14b.modelfile",
+    "deltai-qwen3b": "~/deltai/modelfiles/deltai-qwen3b.modelfile",
+    "deltai-nemo": "~/deltai/modelfiles/deltai-nemo.modelfile",
+    "deltai-fallback": "~/deltai/modelfiles/deltai-fallback.modelfile",
+    "deltai": "~/deltai/modelfiles/deltai.modelfile",
 }
 
 
@@ -1190,6 +1197,7 @@ def _run_fewshot_training(dataset_name: str, base_model: str, output_model: str)
     """Background thread: legacy few-shot model creation via Ollama."""
     global _training_process
     try:
+        output_model = _sanitize_model_name(output_model)
         _update_state(progress=10, status="exporting dataset")
         export_result = export_dataset(dataset_name, fmt="chatml")
         if export_result.get("status") != "ok":
@@ -1304,10 +1312,9 @@ def _prepare_hf_dataset(dataset_name: str, system_prompt: str, eval_split: float
 def _find_quantize_binary() -> str | None:
     """Find the llama-quantize / llama-cpp quantize binary."""
     candidates = [
-        os.path.join(LLAMA_CPP_PATH, "build", "bin", "llama-quantize.exe"),
-        os.path.join(LLAMA_CPP_PATH, "build", "bin", "Release", "llama-quantize.exe"),
-        os.path.join(LLAMA_CPP_PATH, "llama-quantize.exe"),
-        os.path.join(LLAMA_CPP_PATH, "quantize.exe"),
+        os.path.join(LLAMA_CPP_PATH, "build", "bin", "llama-quantize"),
+        os.path.join(LLAMA_CPP_PATH, "llama-quantize"),
+        os.path.join(LLAMA_CPP_PATH, "quantize"),
     ]
     for c in candidates:
         if os.path.exists(c):
@@ -1432,6 +1439,7 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
     from peft import LoraConfig, get_peft_model, PeftModel
     from trl import SFTTrainer, SFTConfig
 
+    output_model = _sanitize_model_name(output_model)
     adapter_dir = os.path.join(ADAPTERS_PATH, output_model)
     merged_dir = os.path.join(ADAPTERS_PATH, f"{output_model}-merged")
     gguf_file = os.path.join(GGUF_PATH, f"{output_model}.gguf")
@@ -1833,6 +1841,13 @@ def start_training(
 
     if output_model is None:
         output_model = f"{base_model}-ft"
+
+    # Sanitize output_model and base_model to prevent path injection
+    try:
+        output_model = _sanitize_model_name(output_model)
+        base_model = _sanitize_model_name(base_model)
+    except ValueError:
+        return {"status": "error", "reason": "Invalid model name: only alphanumerics, '.', '_', '-' are allowed"}
 
     # Validate dataset
     ds_result = get_dataset(dataset_name)
@@ -2753,6 +2768,7 @@ def _dpo_train_impl(
         return
 
     _update_state(progress=5, status="loading positive/negative datasets")
+    output_model = _sanitize_model_name(output_model)
     pos_result = get_dataset(positive_dataset)
     neg_result = get_dataset(negative_dataset)
 
