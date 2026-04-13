@@ -7,19 +7,25 @@ Supports two training modes:
 Training data stored as JSONL files in ~/.local/share/deltai/training/datasets/.
 """
 
-import os
-import json
-import time
-import re
 import gc
-import shutil
+import json
 import logging
+import os
+import re
+import shutil
 import subprocess
 import threading
+import time
 
 import httpx
-
 import safe_errors
+from path_safety import (
+    require_path_under,
+    resolve_under,
+    safe_dataset_basename,
+    safe_export_filename,
+    safe_jsonl_basename,
+)
 
 logger = logging.getLogger("deltai.training")
 
@@ -178,6 +184,10 @@ def register_adapter(name: str, domain: str, adapter_path: str,
     """Register a trained adapter in the registry."""
     if domain not in ADAPTER_DOMAINS:
         return {"status": "error", "reason": f"Unknown domain: {domain}"}
+    try:
+        adapter_path = require_path_under(adapter_path, ADAPTERS_PATH)
+    except ValueError:
+        return {"status": "error", "reason": "adapter_path must be under the adapters directory"}
     registry = _load_registry()
     # Auto-increment version
     existing_versions = [
@@ -234,6 +244,24 @@ def update_adapter(name: str, **kwargs) -> dict:
     registry = _load_registry()
     if name not in registry["adapters"]:
         return {"status": "error", "reason": f"Adapter not found: {name}"}
+    if "adapter_path" in kwargs and kwargs["adapter_path"] is not None:
+        try:
+            kwargs["adapter_path"] = require_path_under(
+                str(kwargs["adapter_path"]), ADAPTERS_PATH
+            )
+        except ValueError:
+            return {
+                "status": "error",
+                "reason": "adapter_path must be under the adapters directory",
+            }
+    if "eval_path" in kwargs and kwargs["eval_path"] is not None:
+        try:
+            kwargs["eval_path"] = require_path_under(str(kwargs["eval_path"]), EVAL_PATH)
+        except ValueError:
+            return {
+                "status": "error",
+                "reason": "eval_path must be under the eval directory",
+            }
     registry["adapters"][name].update(kwargs)
     _save_registry(registry)
     return {"status": "ok", "name": name}
@@ -271,8 +299,9 @@ def remove_adapter(name: str, delete_files: bool = False) -> dict:
     _save_registry(registry)
     if delete_files and entry.get("adapter_path"):
         try:
-            shutil.rmtree(entry["adapter_path"])
-            logger.info(f"Deleted adapter files: {entry['adapter_path']}")
+            ap = require_path_under(entry["adapter_path"], ADAPTERS_PATH)
+            shutil.rmtree(ap)
+            logger.info(f"Deleted adapter files: {ap}")
         except OSError as e:
             logger.warning(f"Failed to delete adapter files: {e}")
     return {"status": "ok", "removed": name}
@@ -362,8 +391,8 @@ def merge_adapters(adapter_names: list = None, method: str = None,
         output_model: Output model name. Default: "deltai-qwen3b-merged".
     """
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
     from peft import PeftModel
+    from transformers import AutoModelForCausalLM, AutoTokenizer
 
     method = method or ADAPTER_MERGE_METHOD
     density = density if density is not None else ADAPTER_MERGE_DENSITY
@@ -390,13 +419,20 @@ def merge_adapters(adapter_names: list = None, method: str = None,
         if name not in registry["adapters"]:
             return {"status": "error", "reason": f"Adapter not found: {name}"}
         entry = registry["adapters"][name]
-        if not os.path.exists(entry["adapter_path"]):
+        try:
+            ap = require_path_under(entry["adapter_path"], ADAPTERS_PATH)
+        except ValueError:
+            return {"status": "error", "reason": f"Invalid adapter path for {name}"}
+        if not os.path.exists(ap):
             return {"status": "error", "reason": f"Adapter files missing: {name}"}
 
     logger.info(f"Merging adapters: {adapter_names} via {method} (density={density})")
 
-    merged_dir = os.path.join(ADAPTERS_PATH, f"{output_model}-merged")
-    gguf_file = os.path.join(GGUF_PATH, f"{output_model}.gguf")
+    try:
+        merged_dir = resolve_under(ADAPTERS_PATH, f"{output_model}-merged")
+        gguf_file = resolve_under(GGUF_PATH, f"{output_model}.gguf")
+    except ValueError as e:
+        return {"status": "error", "reason": str(e)}
 
     try:
         # Load base model on CPU
@@ -412,7 +448,8 @@ def merge_adapters(adapter_names: list = None, method: str = None,
         # Extract deltas from each adapter
         deltas = []
         for name in adapter_names:
-            adapter_path = registry["adapters"][name]["adapter_path"]
+            raw_ap = registry["adapters"][name]["adapter_path"]
+            adapter_path = require_path_under(raw_ap, ADAPTERS_PATH)
             logger.info(f"Loading adapter: {name} from {adapter_path}")
             adapted = PeftModel.from_pretrained(base_model, adapter_path)
             adapted = adapted.merge_and_unload()
@@ -643,6 +680,12 @@ def eval_adapter(adapter_name: str, eval_dataset: str = None,
 
     domain = adapter_info.get("domain", "")
     adapter_path = adapter_info.get("adapter_path", "")
+    if not adapter_path:
+        return {"status": "error", "reason": "Adapter path missing"}
+    try:
+        adapter_path = require_path_under(adapter_path, ADAPTERS_PATH)
+    except ValueError:
+        return {"status": "error", "reason": "Invalid adapter path"}
     if not os.path.exists(adapter_path):
         return {"status": "error", "reason": f"Adapter files missing: {adapter_path}"}
 
@@ -681,8 +724,8 @@ def eval_adapter(adapter_name: str, eval_dataset: str = None,
 
     try:
         import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
         from peft import PeftModel
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
         # Unload Ollama models first
         _unload_ollama_models_sync()
@@ -747,11 +790,8 @@ def eval_adapter(adapter_name: str, eval_dataset: str = None,
 
         # Save eval results
         safe_adapter_name = _sanitize_model_name(adapter_name)
-        eval_root = os.path.realpath(EVAL_PATH)
-        eval_file = os.path.realpath(os.path.join(eval_root, f"{safe_adapter_name}_eval.json"))
         try:
-            if os.path.commonpath([eval_root, eval_file]) != eval_root:
-                return {"status": "error", "reason": "Invalid adapter name for eval path"}
+            eval_file = resolve_under(EVAL_PATH, f"{safe_adapter_name}_eval.json")
         except ValueError:
             return {"status": "error", "reason": "Invalid adapter name for eval path"}
         eval_data = {
@@ -860,24 +900,20 @@ def rollback_adapter(domain: str, target_version: int = None) -> dict:
 
 def _dataset_path(name: str) -> str:
     """Get full path for a dataset file. Sanitizes name."""
-    safe = "".join(c for c in name if c.isalnum() or c in "-_").strip()
-    if not safe:
-        raise ValueError("Invalid dataset name")
+    safe = safe_dataset_basename(name)
     ds_root = os.path.realpath(os.path.expanduser(DATASETS_PATH))
-    full = os.path.realpath(os.path.join(ds_root, f"{safe}.jsonl"))
-    if os.path.commonpath([ds_root, full]) != ds_root:
-        raise ValueError("Invalid dataset name")
-    return full
+    return resolve_under(ds_root, f"{safe}.jsonl")
 
 
 def list_datasets() -> list[dict]:
     """List all datasets with example counts."""
     datasets = []
     for fname in sorted(os.listdir(DATASETS_PATH)):
-        if not fname.endswith(".jsonl"):
+        safe_fname = safe_jsonl_basename(fname)
+        if not safe_fname:
             continue
-        fpath = os.path.join(DATASETS_PATH, fname)
-        name = fname[:-6]  # strip .jsonl
+        fpath = resolve_under(DATASETS_PATH, safe_fname)
+        name = safe_fname[:-6]  # strip .jsonl
         count = 0
         try:
             with open(fpath, "r", encoding="utf-8") as f:
@@ -1000,8 +1036,14 @@ def export_dataset(name: str, fmt: str = "alpaca") -> dict:
     if not examples:
         return {"status": "error", "reason": "Dataset is empty"}
 
-    out_name = f"{name}_{fmt}.json"
-    out_path = os.path.join(EXPORTS_PATH, out_name)
+    try:
+        out_name = safe_export_filename(name, fmt)
+    except ValueError as e:
+        return {"status": "error", "reason": str(e)}
+    try:
+        out_path = resolve_under(EXPORTS_PATH, out_name)
+    except ValueError:
+        return {"status": "error", "reason": "Invalid export path"}
 
     try:
         if fmt == "alpaca":
@@ -1140,16 +1182,23 @@ _KNOWN_MODELFILES = {
 
 def _read_system_prompt(ollama_model_name: str) -> str:
     """Extract SYSTEM prompt from an existing Ollama modelfile."""
-    path = _KNOWN_MODELFILES.get(ollama_model_name)
-    if path and os.path.exists(path):
+    raw = _KNOWN_MODELFILES.get(ollama_model_name)
+    if raw:
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                content = f.read()
-            match = re.search(r'SYSTEM\s+"""(.*?)"""', content, re.DOTALL)
-            if match:
-                return match.group(1).strip()
-        except Exception:
-            pass
+            mf_root = os.path.realpath(os.path.expanduser("~/deltai/modelfiles"))
+            base = os.path.basename(os.path.expanduser(raw))
+            path = resolve_under(mf_root, base)
+        except ValueError:
+            path = None
+        if path and os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                match = re.search(r'SYSTEM\s+"""(.*?)"""', content, re.DOTALL)
+                if match:
+                    return match.group(1).strip()
+            except Exception:
+                pass
     return "You are deltai, a modular local AI layer. Be direct, precise, and safety-conscious."
 
 
@@ -1223,7 +1272,7 @@ def _run_fewshot_training(dataset_name: str, base_model: str, output_model: str)
         examples = ds_result["examples"]
 
         _update_state(progress=40, status="building modelfile")
-        modelfile_path = os.path.join(MODELFILES_PATH, f"{output_model}.modelfile")
+        modelfile_path = resolve_under(MODELFILES_PATH, f"{output_model}.modelfile")
         _build_fewshot_modelfile(base_model, examples, modelfile_path)
 
         _update_state(progress=60, status="creating model via ollama")
@@ -1389,7 +1438,7 @@ def _convert_to_gguf(merged_dir: str, output_gguf: str, quant_method: str = "Q4_
 def _register_ollama_model(model_name: str, gguf_path: str, system_prompt: str):
     """Create an Ollama model from a GGUF file. Writes Modelfile, runs `ollama create`."""
     model_name = _sanitize_model_name(model_name)
-    modelfile_path = os.path.join(MODELFILES_PATH, f"{model_name}.modelfile")
+    modelfile_path = resolve_under(MODELFILES_PATH, f"{model_name}.modelfile")
 
     modelfile_content = (
         f'FROM {gguf_path}\n\n'
@@ -1431,19 +1480,25 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
       9. Register in Ollama
     """
     import torch
+    from peft import LoraConfig, PeftModel, get_peft_model
     from transformers import (
-        AutoModelForCausalLM, AutoTokenizer,
+        AutoModelForCausalLM,
+        AutoTokenizer,
         BitsAndBytesConfig,
         TrainerCallback,
     )
-    from peft import LoraConfig, get_peft_model, PeftModel
-    from trl import SFTTrainer, SFTConfig
+    from trl import SFTConfig, SFTTrainer
 
     output_model = _sanitize_model_name(output_model)
-    adapter_dir = os.path.join(ADAPTERS_PATH, output_model)
-    merged_dir = os.path.join(ADAPTERS_PATH, f"{output_model}-merged")
-    gguf_file = os.path.join(GGUF_PATH, f"{output_model}.gguf")
-    checkpoint_dir = os.path.join(CHECKPOINTS_PATH, output_model)
+    try:
+        adapter_dir = resolve_under(ADAPTERS_PATH, output_model)
+        merged_dir = resolve_under(ADAPTERS_PATH, f"{output_model}-merged")
+        gguf_file = resolve_under(GGUF_PATH, f"{output_model}.gguf")
+        checkpoint_dir = resolve_under(CHECKPOINTS_PATH, output_model)
+    except ValueError as e:
+        _update_state(running=False, status="failed", error=str(e), progress=0)
+        logger.error(f"LoRA training invalid paths: {e}")
+        return
 
     try:
         # ── Step 0: Precondition checks ──
@@ -1830,7 +1885,7 @@ def start_training(
     # VRAM / session guards before dataset or LoRA dep checks (explicit GPU-heavy modes)
     if mode in ("lora", "distill"):
         try:
-            from router import is_sim_running, is_session_active
+            from router import is_session_active, is_sim_running
 
             if is_sim_running():
                 return {"status": "error", "reason": "Cannot train while a GPU focus workload is active"}
@@ -2012,9 +2067,9 @@ def run_ab_eval(
     # Use a trusted filename (no user-controlled model names) to avoid
     # uncontrolled data in path expressions.
     eval_file = f"ab_{int(time.time())}_{threading.get_ident()}.json"
-    eval_root = os.path.realpath(EVAL_PATH)
-    eval_path = os.path.realpath(os.path.join(eval_root, eval_file))
-    if os.path.commonpath([eval_root, eval_path]) != eval_root:
+    try:
+        eval_path = resolve_under(EVAL_PATH, eval_file)
+    except ValueError:
         return {"status": "error", "reason": "Invalid evaluation file path"}
     with open(eval_path, "w", encoding="utf-8") as f:
         json.dump({
@@ -2752,10 +2807,10 @@ def _dpo_train_impl(
     """Internal DPO training implementation. Runs in background thread."""
     try:
         import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-        from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-        from trl import DPOTrainer, DPOConfig
         from datasets import Dataset as HFDataset
+        from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+        from trl import DPOConfig, DPOTrainer
     except ImportError as e:
         logger.error("DPO training dependencies missing: %s", e)
         _update_state(
@@ -2828,7 +2883,11 @@ def _dpo_train_impl(
                           task_type="CAUSAL_LM")
     model = get_peft_model(model, lora_cfg)
 
-    adapter_dir = os.path.join(ADAPTERS_PATH, output_model)
+    try:
+        adapter_dir = resolve_under(ADAPTERS_PATH, output_model)
+    except ValueError as e:
+        _update_state(running=False, status="failed", error=str(e))
+        return
     os.makedirs(adapter_dir, exist_ok=True)
 
     dpo_args = DPOConfig(
@@ -3013,7 +3072,7 @@ def run_daily_cycle(
     # ── Phase 0: Guard checks ──
     guards = {}
     try:
-        from router import is_sim_running, _get_vram_info
+        from router import _get_vram_info, is_sim_running
         _sim = is_sim_running()
         guards["sim_running"] = _sim  # legacy report key
         guards["focus_workload_active"] = _sim
@@ -3189,11 +3248,11 @@ def run_daily_cycle(
 
     # Write report to disk
     try:
-        reports_dir = os.path.join(TRAINING_PATH, "daily_reports")
+        reports_dir = resolve_under(TRAINING_PATH, "daily_reports")
         os.makedirs(reports_dir, exist_ok=True)
-        report_file = os.path.join(
+        report_file = resolve_under(
             reports_dir,
-            f"{datetime.datetime.now().strftime('%Y-%m-%d')}.json"
+            f"{datetime.datetime.now().strftime('%Y-%m-%d')}.json",
         )
         with open(report_file, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2, ensure_ascii=False)

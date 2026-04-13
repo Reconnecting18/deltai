@@ -53,7 +53,7 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "project"]
 markers = [
   "slow: long-running or integration tests (excluded from default CI via -m \"not slow\")",
 ]
