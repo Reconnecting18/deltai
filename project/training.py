@@ -21,6 +21,23 @@ import httpx
 
 logger = logging.getLogger("deltai.training")
 
+
+def _sanitize_model_name(name: str) -> str:
+    """
+    Validate a model name so it is safe for filesystem-derived usage.
+    Allows only alphanumerics plus '.', '_' and '-'.
+    """
+    if not isinstance(name, str):
+        raise ValueError("Model name must be a string.")
+    cleaned = name.strip()
+    if not cleaned:
+        raise ValueError("Model name cannot be empty.")
+    if "/" in cleaned or "\\" in cleaned or ".." in cleaned:
+        raise ValueError("Model name contains invalid path characters.")
+    if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?", cleaned):
+        raise ValueError("Model name contains unsupported characters.")
+    return cleaned
+
 TRAINING_PATH = os.path.expanduser(os.getenv("TRAINING_PATH", "~/.local/share/deltai/training"))
 DATASETS_PATH = os.path.join(TRAINING_PATH, "datasets")
 ADAPTERS_PATH = os.path.join(TRAINING_PATH, "adapters")
@@ -349,6 +366,7 @@ def merge_adapters(adapter_names: list = None, method: str = None,
     method = method or ADAPTER_MERGE_METHOD
     density = density if density is not None else ADAPTER_MERGE_DENSITY
     output_model = output_model or "deltai-qwen3b-merged"
+    output_model = _sanitize_model_name(output_model)
 
     registry = _load_registry()
 
@@ -1358,6 +1376,7 @@ def _convert_to_gguf(merged_dir: str, output_gguf: str, quant_method: str = "Q4_
 
 def _register_ollama_model(model_name: str, gguf_path: str, system_prompt: str):
     """Create an Ollama model from a GGUF file. Writes Modelfile, runs `ollama create`."""
+    model_name = _sanitize_model_name(model_name)
     modelfile_path = os.path.join(MODELFILES_PATH, f"{model_name}.modelfile")
 
     modelfile_content = (
