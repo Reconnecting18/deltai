@@ -3017,10 +3017,8 @@ async def voice_tts(req: TTSRequest):
         return JSONResponse({"error": "Voice module not available"}, status_code=503)
     result = await synthesize_speech(req.text, voice=req.voice, rate=req.rate, pitch=req.pitch)
     if "error" in result:
-        return JSONResponse(
-            {"error": safe_errors.public_error_detail(Exception(result["error"]))},
-            status_code=500,
-        )
+        logger.error("Voice TTS failed (detail omitted from logs and response)")
+        return JSONResponse({"error": "Voice synthesis failed"}, status_code=500)
     return Response(
         content=result["audio"],
         media_type=f"audio/{result['format']}",

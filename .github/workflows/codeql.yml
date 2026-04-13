@@ -74,9 +74,10 @@ jobs:
         languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
         config-file: ./.github/codeql/codeql-config.yml
-        # Deeper security + quality packs (longer analysis).
+        # security-extended only: security-and-quality adds many non-exploitability
+        # alerts that Ruff/weekly hardening do not auto-fix. Tune in codeql-config.yml if needed.
         # https://docs.github.com/en/code-security/code-scanning/automatically-scanning-your-code-for-vulnerabilities-and-errors/configuring-code-scanning#using-queries-in-ql-packs
-        queries: security-extended,security-and-quality
+        queries: security-extended
 
     # If the analyze step fails for one of the languages you are analyzing with
     # "We were unable to automatically build your code", modify the matrix above

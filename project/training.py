@@ -432,7 +432,8 @@ def merge_adapters(adapter_names: list = None, method: str = None,
         merged_dir = resolve_under(ADAPTERS_PATH, f"{output_model}-merged")
         gguf_file = resolve_under(GGUF_PATH, f"{output_model}.gguf")
     except ValueError as e:
-        return {"status": "error", "reason": str(e)}
+        safe_errors.log_exception(logger, "Adapter merge path invalid", e)
+        return {"status": "error", "reason": safe_errors.public_error_detail(e)}
 
     try:
         # Load base model on CPU
@@ -1039,7 +1040,8 @@ def export_dataset(name: str, fmt: str = "alpaca") -> dict:
     try:
         out_name = safe_export_filename(name, fmt)
     except ValueError as e:
-        return {"status": "error", "reason": str(e)}
+        safe_errors.log_exception(logger, "Export filename invalid", e)
+        return {"status": "error", "reason": safe_errors.public_error_detail(e)}
     try:
         out_path = resolve_under(EXPORTS_PATH, out_name)
     except ValueError:
@@ -1496,8 +1498,13 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
         gguf_file = resolve_under(GGUF_PATH, f"{output_model}.gguf")
         checkpoint_dir = resolve_under(CHECKPOINTS_PATH, output_model)
     except ValueError as e:
-        _update_state(running=False, status="failed", error=str(e), progress=0)
-        logger.error(f"LoRA training invalid paths: {e}")
+        safe_errors.log_exception(logger, "LoRA training invalid paths", e)
+        _update_state(
+            running=False,
+            status="failed",
+            error=safe_errors.public_error_detail(e),
+            progress=0,
+        )
         return
 
     try:
@@ -2886,7 +2893,8 @@ def _dpo_train_impl(
     try:
         adapter_dir = resolve_under(ADAPTERS_PATH, output_model)
     except ValueError as e:
-        _update_state(running=False, status="failed", error=str(e))
+        safe_errors.log_exception(logger, "DPO adapter path invalid", e)
+        _update_state(running=False, status="failed", error=safe_errors.public_error_detail(e))
         return
     os.makedirs(adapter_dir, exist_ok=True)
 
