@@ -8,11 +8,14 @@ Reads happen once at startup, writes happen alongside in-memory updates.
 DB location: configured via SQLITE_PATH in .env (default: ~/.local/share/deltai/sqlite/e3n.db)
 """
 
-import sqlite3
-import os
-import time
 import json
 import logging
+import os
+import sqlite3
+import time
+
+import path_guard
+import safe_errors
 
 logger = logging.getLogger("deltai.persistence")
 
@@ -180,6 +183,13 @@ def load_budget(date: str) -> float:
 
 def export_session_history(session_id: str, output_path: str) -> dict:
     """Export a session's conversation history to JSONL file."""
+    export_root = os.path.realpath(os.path.expanduser(path_guard.export_dir_default()))
+    if not os.path.isabs(os.path.expanduser(output_path)):
+        output_path = os.path.join(export_root, output_path)
+    try:
+        output_path = path_guard.realpath_under(export_root, output_path)
+    except ValueError:
+        return {"status": "error", "reason": "Invalid export path — outside export directory"}
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with _connect() as conn:
         rows = conn.execute(
@@ -194,7 +204,8 @@ def export_session_history(session_id: str, output_path: str) -> dict:
                 f.write(json.dumps({"role": role, "content": content, "ts": created_at}) + "\n")
         return {"status": "ok", "turns": len(rows) // 2, "path": output_path}
     except Exception as e:
-        return {"status": "error", "reason": str(e)}
+        safe_errors.log_exception(logger, "export_session_history failed", e)
+        return {"status": "error", "reason": safe_errors.public_error_detail(e)}
 
 
 def save_budget(date: str, spent: float):

@@ -19,6 +19,8 @@ import threading
 
 import httpx
 
+import safe_errors
+
 logger = logging.getLogger("deltai.training")
 
 
@@ -509,7 +511,7 @@ def merge_adapters(adapter_names: list = None, method: str = None,
             shutil.rmtree(merged_dir)
         except OSError:
             pass
-        return {"status": "error", "reason": str(e)}
+        return {"status": "error", "reason": safe_errors.public_error_detail(e)}
 
 
 # ── DOMAIN-TARGETED TRAINING ─────────────────────────────────────────
@@ -669,7 +671,8 @@ def eval_adapter(adapter_name: str, eval_dataset: str = None,
                 except json.JSONDecodeError:
                     continue
     except OSError as e:
-        return {"status": "error", "reason": str(e)}
+        safe_errors.log_exception(logger, "eval_adapter dataset read failed", e)
+        return {"status": "error", "reason": safe_errors.public_error_detail(e)}
 
     if not examples:
         return {"status": "error", "reason": "No valid examples in eval dataset"}
@@ -795,7 +798,7 @@ def eval_adapter(adapter_name: str, eval_dataset: str = None,
         except Exception:
             pass
         gc.collect()
-        return {"status": "error", "reason": str(e)}
+        return {"status": "error", "reason": safe_errors.public_error_detail(e)}
 
 
 def rollback_adapter(domain: str, target_version: int = None) -> dict:
@@ -853,8 +856,9 @@ def _dataset_path(name: str) -> str:
     safe = "".join(c for c in name if c.isalnum() or c in "-_").strip()
     if not safe:
         raise ValueError("Invalid dataset name")
-    full = os.path.normpath(os.path.join(DATASETS_PATH, f"{safe}.jsonl"))
-    if not full.startswith(os.path.normpath(DATASETS_PATH)):
+    ds_root = os.path.realpath(os.path.expanduser(DATASETS_PATH))
+    full = os.path.realpath(os.path.join(ds_root, f"{safe}.jsonl"))
+    if os.path.commonpath([ds_root, full]) != ds_root:
         raise ValueError("Invalid dataset name")
     return full
 
@@ -897,7 +901,7 @@ def create_dataset(name: str) -> dict:
             pass  # empty file
         return {"status": "ok", "name": name}
     except Exception as e:
-        return {"status": "error", "reason": str(e)}
+        return {"status": "error", "reason": safe_errors.public_error_detail(e)}
 
 
 def delete_dataset(name: str) -> dict:
@@ -909,7 +913,7 @@ def delete_dataset(name: str) -> dict:
         os.remove(path)
         return {"status": "ok", "name": name}
     except Exception as e:
-        return {"status": "error", "reason": str(e)}
+        return {"status": "error", "reason": safe_errors.public_error_detail(e)}
 
 
 def get_dataset(name: str) -> dict:
@@ -932,7 +936,7 @@ def get_dataset(name: str) -> dict:
                     continue
         return {"status": "ok", "name": name, "examples": examples}
     except Exception as e:
-        return {"status": "error", "reason": str(e), "examples": []}
+        return {"status": "error", "reason": safe_errors.public_error_detail(e), "examples": []}
 
 
 def add_example(name: str, input_text: str, output_text: str, category: str = "general") -> dict:
@@ -953,7 +957,7 @@ def add_example(name: str, input_text: str, output_text: str, category: str = "g
             f.write(json.dumps(example, ensure_ascii=False) + "\n")
         return {"status": "ok"}
     except Exception as e:
-        return {"status": "error", "reason": str(e)}
+        return {"status": "error", "reason": safe_errors.public_error_detail(e)}
 
 
 def remove_example(name: str, index: int) -> dict:
@@ -971,7 +975,7 @@ def remove_example(name: str, index: int) -> dict:
             f.writelines(lines)
         return {"status": "ok"}
     except Exception as e:
-        return {"status": "error", "reason": str(e)}
+        return {"status": "error", "reason": safe_errors.public_error_detail(e)}
 
 
 # ── DATASET EXPORT ─────────────────────────────────────────────────────
@@ -1032,7 +1036,7 @@ def export_dataset(name: str, fmt: str = "alpaca") -> dict:
             "examples": len(exported),
         }
     except Exception as e:
-        return {"status": "error", "reason": str(e)}
+        return {"status": "error", "reason": safe_errors.public_error_detail(e)}
 
 
 # ── TRAINING STATUS ────────────────────────────────────────────────────
@@ -1257,7 +1261,7 @@ def _run_fewshot_training(dataset_name: str, base_model: str, output_model: str)
         _training_process = None
         _update_state(
             running=False, status="failed",
-            error=str(e), progress=0,
+            error=safe_errors.public_error_detail(e), progress=0,
         )
         logger.error(f"Fewshot training error: {e}")
 
@@ -1670,7 +1674,7 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
             logger.warning(f"GGUF conversion failed: {e}. Adapter saved but model not registered in Ollama.")
             _update_state(
                 running=False, progress=90, status="partial — adapter saved, GGUF conversion failed",
-                error=str(e), completed=int(time.time()),
+                error=safe_errors.public_error_detail(e), completed=int(time.time()),
             )
             return
 
@@ -1694,7 +1698,7 @@ def _run_lora_training(dataset_name: str, base_model: str, output_model: str,
 
     except Exception as e:
         logger.error(f"LoRA training failed: {e}", exc_info=True)
-        _update_state(running=False, status="failed", error=str(e), progress=0)
+        _update_state(running=False, status="failed", error=safe_errors.public_error_detail(e), progress=0)
         try:
             import torch
             torch.cuda.empty_cache()
@@ -1780,7 +1784,7 @@ def _run_distill_training(teacher_dataset: str, replay_datasets: list[str],
 
     except Exception as e:
         logger.error(f"Distill training error: {e}")
-        _update_state(running=False, status="failed", error=str(e), progress=0)
+        _update_state(running=False, status="failed", error=safe_errors.public_error_detail(e), progress=0)
     finally:
         # Cleanup temporary blend dataset
         try:
@@ -1940,7 +1944,8 @@ def _run_eval_inference(model: str, prompt: str) -> tuple[str, int]:
             return resp.json().get("message", {}).get("content", ""), elapsed
         return f"[ERROR: HTTP {resp.status_code}]", elapsed
     except Exception as e:
-        return f"[ERROR: {e}]", int((time.time() - start) * 1000)
+        safe_errors.log_exception(logger, "_run_eval_inference failed", e)
+        return "[ERROR: inference failed]", int((time.time() - start) * 1000)
 
 
 def run_ab_eval(
@@ -2360,7 +2365,8 @@ def verify_retention(
                 resp.raise_for_status()
                 candidate_resp = resp.json().get("message", {}).get("content", "").strip()
         except Exception as e:
-            candidate_resp = f"[ERROR: {e}]"
+            safe_errors.log_exception(logger, "verify_retention candidate inference failed", e)
+            candidate_resp = "[ERROR: inference failed]"
 
         # Get baseline response
         try:
@@ -2376,7 +2382,8 @@ def verify_retention(
                 resp.raise_for_status()
                 baseline_resp = resp.json().get("message", {}).get("content", "").strip()
         except Exception as e:
-            baseline_resp = f"[ERROR: {e}]"
+            safe_errors.log_exception(logger, "verify_retention baseline inference failed", e)
+            baseline_resp = "[ERROR: inference failed]"
 
         # Score: coherence, on-topic, personality
         score = 0
@@ -2707,7 +2714,7 @@ def start_dpo_training(
             _dpo_train_impl(positive_dataset, negative_dataset, effective_base, effective_output)
         except Exception as e:
             logger.error(f"DPO training failed: {e}", exc_info=True)
-            _update_state(running=False, status="failed", error=str(e))
+            _update_state(running=False, status="failed", error=safe_errors.public_error_detail(e))
 
     t = threading.Thread(target=_run_dpo, daemon=True)
     t.start()
@@ -2733,8 +2740,14 @@ def _dpo_train_impl(
         from trl import DPOTrainer, DPOConfig
         from datasets import Dataset as HFDataset
     except ImportError as e:
-        _update_state(running=False, status="failed",
-                      error=f"DPO deps missing: {e}. Install: pip install trl transformers peft bitsandbytes")
+        logger.error("DPO training dependencies missing: %s", e)
+        _update_state(
+            running=False,
+            status="failed",
+            error=(
+                "DPO deps missing. Install: pip install trl transformers peft bitsandbytes"
+            ),
+        )
         return
 
     _update_state(progress=5, status="loading positive/negative datasets")
@@ -2906,7 +2919,11 @@ def synthesize_session_knowledge(
         resp.raise_for_status()
         knowledge_text = resp.json().get("message", {}).get("content", "").strip()
     except Exception as e:
-        return {"status": "error", "reason": f"Synthesis model call failed: {e}"}
+        safe_errors.log_exception(logger, "session synthesis model call failed", e)
+        return {
+            "status": "error",
+            "reason": f"Synthesis model call failed: {safe_errors.public_error_detail(e)}",
+        }
 
     if not knowledge_text or len(knowledge_text) < 100:
         return {"status": "error", "reason": "Synthesis returned insufficient content"}
@@ -2985,8 +3002,8 @@ def run_daily_cycle(
         guards["vram_ok"] = guards["vram_free_mb"] >= _DAILY_TRAIN_MIN_VRAM_MB
     except Exception as e:
         guards["vram_ok"] = False
-        guards["guard_error"] = str(e)
-        report["errors"].append(f"Guard check error: {e}")
+        guards["guard_error"] = safe_errors.public_error_detail(e)
+        report["errors"].append(f"Guard check error: {safe_errors.public_error_detail(e)}")
 
     with _training_lock:
         guards["training_running"] = _training_state.get("running", False)
@@ -3021,7 +3038,7 @@ def run_daily_cycle(
         init_db()
     except Exception as e:
         report["status"] = "error"
-        report["errors"].append(f"Persistence init failed: {e}")
+        report["errors"].append(f"Persistence init failed: {safe_errors.public_error_detail(e)}")
         logger.exception("Daily cycle: persistence init failed")
         return report
 
@@ -3037,8 +3054,8 @@ def run_daily_cycle(
                 f"status={collect_report.get('status')}"
             )
         except Exception as e:
-            collect_report = {"status": "error", "error": str(e)}
-            report["errors"].append(f"Web collection error: {e}")
+            collect_report = {"status": "error", "error": safe_errors.public_error_detail(e)}
+            report["errors"].append(f"Web collection error: {safe_errors.public_error_detail(e)}")
             logger.warning(f"Web collection failed (non-fatal): {e}")
     report["phases"]["web_collection"] = collect_report
 
@@ -3143,7 +3160,7 @@ def run_daily_cycle(
         gap_summary["unresolved_gaps"] = count_unresolved_knowledge_gaps()
     except Exception as e:
         gap_summary["status"] = "error"
-        gap_summary["error"] = str(e)
+        gap_summary["error"] = safe_errors.public_error_detail(e)
     report["phases"]["knowledge_gaps"] = gap_summary
 
     logger.info(f"Daily cycle complete: {report['status']} — "
@@ -3162,6 +3179,6 @@ def run_daily_cycle(
             json.dump(report, f, indent=2, ensure_ascii=False)
         report["report_file"] = report_file
     except Exception as e:
-        report["errors"].append(f"Report write failed: {e}")
+        report["errors"].append(f"Report write failed: {safe_errors.public_error_detail(e)}")
 
     return report

@@ -20,7 +20,10 @@ Stream protocol (JSON lines):
 import os
 import json
 import logging
+
 import httpx
+
+import safe_errors
 
 logger = logging.getLogger("deltai.anthropic")
 
@@ -269,7 +272,10 @@ async def stream_chat(
             yield json.dumps({"t": "done"}) + "\n"
             return
         except Exception as e:
-            yield json.dumps({"t": "error", "c": f"Cloud error: {e}"}) + "\n"
+            safe_errors.log_exception(logger, "Anthropic stream_chat failed", e)
+            yield json.dumps(
+                {"t": "error", "c": f"Cloud error: {safe_errors.public_error_detail(e)}"},
+            ) + "\n"
             yield json.dumps({"t": "done"}) + "\n"
             return
 
@@ -291,7 +297,11 @@ async def stream_chat(
             try:
                 result = execute_tool_fn(name, args)
             except Exception as e:
-                result = f"ERROR: Tool execution failed: {e}"
+                safe_errors.log_exception(logger, f"Anthropic tool {name} failed", e)
+                result = (
+                    "ERROR: Tool execution failed: "
+                    f"{safe_errors.public_error_detail(e)}"
+                )
 
             summary = result[:300].replace("\n", " ").replace("\r", "")
             if len(result) > 300:
@@ -360,4 +370,5 @@ async def chat_once(message: str, model: str, max_tokens: int = 2048) -> str:
             content = data.get("content", [])
             return "".join(c.get("text", "") for c in content if c.get("type") == "text")
     except Exception as e:
-        return f"ERROR: {e}"
+        safe_errors.log_exception(logger, "chat_once failed", e)
+        return f"ERROR: {safe_errors.public_error_detail(e)}"

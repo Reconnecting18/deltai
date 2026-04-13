@@ -1,17 +1,22 @@
-﻿from fastapi import FastAPI
-from fastapi.responses import StreamingResponse, FileResponse, PlainTextResponse
+﻿import json
+import logging
+import os
+import platform
+
+import httpx
+import psutil
+import safe_errors
+from dotenv import load_dotenv
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-import httpx
-import json
-import os
-import psutil
-import platform
-from dotenv import load_dotenv
 
 load_dotenv()
 psutil.cpu_percent(interval=0.1)  # prime the cpu measurement on startup
+
+logger = logging.getLogger("deltai.deltai_app")
 
 try:
     import pynvml
@@ -100,7 +105,7 @@ def stats():
             temp   = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
             try:
                 power_limit = pynvml.nvmlDeviceGetPowerManagementLimit(handle) / 1000
-            except:
+            except Exception:
                 power_limit = 170
             result["gpu"] = {
                 "name":          name if isinstance(name, str) else name.decode(),
@@ -113,7 +118,8 @@ def stats():
                 "temp_c":        temp,
             }
         except Exception as e:
-            result["gpu"] = {"error": str(e)}
+            safe_errors.log_exception(logger, "stats GPU probe failed", e)
+            result["gpu"] = {"error": safe_errors.public_error_detail(e)}
     else:
         result["gpu"] = {"error": "NVML unavailable"}
 
@@ -122,7 +128,7 @@ def stats():
         with urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=2) as r:
             tags = json.loads(r.read())
             result["models"] = [m["name"] for m in tags.get("models", [])]
-    except:
+    except Exception:
         result["models"] = []
 
     chroma_path = os.getenv("CHROMADB_PATH", "~/deltai/data\\chromadb")
@@ -133,7 +139,7 @@ def stats():
             for f in fn
         )
         result["memory_mb"] = round(total / 1e6, 1)
-    except:
+    except Exception:
         result["memory_mb"] = 0
 
     result["model"] = DELTAI_MODEL
@@ -150,14 +156,16 @@ MODULE_FILES = {
     "personality": os.path.join(MODULES_DIR, "personality.md"),
     "pilot": os.path.join(MODULES_DIR, "pilot.md"),
 }
+_ALLOWED_MODULE_PATHS = frozenset(MODULE_FILES.values())
 
 @app.get("/modelfile")
 def get_modelfile():
     try:
-        with open(MODELFILE_PATH, "r", encoding="utf-8") as f:
+        with open(MODELFILE_PATH, encoding="utf-8") as f:
             return PlainTextResponse(f.read())
     except Exception as e:
-        return PlainTextResponse(f"# Error reading modelfile: {e}")
+        safe_errors.log_exception(logger, "get_modelfile failed", e)
+        return PlainTextResponse("# Error reading modelfile", status_code=500)
 
 class ModelfileUpdate(BaseModel):
     content: str
@@ -169,27 +177,28 @@ def save_modelfile(update: ModelfileUpdate):
             f.write(update.content)
         return {"ok": True}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": safe_errors.public_error_detail(e)}
 
 @app.get("/module/{name}")
 def get_module(name: str):
     path = MODULE_FILES.get(name)
-    if not path:
+    if not path or path not in _ALLOWED_MODULE_PATHS:
         return PlainTextResponse(f"# Unknown module: {name}", status_code=404)
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return PlainTextResponse(f.read())
     except Exception as e:
-        return PlainTextResponse(f"# Error reading {name}: {e}")
+        safe_errors.log_exception(logger, f"get_module {name} failed", e)
+        return PlainTextResponse(f"# Error reading {name}", status_code=500)
 
 @app.post("/module/{name}")
 def save_module(name: str, update: ModelfileUpdate):
     path = MODULE_FILES.get(name)
-    if not path:
+    if not path or path not in _ALLOWED_MODULE_PATHS:
         return {"ok": False, "error": f"Unknown module: {name}"}
     try:
         with open(path, "w", encoding="utf-8") as f:
             f.write(update.content)
         return {"ok": True}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": safe_errors.public_error_detail(e)}

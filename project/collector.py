@@ -22,16 +22,17 @@ Output datasets:
   deltai-web-motorsport      → racing domain
 """
 
-import os
-import json
-import time
-import logging
 import hashlib
-import sqlite3
+import json
+import logging
+import os
 import re
+import sqlite3
 import threading
+import time
 
 import httpx
+import safe_errors
 
 logger = logging.getLogger("deltai.collector")
 
@@ -133,7 +134,7 @@ def _write_example(dataset_name: str, instruction: str, output: str, category: s
 def _read_wiki_offset() -> int:
     if os.path.exists(_WIKI_OFFSET_FILE):
         try:
-            return int(open(_WIKI_OFFSET_FILE, "r").read().strip())
+            return int(open(_WIKI_OFFSET_FILE).read().strip())
         except (ValueError, OSError):
             pass
     return 0
@@ -269,7 +270,7 @@ def collect_wikipedia_batch(batch_size: int = 2000, dry_run: bool = False) -> di
 
     except Exception as e:
         result["errors"] += 1
-        result["error"] = str(e)
+        result["error"] = safe_errors.public_error_detail(e)
         result["status"] = "error"
         logger.error(f"Wikipedia collection error: {e}")
 
@@ -463,7 +464,7 @@ def collect_openf1_batch(seasons: list[int] = None, dry_run: bool = False) -> di
 
     except Exception as e:
         result["errors"] += 1
-        result["error"] = str(e)
+        result["error"] = safe_errors.public_error_detail(e)
         logger.error(f"OpenF1 collection error: {e}")
 
     result["status"] = "ok" if result["errors"] == 0 else "partial"
@@ -591,7 +592,7 @@ def _ddg_search_urls(query: str, max_results: int = 3) -> list[str]:
         )
         if resp.status_code != 200:
             return []
-        from urllib.parse import parse_qs, urlparse, unquote
+        from urllib.parse import parse_qs, unquote, urlparse
         link_pat = re.compile(r'<a[^>]*href="([^"]*uddg=[^"]+)"', re.DOTALL)
         urls = []
         for raw in link_pat.findall(resp.text):

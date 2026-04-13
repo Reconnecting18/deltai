@@ -19,11 +19,12 @@ import time
 import wave
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
-from .voice_config import VoiceConfig, DEFAULT_CONFIG
+import safe_errors
+
+from .voice_config import DEFAULT_CONFIG, VoiceConfig
 
 logger = logging.getLogger("deltai.voice.train")
 
@@ -38,13 +39,13 @@ class RVCTrainingState:
     total_epochs: int = 200
     loss_g: float = 0.0            # Generator loss
     loss_d: float = 0.0            # Discriminator loss
-    error: Optional[str] = None
-    started_at: Optional[float] = None
+    error: str | None = None
+    started_at: float | None = None
     elapsed_sec: float = 0.0
     dataset_stats: dict = field(default_factory=dict)
 
 _training_state = RVCTrainingState()
-_training_thread: Optional[threading.Thread] = None
+_training_thread: threading.Thread | None = None
 _training_abort = threading.Event()
 
 
@@ -75,7 +76,7 @@ def is_training() -> bool:
 def prepare_dataset(
     audio_dir: str = None,
     output_dir: str = None,
-    config: Optional[VoiceConfig] = None,
+    config: VoiceConfig | None = None,
 ) -> dict:
     """Prepare training audio: split, resample, normalize.
 
@@ -244,7 +245,7 @@ def _unload_ollama_models() -> None:
 def train(
     dataset_dir: str = None,
     output_name: str = None,
-    config: Optional[VoiceConfig] = None,
+    config: VoiceConfig | None = None,
 ) -> None:
     """Start RVC training in a background thread.
 
@@ -282,7 +283,7 @@ def train(
             _do_train(dataset_dir, output_name, config)
         except Exception as e:
             _training_state.status = "error"
-            _training_state.error = str(e)
+            _training_state.error = safe_errors.public_error_detail(e)
             logger.error("RVC training failed: %s", e)
 
     _training_thread = threading.Thread(target=_train_worker, daemon=True)
@@ -339,7 +340,7 @@ def stop_training() -> None:
 def export_model(
     checkpoint_dir: str = None,
     output_name: str = None,
-    config: Optional[VoiceConfig] = None,
+    config: VoiceConfig | None = None,
 ) -> dict:
     """Export a trained RVC checkpoint to a lightweight inference model.
 

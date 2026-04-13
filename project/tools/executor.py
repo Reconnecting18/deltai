@@ -3,10 +3,24 @@ deltai Tool Executor — runs tools safely and returns results.
 Each tool function returns a string result that gets fed back to the model.
 """
 
+import json
+import logging
 import os
 import subprocess
-import json
+
 import psutil
+
+import path_guard
+import safe_errors
+
+_LOG = logging.getLogger("deltai.executor")
+_TOOL_ERR = "An unexpected error occurred"
+
+
+def _tool_error(exc: BaseException, log_message: str) -> str:
+    safe_errors.log_exception(_LOG, log_message, exc)
+    return f"ERROR: {_TOOL_ERR}"
+
 
 # ── SAFETY ──────────────────────────────────────────────────────────────
 PROTECTED_PATHS = [
@@ -77,7 +91,10 @@ def _coerce_bool(val, default=False):
 def read_file(path: str, max_lines=200) -> str:
     try:
         max_lines = _coerce_int(max_lines, 200)
-        path = os.path.normpath(path)
+        try:
+            path = path_guard.resolve_tool_path(path)
+        except ValueError as e:
+            return f"ERROR: {safe_errors.public_error_detail(e)}"
         if not os.path.exists(path):
             return f"ERROR: File not found: {path}"
         if not os.path.isfile(path):
@@ -85,7 +102,7 @@ def read_file(path: str, max_lines=200) -> str:
         size = os.path.getsize(path)
         if size > 2_000_000:
             return f"ERROR: File too large ({size:,} bytes). Max 2MB."
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
+        with open(path, encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
         total = len(lines)
         truncated = lines[:max_lines]
@@ -94,13 +111,16 @@ def read_file(path: str, max_lines=200) -> str:
             result += f"\n\n[TRUNCATED — showing {max_lines}/{total} lines]"
         return result
     except Exception as e:
-        return f"ERROR: {e}"
+        return _tool_error(e, "read_file failed")
 
 
 def write_file(path: str, content: str, append=False) -> str:
     try:
         append = _coerce_bool(append, False)
-        path = os.path.normpath(path)
+        try:
+            path = path_guard.resolve_tool_path(path)
+        except ValueError as e:
+            return f"ERROR: {safe_errors.public_error_detail(e)}"
         if not _is_path_safe_write(path):
             return f"ERROR: Write blocked — protected path: {path}"
         parent = os.path.dirname(path)
@@ -112,13 +132,16 @@ def write_file(path: str, content: str, append=False) -> str:
         action = "Appended to" if append else "Wrote"
         return f"OK: {action} {path} ({len(content)} chars)"
     except Exception as e:
-        return f"ERROR: {e}"
+        return _tool_error(e, "write_file failed")
 
 
 def list_directory(path: str, recursive=False) -> str:
     try:
         recursive = _coerce_bool(recursive, False)
-        path = os.path.normpath(path)
+        try:
+            path = path_guard.resolve_tool_path(path)
+        except ValueError as e:
+            return f"ERROR: {safe_errors.public_error_detail(e)}"
         if not os.path.exists(path):
             return f"ERROR: Directory not found: {path}"
         if not os.path.isdir(path):
@@ -161,7 +184,7 @@ def list_directory(path: str, recursive=False) -> str:
             return f"{path} is empty."
         return f"{path}\n" + "\n".join(entries)
     except Exception as e:
-        return f"ERROR: {e}"
+        return _tool_error(e, "list_directory failed")
 
 
 def _fmt_size(b: int) -> str:
@@ -200,7 +223,7 @@ def run_powershell(command: str, timeout=15) -> str:
     except subprocess.TimeoutExpired:
         return f"ERROR: Command timed out after {timeout}s"
     except Exception as e:
-        return f"ERROR: {e}"
+        return _tool_error(e, "run_powershell failed")
 
 
 def get_system_info(include_processes=False) -> str:
@@ -246,7 +269,7 @@ def get_system_info(include_processes=False) -> str:
                 info.append(f"  {name:<30} {mem_mb:>7.0f} MB  CPU {cpu_pct:.0f}%")
         return "\n".join(info)
     except Exception as e:
-        return f"ERROR: {e}"
+        return _tool_error(e, "get_system_info failed")
 
 
 # ── KNOWLEDGE / RAG TOOLS ──────────────────────────────────────────────
@@ -268,7 +291,7 @@ def search_knowledge(query: str, n_results=5) -> str:
     except ImportError:
         return "ERROR: Memory system not available (chromadb not installed)"
     except Exception as e:
-        return f"ERROR: {e}"
+        return _tool_error(e, "search_knowledge failed")
 
 
 def memory_stats() -> str:
@@ -277,23 +300,23 @@ def memory_stats() -> str:
         from memory import get_memory_stats
         stats = get_memory_stats()
         lines = [
-            f"Knowledge Base Stats:",
+            "Knowledge Base Stats:",
             f"  Total chunks: {stats['total_chunks']}",
             f"  Files ingested: {stats['total_files']}",
             f"  Disk usage: {stats['disk_mb']} MB",
         ]
         if stats["sources"]:
-            lines.append(f"  Sources:")
+            lines.append("  Sources:")
             for s in stats["sources"]:
                 lines.append(f"    - {s}")
         else:
             lines.append("  No files ingested yet.")
-            lines.append(f"  Drop files in ~/deltai/data\\knowledge\\ to ingest.")
+            lines.append("  Drop files in ~/deltai/data\\knowledge\\ to ingest.")
         return "\n".join(lines)
     except ImportError:
         return "ERROR: Memory system not available (chromadb not installed)"
     except Exception as e:
-        return f"ERROR: {e}"
+        return _tool_error(e, "memory_stats failed")
 
 
 # ── WEB SEARCH TOOL ──────────────────────────────────────────────────
@@ -316,8 +339,9 @@ def web_search(query: str, max_results=5) -> str:
         if not query or not query.strip():
             return "ERROR: Empty search query"
 
-        import httpx as _httpx
         import re as _re
+
+        import httpx as _httpx
 
         # DuckDuckGo HTML Lite — simple table-based results, no JS required, no API key
         resp = _httpx.get(
@@ -356,7 +380,7 @@ def web_search(query: str, max_results=5) -> str:
             if len(clean) > 40 and not clean.startswith('http') and not clean.startswith('www.'):
                 snippets.append(_re.sub(r'\s+', ' ', clean))
 
-        from urllib.parse import unquote, urlparse, parse_qs
+        from urllib.parse import parse_qs, unquote, urlparse
         for i, (raw_url, raw_title) in enumerate(links[:max_results]):
             clean_title = _re.sub(r'<[^>]+>', '', raw_title).strip()
             clean_title = _re.sub(r'&#x27;', "'", clean_title)
@@ -378,9 +402,12 @@ def web_search(query: str, max_results=5) -> str:
         return header + "\n\n".join(results)
 
     except Exception as e:
-        if "timeout" in str(e).lower() or "timed out" in str(e).lower():
+        safe_errors.log_exception(_LOG, "web_search failed", e)
+        import httpx as _httpx_err
+
+        if isinstance(e, (_httpx_err.TimeoutException, TimeoutError)):
             return "ERROR: Search timed out (10s limit). Try a simpler query."
-        return f"ERROR: Web search failed: {e}"
+        return f"ERROR: {_TOOL_ERR}"
 
 
 def fetch_url(url: str, max_chars: int = 8000) -> str:
@@ -442,9 +469,12 @@ def fetch_url(url: str, max_chars: int = 8000) -> str:
             return f"Content from {url} (HTML stripped — install trafilatura for better extraction):\n\n{text}"
 
     except Exception as e:
-        if "timeout" in str(e).lower() or "timed out" in str(e).lower():
+        safe_errors.log_exception(_LOG, "fetch_url failed", e)
+        import httpx as _httpx_err2
+
+        if isinstance(e, (_httpx_err2.TimeoutException, TimeoutError)):
             return f"ERROR: Request timed out fetching {url}"
-        return f"ERROR: fetch_url failed: {e}"
+        return f"ERROR: {_TOOL_ERR}"
 
 
 # ── COMPUTATION DELEGATION TOOLS ──────────────────────────────────────
@@ -494,7 +524,7 @@ def calculate(expression: str, description: str = None) -> str:
     except ZeroDivisionError:
         return "ERROR: Division by zero"
     except Exception as e:
-        return f"ERROR: {e}"
+        return _tool_error(e, "calculate failed")
 
 
 def solve_math(operation: str, expression: str, variable: str = "x",
@@ -503,11 +533,38 @@ def solve_math(operation: str, expression: str, variable: str = "x",
     try:
         import sympy
         from sympy import (
-            symbols, Symbol, sympify, solve, diff, integrate, limit, simplify,
-            expand, factor, series, Matrix, oo, pi, E, I,
-            sin, cos, tan, exp, log, sqrt, Abs, sign,
-            asin, acos, atan, sinh, cosh, tanh,
-            Rational, Function, Eq,
+            Abs,
+            E,
+            Eq,
+            Function,
+            I,
+            Matrix,
+            Rational,
+            acos,
+            asin,
+            atan,
+            cos,
+            cosh,
+            diff,
+            exp,
+            expand,
+            factor,
+            integrate,
+            limit,
+            log,
+            oo,
+            pi,
+            series,
+            sign,
+            simplify,
+            sin,
+            sinh,
+            solve,
+            sqrt,
+            symbols,
+            sympify,
+            tan,
+            tanh,
         )
         from sympy.integrals.transforms import laplace_transform
 
@@ -648,7 +705,7 @@ def solve_math(operation: str, expression: str, variable: str = "x",
         elif operation == "matrix":
             # General matrix operation — expression should be a full statement
             if isinstance(expr, sympy.Matrix):
-                lines = [f"Matrix result:"]
+                lines = ["Matrix result:"]
                 lines.append(str(expr))
                 lines.append(f"det = {expr.det()}")
                 try:
@@ -662,10 +719,10 @@ def solve_math(operation: str, expression: str, variable: str = "x",
             valid = "solve, differentiate, integrate, limit, simplify, expand, factor, matrix, series, laplace, eigenvalues"
             return f"ERROR: Unknown operation '{operation}'. Valid: {valid}"
 
-    except sympy.SympifyError as e:
-        return f"ERROR: Could not parse expression: {e}"
+    except sympy.SympifyError:
+        return "ERROR: Could not parse expression"
     except Exception as e:
-        return f"ERROR: {e}"
+        return _tool_error(e, "solve_math failed")
 
 
 def summarize_data(data: str, focus: str = "all") -> str:
@@ -677,8 +734,8 @@ def summarize_data(data: str, focus: str = "all") -> str:
             return "ERROR: Data too large (max 50000 chars)"
 
         focus = (focus or "all").lower().strip()
-        import statistics
         import re
+        import statistics
 
         # Try to extract numbers from the data
         numbers = []
@@ -756,7 +813,7 @@ def summarize_data(data: str, focus: str = "all") -> str:
 
         return "\n".join(lines)
     except Exception as e:
-        return f"ERROR: {e}"
+        return _tool_error(e, "summarize_data failed")
 
 
 def lookup_reference(query: str) -> str:
@@ -779,7 +836,7 @@ def lookup_reference(query: str) -> str:
     except ImportError:
         return "ERROR: Memory system not available (chromadb not installed)"
     except Exception as e:
-        return f"ERROR: {e}"
+        return _tool_error(e, "lookup_reference failed")
 
 
 # ── TELEMETRY TOOLS (conditional) ─────────────────────────────────────
@@ -799,7 +856,10 @@ def _telemetry_get(endpoint: str, params: dict = None) -> str:
             data = resp.json()
             return json.dumps(data, indent=2)
     except Exception as e:
-        return f"ERROR: Cannot reach telemetry API at {_TELEMETRY_API_URL}: {e}"
+        return _tool_error(
+            e,
+            f"telemetry GET failed ({_TELEMETRY_API_URL})",
+        )
 
 
 def get_session_status(**kwargs) -> str:
@@ -871,7 +931,7 @@ def self_diagnostics(subsystem=None) -> str:
             return _diag_deep(subsystem.lower().strip())
         return _diag_full()
     except Exception as e:
-        return f"ERROR: Diagnostics failed: {e}"
+        return _tool_error(e, "self_diagnostics")
 
 
 def _diag_full() -> str:
@@ -899,7 +959,8 @@ def _diag_full() -> str:
         stats = get_memory_stats()
         lines.append(f"ChromaDB:  ONLINE ({stats['total_chunks']} chunks, {stats['total_files']} files, {stats['disk_mb']} MB)")
     except Exception as e:
-        lines.append(f"ChromaDB:  ERROR — {e}")
+        safe_errors.log_exception(_LOG, "self_diagnostics chromadb", e)
+        lines.append(f"ChromaDB:  ERROR — {_TOOL_ERR}")
 
     # GPU / VRAM
     try:
@@ -924,7 +985,7 @@ def _diag_full() -> str:
 
     # Voice
     try:
-        from voice import get_voice_status, VOICE_ENABLED
+        from voice import VOICE_ENABLED, get_voice_status
         if VOICE_ENABLED:
             vs = get_voice_status()
             stt = vs.get("stt", {}).get("status", "?")
@@ -1016,7 +1077,7 @@ def _diag_deep(subsystem: str) -> str:
     elif subsystem == "chromadb":
         lines = ["CHROMADB DEEP DIAGNOSTICS", "=" * 40]
         try:
-            from memory import get_memory_stats, get_file_details, CHROMADB_PATH
+            from memory import CHROMADB_PATH, get_file_details, get_memory_stats
             stats = get_memory_stats()
             lines.append(f"Path:    {CHROMADB_PATH}")
             lines.append(f"Chunks:  {stats['total_chunks']}")
@@ -1031,7 +1092,8 @@ def _diag_deep(subsystem: str) -> str:
                 for f in files[:20]:
                     lines.append(f"  {f['source']:<40} {f['chunks']} chunks")
         except Exception as e:
-            lines.append(f"ERROR: {e}")
+            safe_errors.log_exception(_LOG, "_diag_deep chromadb", e)
+            lines.append(f"ERROR: {_TOOL_ERR}")
             lines.append("FIX: Check ChromaDB installation, verify ~/deltai/data\\chromadb exists")
         return "\n".join(lines)
 
@@ -1065,13 +1127,14 @@ def _diag_deep(subsystem: str) -> str:
                 lines.append("\nWARNING: High GPU temperature")
                 lines.append("FIX: Check cooling, reduce load, or unload models")
         except Exception as e:
-            lines.append(f"GPU unavailable: {e}")
+            safe_errors.log_exception(_LOG, "_diag_deep gpu", e)
+            lines.append(f"GPU unavailable: {_TOOL_ERR}")
         return "\n".join(lines)
 
     elif subsystem == "voice":
         lines = ["VOICE DEEP DIAGNOSTICS", "=" * 40]
         try:
-            from voice import get_voice_status, VOICE_ENABLED
+            from voice import VOICE_ENABLED, get_voice_status
             vs = get_voice_status()
             lines.append(f"Enabled: {VOICE_ENABLED}")
             lines.append(f"STT:     {vs.get('stt', {})}")
@@ -1086,8 +1149,8 @@ def _diag_deep(subsystem: str) -> str:
     elif subsystem == "watcher":
         lines = ["WATCHER DEEP DIAGNOSTICS", "=" * 40]
         try:
-            from watcher import watcher_running
             from memory import KNOWLEDGE_PATH
+            from watcher import watcher_running
             running = watcher_running()
             lines.append(f"Status:  {'ACTIVE' if running else 'STOPPED'}")
             lines.append(f"Path:    {KNOWLEDGE_PATH}")
@@ -1097,8 +1160,8 @@ def _diag_deep(subsystem: str) -> str:
                 lines.append(f"Files:   {len(files)}")
             if not running:
                 lines.append("\nFIX: Use repair_subsystem('restart_watcher')")
-        except ImportError as e:
-            lines.append(f"Watcher not available: {e}")
+        except ImportError:
+            lines.append("Watcher not available")
         return "\n".join(lines)
 
     elif subsystem == "backup":
@@ -1135,7 +1198,7 @@ def _diag_deep(subsystem: str) -> str:
                 lines.append(f"  OK    {p}  ({size} bytes)")
             else:
                 lines.append(f"  MISS  {p}")
-                lines.append(f"        FIX: mkdir {p}" if "." not in os.path.basename(p) else f"        FIX: Check installation")
+                lines.append(f"        FIX: mkdir {p}" if "." not in os.path.basename(p) else "        FIX: Check installation")
         return "\n".join(lines)
 
     else:
@@ -1164,7 +1227,7 @@ def manage_ollama_models(action: str, model: str = None) -> str:
         loaded_names = {m.get("name", "") for m in loaded}
         avail = [m for m in all_models if m["name"] not in loaded_names]
         if avail:
-            lines.append(f"\nAvailable (not loaded):")
+            lines.append("\nAvailable (not loaded):")
             for m in avail:
                 size_gb = round(m.get("size", 0) / 1e9, 1)
                 deltai_tag = " [deltai]" if m["name"].split(":")[0] in _DELTAI_MODELS else ""
@@ -1198,7 +1261,7 @@ def manage_ollama_models(action: str, model: str = None) -> str:
                 return f"OK: Unloaded {model} from VRAM. Use manage_ollama_models('status') to verify."
             return f"ERROR: Ollama returned HTTP {resp.status_code}"
         except Exception as e:
-            return f"ERROR: Failed to unload {model}: {e}"
+            return _tool_error(e, "manage_ollama_models unload")
 
     elif action == "preload":
         if not model:
@@ -1236,7 +1299,7 @@ def manage_ollama_models(action: str, model: str = None) -> str:
                 return f"OK: Preloaded {model} into VRAM (5min keep-alive)."
             return f"ERROR: Ollama returned HTTP {resp.status_code}"
         except Exception as e:
-            return f"ERROR: Failed to preload {model}: {e}"
+            return _tool_error(e, "manage_ollama_models preload")
 
     else:
         return f"ERROR: Unknown action '{action}'. Use 'status', 'unload', or 'preload'."
@@ -1248,13 +1311,13 @@ def repair_subsystem(repair: str) -> str:
 
     if repair == "restart_watcher":
         try:
-            from watcher import stop_watcher, start_watcher, watcher_running
+            from watcher import start_watcher, stop_watcher, watcher_running
             stop_watcher()
             start_watcher()
             running = watcher_running()
             return f"OK: Watcher {'restarted successfully' if running else 'restart attempted but not confirmed running'}"
         except Exception as e:
-            return f"ERROR: Failed to restart watcher: {e}"
+            return _tool_error(e, "repair_subsystem restart_watcher")
 
     elif repair == "clear_vram":
         try:
@@ -1277,7 +1340,7 @@ def repair_subsystem(repair: str) -> str:
                         pass
             return f"OK: Unloaded {len(unloaded)} model(s) from VRAM: {', '.join(unloaded)}"
         except Exception as e:
-            return f"ERROR: Failed to clear VRAM: {e}"
+            return _tool_error(e, "repair_subsystem clear_vram")
 
     elif repair == "reindex_knowledge":
         try:
@@ -1288,7 +1351,7 @@ def repair_subsystem(repair: str) -> str:
             errors = len([r for r in results if r["status"] == "error"])
             return f"OK: Re-indexed knowledge base — {ok} ingested, {skipped} skipped, {errors} errors"
         except Exception as e:
-            return f"ERROR: Failed to reindex: {e}"
+            return _tool_error(e, "repair_subsystem reindex_knowledge")
 
     elif repair == "check_ollama":
         tags = _ollama_get("/api/tags")
@@ -1311,7 +1374,7 @@ def repair_subsystem(repair: str) -> str:
                 return f"OK: Started Ollama successfully ({len(tags.get('models', []))} models available)"
             return "WARNING: Started Ollama process but it's not responding yet. Wait a few seconds and retry."
         except Exception as e:
-            return f"ERROR: Failed to start Ollama: {e}"
+            return _tool_error(e, "repair_subsystem check_ollama")
 
     else:
         return f"ERROR: Unknown repair '{repair}'. Options: restart_watcher, clear_vram, reindex_knowledge, check_ollama"
@@ -1359,7 +1422,7 @@ def resource_status() -> str:
             data = resp.json()
             rm = data.get("resource_manager", {})
             cb = data.get("circuit_breaker", {})
-            lines.append(f"\nResource Manager:")
+            lines.append("\nResource Manager:")
             lines.append(f"  VRAM warnings:    {rm.get('vram_warnings', 0)}")
             lines.append(f"  Ollama failures:  {rm.get('ollama_failures', 0)}")
             lines.append(f"  Watcher restarts: {rm.get('watcher_restarts', 0)}")
@@ -1369,7 +1432,7 @@ def resource_status() -> str:
                 for a in actions[-5:]:
                     lines.append(f"    {a.get('action', '?')}")
 
-            lines.append(f"\nCircuit Breaker:")
+            lines.append("\nCircuit Breaker:")
             lines.append(f"  State:   {cb.get('state', '?')}")
             lines.append(f"  Backoff: {cb.get('backoff_sec', '?')}s")
     except Exception:
@@ -1377,7 +1440,7 @@ def resource_status() -> str:
 
     # Sim detection
     try:
-        from router import is_sim_running, is_session_active
+        from router import is_session_active, is_sim_running
         lines.append(f"\nSim running: {is_sim_running()}")
         lines.append(f"Session active: {is_session_active()}")
     except ImportError:
@@ -1392,9 +1455,17 @@ def manage_adapters(action: str, domain: str = None,
                     adapter_name: str = None, dataset: str = None) -> str:
     """Manage deltai's augmentation slot adapters."""
     try:
-        from training import (list_adapters, get_active_adapters, start_domain_training,
-                              merge_adapters, set_active_adapter, update_adapter,
-                              get_adapter, rollback_adapter, ADAPTER_DOMAINS)
+        from training import (
+            ADAPTER_DOMAINS,
+            get_active_adapters,
+            get_adapter,
+            list_adapters,
+            merge_adapters,
+            rollback_adapter,
+            set_active_adapter,
+            start_domain_training,
+            update_adapter,
+        )
     except ImportError:
         return "ERROR: Training module not available"
 
@@ -1501,6 +1572,6 @@ def execute_tool(name: str, arguments: dict) -> str:
     try:
         return fn(**arguments)
     except TypeError as e:
-        return f"ERROR: Bad arguments for {name}: {e}"
+        return f"ERROR: Bad arguments for {name}: {safe_errors.public_error_detail(e)}"
     except Exception as e:
-        return f"ERROR: Tool {name} failed: {e}"
+        return _tool_error(e, f"execute_tool {name}")

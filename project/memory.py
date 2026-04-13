@@ -3,16 +3,20 @@ deltai Memory System — ChromaDB + Ollama Embeddings
 Handles ingestion, chunking, storage, and retrieval of knowledge documents.
 """
 
-import os
-import re
 import hashlib
 import json
 import logging
+import os
+import re
 import time as _time
 from collections import defaultdict
-import httpx
+
 import chromadb
+import httpx
 from chromadb.config import Settings
+
+import path_guard
+import safe_errors
 
 logger = logging.getLogger("deltai.memory")
 
@@ -303,7 +307,11 @@ def compact_warm_to_cold() -> dict:
         return {"demoted": demoted, "checked": len(old_data["ids"])}
     except Exception as e:
         logger.warning(f"Warm-to-cold compaction failed: {e}")
-        return {"demoted": 0, "checked": 0, "error": str(e)}
+        return {
+            "demoted": 0,
+            "checked": 0,
+            "error": safe_errors.public_error_detail(e),
+        }
 
 
 def get_cold_stats() -> dict:
@@ -327,23 +335,31 @@ def ingest_file(filepath: str) -> dict:
     Returns {"status": "ok"/"skipped"/"error", "chunks": N, ...}
     """
     filepath = os.path.normpath(filepath)
+    try:
+        filepath = path_guard.realpath_under(KNOWLEDGE_PATH, filepath)
+    except ValueError:
+        return {"status": "error", "reason": "Invalid path — outside knowledge directory"}
     ext = os.path.splitext(filepath)[1].lower()
 
     if ext not in SUPPORTED_EXTENSIONS:
         return {"status": "skipped", "reason": f"unsupported extension: {ext}"}
+
+    knowledge_root = os.path.realpath(os.path.expanduser(KNOWLEDGE_PATH))
 
     try:
         fsize = os.path.getsize(filepath)
         if fsize > MAX_FILE_SIZE:
             return {"status": "skipped", "reason": f"file too large ({fsize} bytes)"}
     except OSError as e:
-        return {"status": "error", "reason": str(e)}
+        safe_errors.log_exception(logger, "ingest_file stat failed", e)
+        return {"status": "error", "reason": safe_errors.public_error_detail(e)}
 
     try:
-        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+        with open(filepath, encoding="utf-8", errors="replace") as f:
             content = f.read()
     except Exception as e:
-        return {"status": "error", "reason": str(e)}
+        safe_errors.log_exception(logger, "ingest_file read failed", e)
+        return {"status": "error", "reason": safe_errors.public_error_detail(e)}
 
     if not content.strip():
         return {"status": "skipped", "reason": "empty file"}
@@ -351,7 +367,7 @@ def ingest_file(filepath: str) -> dict:
     # Check if file has changed since last ingestion
     current_hash = file_hash(filepath)
     collection = get_collection()
-    rel_path = os.path.relpath(filepath, KNOWLEDGE_PATH)
+    rel_path = os.path.relpath(filepath, knowledge_root)
 
     # Delete old chunks for this file
     try:
@@ -376,7 +392,11 @@ def ingest_file(filepath: str) -> dict:
     try:
         embeddings = get_embeddings(texts)
     except Exception as e:
-        return {"status": "error", "reason": f"embedding failed: {e}"}
+        safe_errors.log_exception(logger, "ingest_file embeddings failed", e)
+        return {
+            "status": "error",
+            "reason": f"embedding failed: {safe_errors.public_error_detail(e)}",
+        }
 
     # Store in ChromaDB
     ids = [f"{rel_path}::chunk_{i}" for i in range(len(chunks))]
@@ -404,7 +424,12 @@ def ingest_file(filepath: str) -> dict:
 def remove_file(filepath: str) -> dict:
     """Remove all chunks for a file from ChromaDB."""
     filepath = os.path.normpath(filepath)
-    rel_path = os.path.relpath(filepath, KNOWLEDGE_PATH)
+    try:
+        filepath = path_guard.realpath_under(KNOWLEDGE_PATH, filepath)
+    except ValueError:
+        return {"status": "error", "reason": "Invalid path — outside knowledge directory"}
+    knowledge_root = os.path.realpath(os.path.expanduser(KNOWLEDGE_PATH))
+    rel_path = os.path.relpath(filepath, knowledge_root)
     collection = get_collection()
 
     try:
@@ -414,7 +439,8 @@ def remove_file(filepath: str) -> dict:
             return {"status": "ok", "removed": len(existing["ids"]), "source": rel_path}
         return {"status": "skipped", "reason": "not found in store"}
     except Exception as e:
-        return {"status": "error", "reason": str(e)}
+        safe_errors.log_exception(logger, "remove_file failed", e)
+        return {"status": "error", "reason": safe_errors.public_error_detail(e)}
 
 
 def ingest_all() -> list[dict]:
@@ -924,7 +950,11 @@ def ingest_context(source: str, context: str, ttl: int = 0,
     try:
         embeddings = get_embeddings(texts)
     except Exception as e:
-        return {"status": "error", "reason": f"embedding failed: {e}"}
+        safe_errors.log_exception(logger, "ingest_context embeddings failed", e)
+        return {
+            "status": "error",
+            "reason": f"embedding failed: {safe_errors.public_error_detail(e)}",
+        }
 
     # ── Semantic deduplication: skip chunks that are near-duplicates ──
     new_texts = []
@@ -1030,7 +1060,11 @@ def ingest_context_batch(items: list[dict]) -> dict:
     try:
         embeddings = get_embeddings(all_texts)
     except Exception as e:
-        return {"status": "error", "reason": f"embedding failed: {e}"}
+        safe_errors.log_exception(logger, "ingest_context_batch embeddings failed", e)
+        return {
+            "status": "error",
+            "reason": f"embedding failed: {safe_errors.public_error_detail(e)}",
+        }
 
     collection.add(
         ids=all_ids,

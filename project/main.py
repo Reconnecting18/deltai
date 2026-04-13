@@ -18,6 +18,8 @@ import platform
 import logging
 from dotenv import load_dotenv
 
+import safe_errors
+
 from tools.definitions import TOOLS, filter_tools
 from tools.executor import execute_tool
 from router import (route, is_cloud_available, is_cloud_available_sync,
@@ -384,7 +386,8 @@ async def _try_ollama_inference(client: httpx.AsyncClient, model: str,
         return None, "Cannot connect to Ollama"
     except Exception as e:
         _cb_failure()
-        return None, str(e)
+        safe_errors.log_exception(logger, "Ollama inference request failed", e)
+        return None, safe_errors.public_error_detail(e)
 
 
 async def _inference_with_emergency_fallback(
@@ -567,7 +570,8 @@ async def _react_reasoning_loop(client, model: str, user_message: str,
                     result = execute_fn(name, args)
                     result_str = str(result)[:4000]
                 except Exception as e:
-                    result_str = f"Error: {e}"
+                    safe_errors.log_exception(logger, f"ReAct tool {name} failed", e)
+                    result_str = f"Error: {safe_errors.public_error_detail(e)}"
 
                 events.append({"t": "result", "n": name, "s": result_str[:200]})
                 messages.append({"role": "tool", "content": result_str})
@@ -1944,14 +1948,15 @@ async def chat(req: ChatRequest):
 
                 if data is None:
                     # User-friendly error messages
-                    if "timed out" in str(err).lower():
+                    err_l = (err or "").lower()
+                    if "timed out" in err_l:
                         friendly = "Model took too long to respond. Try a shorter question or check if Ollama is running."
-                    elif "connect" in str(err).lower() or "refused" in str(err).lower():
+                    elif "connect" in err_l or "refused" in err_l:
                         friendly = "Cannot reach Ollama. Make sure it's running (ollama serve)."
-                    elif "all models failed" in str(err).lower():
+                    elif "all models failed" in err_l:
                         friendly = "All models are offline. Check Ollama and model availability."
                     else:
-                        friendly = f"Backend error: {err}"
+                        friendly = "Backend error. Please try again."
                     yield json.dumps({"t": "error", "c": friendly}) + "\n"
                     yield json.dumps({"t": "done"}) + "\n"
                     return
@@ -1986,7 +1991,11 @@ async def chat(req: ChatRequest):
                     try:
                         result = await asyncio.to_thread(execute_tool, name, args)
                     except Exception as tool_err:
-                        result = f"ERROR: Tool execution crashed: {tool_err}"
+                        safe_errors.log_exception(logger, "Tool execution crashed", tool_err)
+                        result = (
+                            "ERROR: Tool execution crashed: "
+                            f"{safe_errors.public_error_detail(tool_err)}"
+                        )
                     # If tool errored, retry once with sanitized args
                     if result.startswith("ERROR:") and name in ("run_powershell", "read_file", "write_file"):
                         yield json.dumps({"t": "retry", "n": name, "c": "Retrying with adjusted parameters..."}) + "\n"
@@ -2023,7 +2032,16 @@ async def chat(req: ChatRequest):
                     yield json.dumps({"t": "text", "c": content[i:i+4]}) + "\n"
                 _append_to_history(req.message, content)
             else:
-                yield json.dumps({"t": "error", "c": str(err)}) + "\n"
+                err_l = (err or "").lower()
+                if "timed out" in err_l:
+                    friendly = "Model took too long to respond. Try a shorter question or check if Ollama is running."
+                elif "connect" in err_l or "refused" in err_l:
+                    friendly = "Cannot reach Ollama. Make sure it's running (ollama serve)."
+                elif "all models failed" in err_l:
+                    friendly = "All models are offline. Check Ollama and model availability."
+                else:
+                    friendly = "Backend error. Please try again."
+                yield json.dumps({"t": "error", "c": friendly}) + "\n"
             yield json.dumps({"t": "done", "turns": len(_conversation_history) // 2}) + "\n"
 
     return StreamingResponse(stream_local(), media_type="application/x-ndjson")
@@ -2094,7 +2112,7 @@ def memory_stats_endpoint():
         stats["watcher_active"] = watcher_running()
         return stats
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_errors.public_error_detail(e)}
 
 @app.post("/memory/ingest")
 def memory_ingest_endpoint():
@@ -2109,7 +2127,7 @@ def memory_ingest_endpoint():
             "errors": len([r for r in results if r["status"] == "error"]),
         }
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_errors.public_error_detail(e)}
 
 @app.get("/memory/files")
 def memory_files_endpoint():
@@ -2120,7 +2138,7 @@ def memory_files_endpoint():
         files = get_file_details()
         return {"files": files}
     except Exception as e:
-        return {"error": str(e), "files": []}
+        return {"error": safe_errors.public_error_detail(e), "files": []}
 
 @app.delete("/memory/files/{filepath:path}")
 def memory_delete_file(filepath: str):
@@ -2134,7 +2152,7 @@ def memory_delete_file(filepath: str):
         result = remove_file(full_path)
         return result
     except Exception as e:
-        return {"status": "error", "reason": str(e)}
+        return {"status": "error", "reason": safe_errors.public_error_detail(e)}
 
 
 # ── STREAMING INGEST PIPELINE ─────────────────────────────────────────
@@ -2294,7 +2312,7 @@ async def ingest_endpoint(req: IngestRequest):
             await _broadcast_alert(alert)
         return result
     except Exception as e:
-        return {"status": "error", "reason": str(e)}
+        return {"status": "error", "reason": safe_errors.public_error_detail(e)}
 
 
 class IngestBatchRequest(BaseModel):
@@ -2323,7 +2341,7 @@ async def ingest_batch_endpoint(req: IngestBatchRequest):
                 await _broadcast_alert(alert)
         return result
     except Exception as e:
-        return {"status": "error", "reason": str(e)}
+        return {"status": "error", "reason": safe_errors.public_error_detail(e)}
 
 
 @app.get("/ingest/pipeline/status")
@@ -2345,7 +2363,7 @@ def ingest_cleanup():
     try:
         return cleanup_expired()
     except Exception as e:
-        return {"status": "error", "reason": str(e)}
+        return {"status": "error", "reason": safe_errors.public_error_detail(e)}
 
 
 # ── HIERARCHICAL MEMORY ENDPOINTS ─────────────────────────────────────
@@ -2359,7 +2377,7 @@ async def memory_compact():
         result = await asyncio.to_thread(compact_warm_to_cold)
         return result
     except Exception as e:
-        return {"status": "error", "reason": str(e)}
+        return {"status": "error", "reason": safe_errors.public_error_detail(e)}
 
 
 @app.get("/memory/cold/stats")
@@ -2370,7 +2388,7 @@ def cold_memory_stats():
     try:
         return get_cold_stats()
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_errors.public_error_detail(e)}
 
 
 # ── KNOWLEDGE GAP ENDPOINTS ───────────────────────────────────────────
@@ -2382,7 +2400,7 @@ def knowledge_gaps():
         gaps = get_unresolved_gaps(limit=50)
         return {"gaps": gaps, "count": len(gaps)}
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_errors.public_error_detail(e)}
 
 
 @app.post("/knowledge/gaps/{gap_id}/resolve")
@@ -2392,7 +2410,7 @@ def resolve_gap(gap_id: int):
         resolve_knowledge_gap(gap_id)
         return {"status": "ok", "resolved": gap_id}
     except Exception as e:
-        return {"status": "error", "reason": str(e)}
+        return {"status": "error", "reason": safe_errors.public_error_detail(e)}
 
 
 # ── TRAINING INTELLIGENCE ENDPOINTS ──────────────────────────────────
@@ -2406,7 +2424,7 @@ def training_weaknesses():
         from training import identify_weak_domains
         return {"weaknesses": identify_weak_domains()}
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": safe_errors.public_error_detail(e)}
 
 
 @app.post("/training/improve/{domain}")
@@ -2419,7 +2437,7 @@ async def training_improve(domain: str):
         result = await asyncio.to_thread(run_improvement_cycle, domain)
         return result
     except Exception as e:
-        return {"status": "error", "reason": str(e)}
+        return {"status": "error", "reason": safe_errors.public_error_detail(e)}
 
 
 # ── WEBSOCKET ALERTS ─────────────────────────────────────────────────
@@ -2950,7 +2968,7 @@ async def voice_warm():
         await asyncio.to_thread(transcribe_audio, b"RIFF$\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x80>\x00\x00\x00}\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00")
         return {"ok": True, "stt": "warmed"}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": safe_errors.public_error_detail(e)}
 
 
 @app.post("/voice/stt")
@@ -2977,7 +2995,10 @@ async def voice_tts(req: TTSRequest):
         return JSONResponse({"error": "Voice module not available"}, status_code=503)
     result = await synthesize_speech(req.text, voice=req.voice, rate=req.rate, pitch=req.pitch)
     if "error" in result:
-        return JSONResponse({"error": result["error"]}, status_code=500)
+        return JSONResponse(
+            {"error": safe_errors.public_error_detail(Exception(result["error"]))},
+            status_code=500,
+        )
     return Response(
         content=result["audio"],
         media_type=f"audio/{result['format']}",
@@ -3073,7 +3094,7 @@ async def api_voice_speak(req: dict):
         await voice_speak(text, priority=priority)
         return {"ok": True, "text": text, "priority": priority}
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": safe_errors.public_error_detail(e)}, status_code=500)
 
 
 @app.get("/api/voice/config")
@@ -3126,7 +3147,7 @@ async def api_voice_preset_save(req: dict):
         _voice_cfg.save_preset(name)
         return {"ok": True, "name": name}
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": safe_errors.public_error_detail(e)}, status_code=500)
 
 
 @app.get("/api/voice/status")
@@ -3188,7 +3209,7 @@ async def api_voice_test():
             timings["note"] = "Piper TTS not installed — install piper-tts for local voice"
         return {"ok": True, "text": test_text, "timings": timings}
     except Exception as e:
-        return {"ok": False, "error": str(e), "timings": timings}
+        return {"ok": False, "error": safe_errors.public_error_detail(e), "timings": timings}
 
 
 # ── VOICE TRAINING ENDPOINTS ────────────────────────────────────────────
@@ -3203,7 +3224,7 @@ async def api_voice_train_prepare():
         stats = await asyncio.to_thread(prepare_dataset)
         return {"ok": True, **stats}
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": safe_errors.public_error_detail(e)}, status_code=500)
 
 
 @app.post("/api/voice/train/start")
@@ -3217,9 +3238,9 @@ async def api_voice_train_start(req: dict = None):
         train(output_name=output_name)
         return {"ok": True, "status": "training started"}
     except RuntimeError as e:
-        return JSONResponse({"error": str(e)}, status_code=409)
+        return JSONResponse({"error": safe_errors.public_error_detail(e)}, status_code=409)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": safe_errors.public_error_detail(e)}, status_code=500)
 
 
 @app.get("/api/voice/train/status")
@@ -3252,7 +3273,7 @@ async def api_voice_train_export(req: dict = None):
         result = await asyncio.to_thread(export_model, output_name=output_name)
         return {"ok": True, **result}
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": safe_errors.public_error_detail(e)}, status_code=500)
 
 
 # ── STATS ───────────────────────────────────────────────────────────────
@@ -3302,7 +3323,8 @@ def stats():
                 "temp_c": temp,
             }
         except Exception as e:
-            result["gpu"] = {"error": str(e)}
+            safe_errors.log_exception(logger, "stats GPU probe failed", e)
+            result["gpu"] = {"error": safe_errors.public_error_detail(e)}
     else:
         result["gpu"] = {"error": "NVML unavailable"}
     try:
@@ -3359,6 +3381,8 @@ MODULE_FILES = {
     "personality": os.path.join(MODULES_DIR, "personality.md"),
     "pilot": os.path.join(MODULES_DIR, "pilot.md"),
 }
+_ALLOWED_MODULE_PATHS = frozenset(MODULE_FILES.values())
+
 
 @app.get("/modelfile")
 def get_modelfile():
@@ -3366,7 +3390,8 @@ def get_modelfile():
         with open(MODELFILE_PATH, "r", encoding="utf-8") as f:
             return PlainTextResponse(f.read())
     except Exception as e:
-        return PlainTextResponse(f"# Error: {e}")
+        safe_errors.log_exception(logger, "get_modelfile failed", e)
+        return PlainTextResponse("# Error reading modelfile", status_code=500)
 
 class ModelfileUpdate(BaseModel):
     content: str
@@ -3378,27 +3403,28 @@ def save_modelfile(update: ModelfileUpdate):
             f.write(update.content)
         return {"ok": True}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": safe_errors.public_error_detail(e)}
 
 @app.get("/module/{name}")
 def get_module(name: str):
     path = MODULE_FILES.get(name)
-    if not path:
+    if not path or path not in _ALLOWED_MODULE_PATHS:
         return PlainTextResponse(f"# Unknown module: {name}", status_code=404)
     try:
         with open(path, "r", encoding="utf-8") as f:
             return PlainTextResponse(f.read())
     except Exception as e:
-        return PlainTextResponse(f"# Error reading {name}: {e}")
+        safe_errors.log_exception(logger, f"get_module {name} failed", e)
+        return PlainTextResponse(f"# Error reading {name}", status_code=500)
 
 @app.post("/module/{name}")
 def save_module(name: str, update: ModelfileUpdate):
     path = MODULE_FILES.get(name)
-    if not path:
+    if not path or path not in _ALLOWED_MODULE_PATHS:
         return {"ok": False, "error": f"Unknown module: {name}"}
     try:
         with open(path, "w", encoding="utf-8") as f:
             f.write(update.content)
         return {"ok": True}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": safe_errors.public_error_detail(e)}

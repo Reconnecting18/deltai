@@ -12,17 +12,16 @@ Endpoints are registered in main.py:
   WS   /voice/stream  — Real-time bidirectional voice (future)
 """
 
-import os
+import asyncio
 import io
+import logging
+import os
+import subprocess
+import tempfile
 import time
 import wave
-import json
-import struct
-import asyncio
-import logging
-import tempfile
-import subprocess
-from pathlib import Path
+
+import safe_errors
 
 logger = logging.getLogger("deltai.voice")
 
@@ -165,7 +164,7 @@ def transcribe_audio(audio_bytes: bytes, language: str = "en") -> dict:
         }
     except Exception as e:
         logger.error(f"Transcription failed: {e}")
-        return {"error": str(e), "text": ""}
+        return {"error": safe_errors.public_error_detail(e), "text": ""}
     finally:
         try:
             os.unlink(tmp_path)
@@ -259,7 +258,7 @@ async def synthesize_speech(text: str, voice: str = None, rate: str = None, pitc
         return await _windows_tts(clean)
     except Exception as e:
         logger.error(f"All TTS backends failed: {e}")
-        return {"error": f"TTS unavailable: {e}"}
+        return {"error": f"TTS unavailable: {safe_errors.public_error_detail(e)}"}
 
 
 async def _windows_tts(text: str) -> dict:
@@ -302,10 +301,11 @@ $synth.Dispose()
             "size": len(audio_data),
             "duration_estimate": round(len(text.split()) / 2.5, 1),
         }
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return {"error": "TTS timed out"}
     except Exception as e:
-        return {"error": str(e)}
+        safe_errors.log_exception(logger, "_windows_tts failed", e)
+        return {"error": safe_errors.public_error_detail(e)}
     finally:
         for p in (tmp_path, text_path):
             try:
@@ -394,7 +394,6 @@ def record_audio(duration: float = 5.0, sample_rate: int = 16000) -> bytes:
     """
     try:
         import sounddevice as sd
-        import numpy as np
 
         logger.info(f"Recording {duration}s of audio at {sample_rate}Hz...")
         audio = sd.rec(
