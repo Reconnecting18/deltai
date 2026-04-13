@@ -1968,8 +1968,13 @@ def run_ab_eval(
         })
 
     # Save results
-    eval_file = f"ab_{model_a}_vs_{model_b}_{int(time.time())}.json"
-    eval_path = os.path.join(EVAL_PATH, eval_file)
+    safe_model_a = re.sub(r"[^A-Za-z0-9._-]", "_", model_a).strip("._-") or "model_a"
+    safe_model_b = re.sub(r"[^A-Za-z0-9._-]", "_", model_b).strip("._-") or "model_b"
+    eval_file = f"ab_{safe_model_a}_vs_{safe_model_b}_{int(time.time())}.json"
+    eval_root = os.path.realpath(EVAL_PATH)
+    eval_path = os.path.realpath(os.path.join(eval_root, eval_file))
+    if os.path.commonpath([eval_root, eval_path]) != eval_root:
+        return {"status": "error", "reason": "Invalid evaluation file path"}
     with open(eval_path, "w", encoding="utf-8") as f:
         json.dump({
             "model_a": model_a,
