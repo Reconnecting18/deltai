@@ -146,10 +146,10 @@ See [Configuration](#configuration) below for all options.
 cd project && source venv/bin/activate
 uvicorn main:app --reload --host 127.0.0.1 --port 8000
 
-# Option B — install as a systemd user service
-cp systemd/user/deltai.service ~/.config/systemd/user/
+# Option B — install the DELTA user daemon (optional; separate from uvicorn chat app)
+cp systemd/user/delta-daemon.service ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now deltai
+systemctl --user enable --now delta-daemon
 ```
 
 ### 5. Use it
@@ -317,6 +317,7 @@ deltai/
 ├── app/                          Electron desktop shell (optional)
 │   └── main.js                   Frameless window + IPC
 ├── project/                      deltai daemon (FastAPI)
+│   ├── .env.example              Template copied to .env for local configuration
 │   ├── main.py                   Chat, ingest pipeline, ReAct loop, resource manager
 │   ├── router.py                 VRAM detection, dynamic quant, partial offload
 │   ├── memory.py                 Hierarchical RAG (hot/warm/cold), iterative retrieval
@@ -339,7 +340,7 @@ deltai/
 │       └── verify_distill.py     Distillation pipeline tests
 ├── systemd/
 │   └── user/
-│       └── deltai.service        systemd user service unit
+│       └── delta-daemon.service  systemd user unit (delta-daemon)
 ├── modelfiles/                   Ollama modelfiles
 ├── data/                         Runtime data (gitignored)
 │   ├── chromadb/                 Vector store
@@ -432,23 +433,23 @@ deltai/
 
 ## systemd Integration
 
-deltai ships a user service unit. Install and manage it like any user service:
+This repo ships a **user** unit for the `delta-daemon` CLI (`src/delta` FastAPI daemon), not the `project/` uvicorn app. Install and manage it like any user service:
 
 ```bash
 # Install
-cp systemd/user/deltai.service ~/.config/systemd/user/
+cp systemd/user/delta-daemon.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 
 # Enable on login
-systemctl --user enable deltai
+systemctl --user enable delta-daemon
 
 # Start/stop/restart
-systemctl --user start deltai
-systemctl --user stop deltai
-systemctl --user restart deltai
+systemctl --user start delta-daemon
+systemctl --user stop delta-daemon
+systemctl --user restart delta-daemon
 
 # Logs
-journalctl --user -u deltai -f
+journalctl --user -u delta-daemon -f
 ```
 
 No root required. The service starts after the user session begins.

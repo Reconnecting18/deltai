@@ -150,12 +150,13 @@ Web training data collection: Wikipedia (HF datasets streaming), arXiv XML API, 
 | `project/watcher.py` | Watchdog file watcher for `data/knowledge/` |
 | `project/anthropic_client.py` | Cloud inference (dormant until ANTHROPIC_API_KEY set) |
 | `project/static/index.html` | Dashboard UI (single file — HTML + CSS + JS) |
+| `project/.env.example` | Template for `project/.env` |
 | `project/.env` | Runtime configuration (not committed) |
 | `project/tests/verify_full.py` | 46-test core verification suite |
 | `project/tests/verify_stress.py` | 30-test stress simulation suite |
 | `project/tests/verify_resource_mgmt.py` | 29-test resource management suite |
 | `project/tests/verify_distill.py` | 34-test distillation suite |
-| `systemd/user/deltai.service` | systemd user service unit |
+| `systemd/user/delta-daemon.service` | systemd user unit for `delta-daemon` |
 | `scripts/backup_s3.py` | S3 backup (full/incremental/restore) |
 | `scripts/daily_training.py` | Nightly autonomous training orchestrator |
 | `scripts/collect_training_data.py` | Standalone web data collector |

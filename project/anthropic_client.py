@@ -114,7 +114,10 @@ async def stream_chat(
 
     api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
     if not api_key:
-        yield json.dumps({"t": "error", "c": "No Anthropic API key configured. Add ANTHROPIC_API_KEY to ~/deltai/project\\.env"}) + "\n"
+        yield json.dumps({
+            "t": "error",
+            "c": "No Anthropic API key configured. Set ANTHROPIC_API_KEY in project/.env (or your environment).",
+        }) + "\n"
         yield json.dumps({"t": "done"}) + "\n"
         return
 
