@@ -40,6 +40,8 @@ For short agent onboarding (Cursor entry point), see [AGENTS.md](AGENTS.md).
 
 External services, scripts, and cron jobs push context into deltai via `POST /ingest`. deltai stores it in ChromaDB with TTL and source tags. RAG retrieves it when relevant to a query. This makes deltai pluggable — any service can feed it context without deltai knowing or caring about the domain.
 
+**Domain-specific automation** (for example Arch Linux update risk summaries, personal dashboards, or org-specific workflows) belongs in [`project/extensions/`](project/extensions/) as auto-discovered FastAPI routers and optional `TOOLS` / `register_handler` hooks — not baked into `project/main.py` or the core tool catalog. Extensions use the same public surfaces as any external client: `POST /ingest`, extension HTTP routes under `/ext/…`, and the shared tool executor. That keeps the daemon core small and fork-friendly while still allowing deep customization.
+
 ---
 
 ## Repository Layout
@@ -143,7 +145,7 @@ User-space extension system. Any subdirectory inside `project/extensions/` that 
 
 Extensions are loaded **after** the core app is initialised. A broken extension is skipped with a warning and never prevents deltai from starting. Personal extension directories are gitignored by default (see `.gitignore`); add `-f` to `git add` to opt a specific extension into version control.
 
-See `project/extensions/README.md` for the full authoring guide and `project/extensions/example_extension/` for a working template.
+See `project/extensions/README.md` for the full authoring guide, `project/extensions/example_extension/` for a minimal template, and `project/extensions/arch_update_guard/` for an optional Arch Linux news/pacman evidence extension.
 
 ---
 
@@ -161,6 +163,7 @@ See `project/extensions/README.md` for the full authoring guide and `project/ext
 | `project/extensions/__init__.py` | Extension loader — `load_extensions()`, `get_extension_tools()`, `shutdown_extensions()` |
 | `project/extensions/README.md` | Extension authoring guide |
 | `project/extensions/example_extension/` | Working extension template |
+| `project/extensions/arch_update_guard/` | Optional Arch news/wiki ingest + pacman evidence (`/ext/arch_update_guard/…`) |
 | `project/training.py` | QLoRA, adapters, distillation, dataset CRUD, auto-capture, daily cycle |
 | `project/collector.py` | Web data collection for training |
 | `project/voice/` | STT/TTS package |

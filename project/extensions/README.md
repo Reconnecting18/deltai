@@ -101,7 +101,7 @@ Add a line to the project-level `.gitignore` (or a local `.git/info/exclude`) fo
 project/extensions/my_feature/
 ```
 
-The `example_extension/` that ships with deltai is tracked by git as a reference; your own packages are yours to manage.
+The `example_extension/` and optional `arch_update_guard/` (Arch Linux update context) ship as references; your own packages are yours to manage.
 
 ---
 

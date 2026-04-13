@@ -502,6 +502,9 @@ _TELEMETRY_TOOL_NAMES = {"get_session_status", "get_lap_summary",
 # Universal tools always included
 _UNIVERSAL_TOOLS = {"search_knowledge", "calculate"}
 
+# Arch update guard extension (project/extensions/arch_update_guard/)
+_ARCH_EXT_TOOL_NAMES = {"arch_pending_updates_report", "arch_refresh_news_digest"}
+
 # Domain-specific tool sets
 TOOL_DOMAIN_MAP = {
     "racing": {"search_knowledge", "calculate", "solve_math", "lookup_reference",
@@ -512,7 +515,8 @@ TOOL_DOMAIN_MAP = {
                   "read_file", "lookup_reference"},
     "system": {"read_file", "write_file", "list_directory", "run_shell",
                "get_system_info", "memory_stats", "self_diagnostics",
-               "manage_ollama_models", "repair_subsystem", "resource_status"},
+               "manage_ollama_models", "repair_subsystem", "resource_status"}
+    | _ARCH_EXT_TOOL_NAMES,
     "diagnostics": {"self_diagnostics", "manage_ollama_models", "repair_subsystem",
                     "resource_status", "get_system_info", "memory_stats"},
 }
@@ -525,6 +529,11 @@ _SYSTEM_PATTERNS = _re.compile(
 _DIAG_PATTERNS = _re.compile(
     r'\b(diagnostic|health|status|repair|fix|restart|ollama|model|vram|'
     r'gpu|subsystem|watcher|circuit.breaker)\b', _re.IGNORECASE)
+_ARCH_PATTERNS = _re.compile(
+    r'\b(pacman|checkupdates|pacnew|mkinitcpio|arch\s*linux|system\s*upgrade|'
+    r'kernel\s*upgrade|rolling\s*release)\b',
+    _re.IGNORECASE,
+)
 
 
 def filter_tools(tools: list, domain: str | None = None, tier: int = 1,
@@ -551,6 +560,8 @@ def filter_tools(tools: list, domain: str | None = None, tier: int = 1,
         relevant_names |= TOOL_DOMAIN_MAP.get("system", set())
     if _DIAG_PATTERNS.search(query):
         relevant_names |= TOOL_DOMAIN_MAP.get("diagnostics", set())
+    if _ARCH_PATTERNS.search(query):
+        relevant_names |= _ARCH_EXT_TOOL_NAMES
 
     # Add domain-specific tools
     if domain and domain in TOOL_DOMAIN_MAP:
@@ -561,7 +572,12 @@ def filter_tools(tools: list, domain: str | None = None, tier: int = 1,
         relevant_names |= _TELEMETRY_TOOL_NAMES
 
     # If no specific domain matched, include a broad set
-    if not domain and not _SYSTEM_PATTERNS.search(query) and not _DIAG_PATTERNS.search(query):
+    if (
+        not domain
+        and not _SYSTEM_PATTERNS.search(query)
+        and not _DIAG_PATTERNS.search(query)
+        and not _ARCH_PATTERNS.search(query)
+    ):
         # General query: include common tools but skip diagnostics
         relevant_names = {"search_knowledge", "calculate", "solve_math",
                          "lookup_reference", "summarize_data", "read_file",

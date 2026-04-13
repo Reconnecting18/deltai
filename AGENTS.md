@@ -21,11 +21,14 @@ It is the open, user-controlled Linux answer to Copilot+Windows — built around
 | Area | Path |
 |------|------|
 | Backend (FastAPI daemon) | `project/` |
+| **Extensions** (personal or domain-specific features; keep core minimal) | `project/extensions/` — see [project/extensions/README.md](project/extensions/README.md) |
 | Desktop shell (optional) | `app/` |
 | Ollama modelfiles | `modelfiles/` |
 | systemd user unit | `systemd/user/` |
 | Runtime data (gitignored) | `data/` |
 | Scripts | `scripts/` |
+
+Domain-specific automation (e.g. distro maintenance assistants) belongs in `project/extensions/`, not in `project/main.py` or core tool definitions, unless it is a generic primitive reused everywhere.
 
 ## How to run (development)
 
