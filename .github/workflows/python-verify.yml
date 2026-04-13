@@ -1,0 +1,83 @@
+# Reusable Python verification (Ruff, Mypy, Pytest). Called from CI and weekly hardening.
+on:
+  workflow_call:
+    inputs:
+      pytest_args:
+        description: Arguments passed to pytest (e.g. -q -m "not slow")
+        type: string
+        required: false
+        default: "-q"
+      collect_junit:
+        description: Write diagnostics/pytest-junit.xml and upload artifact + summary
+        type: boolean
+        required: false
+        default: false
+      run_ruff_format_check:
+        description: Run ruff format --check on src and tests
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  verify:
+    name: Python verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Lint (ruff)
+        run: ruff check src tests
+
+      - name: Ruff format check
+        if: inputs.run_ruff_format_check == true
+        run: ruff format --check src tests
+
+      - name: Type check (mypy)
+        run: mypy src/delta --ignore-missing-imports
+
+      - name: Run tests
+        if: inputs.collect_junit != true
+        run: python -m pytest ${{ inputs.pytest_args }}
+
+      - name: Run tests (JUnit XML)
+        if: inputs.collect_junit == true
+        run: |
+          mkdir -p diagnostics
+          python -m pytest ${{ inputs.pytest_args }} --junitxml=diagnostics/pytest-junit.xml
+
+      - name: Upload diagnostics
+        if: inputs.collect_junit == true && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-hardening-diagnostics
+          path: diagnostics/
+          if-no-files-found: warn
+
+      - name: Job summary
+        if: inputs.collect_junit == true && always()
+        run: |
+          {
+            echo "## Weekly hardening — verify"
+            echo ""
+            echo "| Step | Status |"
+            echo "|------|--------|"
+            echo "| Ruff / Mypy / Pytest | See job log |"
+            echo ""
+            echo "- **This run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "- **Code scanning (CodeQL):** ${{ github.server_url }}/${{ github.repository }}/security/code-scanning"
+            echo ""
+            echo "Download **weekly-hardening-diagnostics** for Pytest JUnit XML (\`diagnostics/pytest-junit.xml\`)."
+          } >> "$GITHUB_STEP_SUMMARY"

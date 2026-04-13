@@ -10,6 +10,15 @@ on:
 jobs:
   verify:
     name: Verify
+    uses: ./.github/workflows/python-verify.yml
+    with:
+      pytest_args: "-q"
+      collect_junit: true
+      run_ruff_format_check: true
+
+  pip_audit:
+    name: pip-audit
+    needs: verify
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -22,46 +31,14 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install project and pip-audit
         run: |
           python -m pip install --upgrade pip
           pip install -e .[dev]
+          pip install "pip-audit>=2.7"
 
-      - name: Prepare diagnostics directory
-        run: mkdir -p diagnostics
-
-      - name: Lint (ruff)
-        run: ruff check src tests
-
-      - name: Type check (mypy)
-        run: mypy src/delta --ignore-missing-imports
-
-      - name: Run tests (JUnit XML)
-        run: python -m pytest -q --junitxml=diagnostics/pytest-junit.xml
-
-      - name: Upload diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: weekly-hardening-diagnostics
-          path: diagnostics/
-          if-no-files-found: warn
-
-      - name: Job summary
-        if: always()
-        run: |
-          {
-            echo "## Weekly hardening — verify"
-            echo ""
-            echo "| Step | Status |"
-            echo "|------|--------|"
-            echo "| Ruff / Mypy / Pytest | See job log |"
-            echo ""
-            echo "- **This run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            echo "- **Code scanning (CodeQL):** ${{ github.server_url }}/${{ github.repository }}/security/code-scanning"
-            echo ""
-            echo "Download **weekly-hardening-diagnostics** for Pytest JUnit XML (\`diagnostics/pytest-junit.xml\`)."
-          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Audit dependencies for known vulnerabilities
+        run: pip-audit
 
   propose_ruff_fixes:
     name: Propose Ruff fixes
