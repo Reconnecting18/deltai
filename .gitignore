@@ -1,6 +1,7 @@
 # Python
 *.egg-info/
 project/venv/
+venv/
 project/__pycache__/
 project/*.pyc
 project/.env
@@ -19,6 +20,7 @@ app/.cache/
 # Data / memory stores
 data/chromadb/
 data/sqlite/
+project/~/.local/share/
 
 # Knowledge base files (PDFs, docs) — add manually if desired
 # data/knowledge/
