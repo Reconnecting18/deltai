@@ -50,13 +50,35 @@ jobs:
 
       - name: Run tests
         if: inputs.collect_junit != true
-        run: python -m pytest ${{ inputs.pytest_args }}
+        env:
+          PYTEST_ARGS: ${{ inputs.pytest_args }}
+        run: |
+          python - <<'PY'
+          import os
+          import shlex
+          import subprocess
+          import sys
+
+          args = shlex.split(os.environ.get("PYTEST_ARGS", "-q"))
+          sys.exit(subprocess.call(["python", "-m", "pytest", *args]))
+          PY
 
       - name: Run tests (JUnit XML)
         if: inputs.collect_junit == true
+        env:
+          PYTEST_ARGS: ${{ inputs.pytest_args }}
         run: |
           mkdir -p diagnostics
-          python -m pytest ${{ inputs.pytest_args }} --junitxml=diagnostics/pytest-junit.xml
+          python - <<'PY'
+          import os
+          import shlex
+          import subprocess
+          import sys
+
+          args = shlex.split(os.environ.get("PYTEST_ARGS", "-q"))
+          cmd = ["python", "-m", "pytest", *args, "--junitxml=diagnostics/pytest-junit.xml"]
+          sys.exit(subprocess.call(cmd))
+          PY
 
       - name: Upload diagnostics
         if: inputs.collect_junit == true && always()

@@ -2747,7 +2747,7 @@ _CAPTURE_HASH_CACHE_SIZE = 200
 
 def _query_hash(text: str) -> str:
     """Fast hash for dedup."""
-    return _hashlib.md5(text.strip().lower().encode()).hexdigest()
+    return _hashlib.sha256(text.strip().lower().encode()).hexdigest()
 
 
 def smart_auto_capture(

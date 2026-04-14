@@ -24,6 +24,7 @@ from fastapi.responses import (
     StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
+from path_guard import realpath_under
 from persistence import (
     _serialize_embedding,
     find_similar_traces,
@@ -266,7 +267,7 @@ def _append_to_history(user_message: str, assistant_response: str, chat_metadata
         try:
             import hashlib
 
-            qhash = hashlib.md5(user_message.strip().lower().encode()).hexdigest()
+            qhash = hashlib.sha256(user_message.strip().lower().encode()).hexdigest()
             save_routing_feedback(
                 query_hash=qhash,
                 classified_tier=metadata.get("tier", 1),
@@ -3868,21 +3869,35 @@ def stats():
 
 # ── MODELFILE ───────────────────────────────────────────────────────────
 
-MODELFILE_PATH = r"~/deltai/modelfiles\deltai.modelfile"
-MODULES_DIR = os.path.join(_HERE, "..", "modelfiles")
+MODULES_DIR = os.path.realpath(os.path.join(_HERE, "..", "modelfiles"))
+MODELFILE_PATH = os.path.join(MODULES_DIR, "deltai.modelfile")
 MODULE_FILES = {
     "modelfile": MODELFILE_PATH,
     "protocols": os.path.join(MODULES_DIR, "protocols.md"),
     "personality": os.path.join(MODULES_DIR, "personality.md"),
     "pilot": os.path.join(MODULES_DIR, "pilot.md"),
 }
-_ALLOWED_MODULE_PATHS = frozenset(MODULE_FILES.values())
+_ALLOWED_MODULE_PATHS = frozenset(realpath_under(MODULES_DIR, p) for p in MODULE_FILES.values())
+
+
+def _resolve_module_path(name: str) -> str | None:
+    candidate = MODULE_FILES.get(name)
+    if not candidate:
+        return None
+    try:
+        resolved = realpath_under(MODULES_DIR, candidate)
+    except ValueError:
+        return None
+    return resolved if resolved in _ALLOWED_MODULE_PATHS else None
 
 
 @app.get("/modelfile")
 def get_modelfile():
+    path = _resolve_module_path("modelfile")
+    if not path:
+        return PlainTextResponse("# Modelfile path unavailable", status_code=500)
     try:
-        with open(MODELFILE_PATH, encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return PlainTextResponse(f.read())
     except Exception as e:
         safe_errors.log_exception(logger, "get_modelfile failed", e)
@@ -3895,8 +3910,11 @@ class ModelfileUpdate(BaseModel):
 
 @app.post("/modelfile")
 def save_modelfile(update: ModelfileUpdate):
+    path = _resolve_module_path("modelfile")
+    if not path:
+        return {"ok": False, "error": "Modelfile path unavailable"}
     try:
-        with open(MODELFILE_PATH, "w", encoding="utf-8") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(update.content)
         return {"ok": True}
     except Exception as e:
@@ -3905,8 +3923,8 @@ def save_modelfile(update: ModelfileUpdate):
 
 @app.get("/module/{name}")
 def get_module(name: str):
-    path = MODULE_FILES.get(name)
-    if not path or path not in _ALLOWED_MODULE_PATHS:
+    path = _resolve_module_path(name)
+    if not path:
         return PlainTextResponse(f"# Unknown module: {name}", status_code=404)
     try:
         with open(path, encoding="utf-8") as f:
@@ -3918,8 +3936,8 @@ def get_module(name: str):
 
 @app.post("/module/{name}")
 def save_module(name: str, update: ModelfileUpdate):
-    path = MODULE_FILES.get(name)
-    if not path or path not in _ALLOWED_MODULE_PATHS:
+    path = _resolve_module_path(name)
+    if not path:
         return {"ok": False, "error": f"Unknown module: {name}"}
     try:
         with open(path, "w", encoding="utf-8") as f:
