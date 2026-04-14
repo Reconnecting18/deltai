@@ -75,6 +75,32 @@ def test_get_pending_updates_mock_checkupdates():
     assert out["pending"][0]["package"] == "foo"
 
 
+def test_get_pending_updates_pacman_qu_exit_1_empty_is_no_upgrades():
+    """pacman -Qu returns 1 with no output when nothing to upgrade (Arch BBS #301276)."""
+    from extensions.arch_update_guard import pacman_audit
+
+    def fake_which(name):
+        if name == "checkupdates":
+            return None
+        if name == "pacman":
+            return "/usr/bin/pacman"
+        return None
+
+    with (
+        mock.patch.object(pacman_audit.shutil, "which", side_effect=fake_which),
+        mock.patch.object(
+            pacman_audit,
+            "_run_allowlisted",
+            return_value=(1, "", ""),
+        ),
+    ):
+        out = pacman_audit.get_pending_updates(include_reverse_deps=False)
+
+    assert out["method"] == "pacman_-Qu"
+    assert out["pending_count"] == 0
+    assert out["errors"] == []
+
+
 def test_refresh_news_skipped_when_rate_limited():
     from extensions.arch_update_guard import news_wiki
 

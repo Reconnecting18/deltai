@@ -67,3 +67,5 @@ Official Arch Linux news feed: `https://archlinux.org/feeds/news/`
 
 - **`httpx`** — already a deltai dependency.
 - **`pacman-contrib`** (`checkupdates`) recommended on Arch for unprivileged pending-package listing.
+
+Note: plain **`pacman -Qu`** may exit **1** with **no output** when there is nothing to upgrade (pacman convention on Arch); that is not a failure. Prefer **`checkupdates`** from `pacman-contrib` for a clearer exit code and sync-aware listing without touching the live DB.

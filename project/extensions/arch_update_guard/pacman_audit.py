@@ -125,8 +125,16 @@ def get_pending_updates(
     elif shutil.which("pacman"):
         method = "pacman_-Qu"
         code, out, err = _run_allowlisted(["pacman", "-Qu"])
-        if code != 0:
-            msg = (err or out).strip() or f"exit {code}"
+        combined = (err or "").strip() or (out or "").strip()
+        if code == 0:
+            for rec in _parse_pending_from_output(out, "pacman_-Qu"):
+                pending.append(rec)
+        elif code == 1 and not combined:
+            # pacman -Qu: exit 1 with no stdout/stderr means nothing to upgrade
+            # (see Arch forums e.g. bbs.archlinux.org/viewtopic.php?id=301276).
+            pass
+        elif code != 0:
+            msg = combined or f"exit {code}"
             if "unable to lock" in msg.lower() or "permission denied" in msg.lower():
                 errors.append(
                     "pacman -Qu failed (database lock or permissions). "
@@ -135,9 +143,6 @@ def get_pending_updates(
                 )
             else:
                 errors.append(f"pacman -Qu: {msg}")
-        else:
-            for rec in _parse_pending_from_output(out, "pacman_-Qu"):
-                pending.append(rec)
     else:
         errors.append("Neither checkupdates nor pacman found in PATH (not Arch/pacman?)")
 
