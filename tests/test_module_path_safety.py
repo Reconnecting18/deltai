@@ -9,7 +9,7 @@ import main
 def _assert_module_resolution_safety(mod) -> None:
     path = mod._resolve_module_path("protocols")
     assert path is not None
-    assert path.startswith(mod.MODULES_DIR + os.sep)
+    assert os.path.commonpath([path, mod.MODULES_DIR]) == mod.MODULES_DIR
     assert mod._resolve_module_path("../etc/passwd") is None
     assert mod._resolve_module_path("missing-module") is None
 

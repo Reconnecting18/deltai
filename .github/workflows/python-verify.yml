@@ -59,7 +59,7 @@ jobs:
           import subprocess
           import sys
 
-          args = shlex.split(os.environ.get("PYTEST_ARGS", "-q"))
+          args = shlex.split(os.environ.get("PYTEST_ARGS") or "-q")
           sys.exit(subprocess.call(["python", "-m", "pytest", *args]))
           PY
 
@@ -75,7 +75,7 @@ jobs:
           import subprocess
           import sys
 
-          args = shlex.split(os.environ.get("PYTEST_ARGS", "-q"))
+          args = shlex.split(os.environ.get("PYTEST_ARGS") or "-q")
           cmd = ["python", "-m", "pytest", *args, "--junitxml=diagnostics/pytest-junit.xml"]
           sys.exit(subprocess.call(cmd))
           PY
