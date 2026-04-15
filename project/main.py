@@ -94,7 +94,7 @@ try:
 
     RAG_AVAILABLE = True
 except ImportError as e:
-    logger.warning(f"RAG system unavailable: {e}")
+    logger.warning("RAG system unavailable [%s]", type(e).__name__)
 
 # ── TRAINING IMPORTS ───────────────────────────────────────────────────
 TRAINING_AVAILABLE = False
@@ -115,7 +115,7 @@ try:
 
     TRAINING_AVAILABLE = True
 except ImportError as e:
-    logger.warning(f"Training system unavailable: {e}")
+    logger.warning("Training system unavailable [%s]", type(e).__name__)
 
 
 # ── VOICE IMPORTS ─────────────────────────────────────────────────────
@@ -129,7 +129,7 @@ try:
 
     VOICE_AVAILABLE = True
 except ImportError as e:
-    logger.warning(f"Voice system unavailable: {e}")
+    logger.warning("Voice system unavailable [%s]", type(e).__name__)
 
 # ── EXTENSIONS IMPORTS ─────────────────────────────────────────────────
 EXTENSIONS_AVAILABLE = False
@@ -139,7 +139,7 @@ try:
 
     EXTENSIONS_AVAILABLE = True
 except ImportError as e:
-    logger.warning(f"Extensions system unavailable: {e}")
+    logger.warning("Extensions system unavailable [%s]", type(e).__name__)
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 DELTAI_MODEL = os.getenv("DELTAI_MODEL", "deltai")
@@ -242,7 +242,7 @@ def _append_to_history(user_message: str, assistant_response: str, chat_metadata
         save_history_pair(user_message, assistant_response)
         trim_history(HISTORY_MAX_TURNS)
     except Exception as e:
-        logger.warning(f"Failed to persist history: {e}")
+        logger.warning("Failed to persist history [%s]", type(e).__name__)
 
     # ── Quality scoring + smart capture ──
     metadata = chat_metadata or {}
@@ -261,7 +261,7 @@ def _append_to_history(user_message: str, assistant_response: str, chat_metadata
             domain=metadata.get("domain", "general"),
         )
     except Exception as e:
-        logger.debug(f"Quality scoring failed: {e}")
+        logger.debug("Quality scoring failed [%s]", type(e).__name__)
 
     # ── Routing feedback ──
     if metadata.get("model") and quality_result:
@@ -279,7 +279,7 @@ def _append_to_history(user_message: str, assistant_response: str, chat_metadata
                 tool_calls_count=len(metadata.get("tool_calls", [])),
             )
         except Exception as e:
-            logger.debug(f"Routing feedback save failed: {e}")
+            logger.debug("Routing feedback save failed [%s]", type(e).__name__)
 
     # ── Knowledge gap detection ──
     if quality_result and quality_result["score"] < 0.3:
@@ -612,7 +612,7 @@ async def _react_reasoning_loop(
                 parts.append("[END PRIOR REASONING]\n")
                 prior_context = "\n\n".join(parts)
         except Exception as e:
-            logger.debug(f"Trace retrieval failed: {e}")
+            logger.debug("Trace retrieval failed [%s]", type(e).__name__)
 
     react_system = _REACT_SYSTEM_PROMPT.format(max_iter=_REACT_MAX_ITERATIONS)
     context_prefix = f"{rag_context}\n" if rag_context else ""
@@ -733,7 +733,7 @@ def _save_react_trace(
             embedding=query_emb_bytes,
         )
     except Exception as e:
-        logger.debug(f"Trace save failed: {e}")
+        logger.debug("Trace save failed [%s]", type(e).__name__)
 
 
 async def _backup_health_loop():
@@ -828,7 +828,7 @@ def _adjust_process_priority(lower: bool):
         _resource_state["priority_lowered"] = lower
         _log_resource_action(f"Process priority → {label}")
     except Exception as e:
-        logger.debug(f"Priority adjustment failed: {e}")
+        logger.debug("Priority adjustment failed [%s]", type(e).__name__)
 
 
 def _record_vram_reading(vram_free: int):
@@ -1007,7 +1007,7 @@ async def _resource_manager_loop():
                                         break
                                 _resource_state["last_vram_action"] = now
                     except Exception as e:
-                        logger.debug(f"VRAM management failed: {e}")
+                        logger.debug("VRAM management failed [%s]", type(e).__name__)
 
             elif vram_free < _VRAM_WARN_MB:
                 _resource_state["vram_warnings"] = max(1, _resource_state["vram_warnings"])
@@ -1061,7 +1061,7 @@ async def _resource_manager_loop():
                                 "model_loaded", {"model": sim_model, "reason": "sim_start"}
                             )
                 except Exception as e:
-                    logger.debug(f"Sim-start model swap failed: {e}")
+                    logger.debug("Sim-start model swap failed [%s]", type(e).__name__)
                 _resource_state["pending_14b_preload"] = False
 
             # Sim just STOPPED (True -> False)
@@ -1098,7 +1098,7 @@ async def _resource_manager_loop():
                                     "model_loaded", {"model": strong_model, "reason": "sim_stop"}
                                 )
                         except Exception as e:
-                            logger.debug(f"Post-sim 14B preload failed: {e}")
+                            logger.debug("Post-sim 14B preload failed [%s]", type(e).__name__)
                     else:
                         _log_resource_action(f"Skipped 14B preload — only {vram_now}MB VRAM free")
 
@@ -1130,7 +1130,7 @@ async def _resource_manager_loop():
                         _resource_state["ollama_failures"] = 0
                         await asyncio.sleep(5)  # give it time to start
                     except Exception as e:
-                        logger.error(f"Ollama auto-restart failed: {e}")
+                        safe_errors.log_exception(logger, "Ollama auto-restart failed", e)
 
             # ── 4. WATCHER RECOVERY ──
             if RAG_AVAILABLE:
@@ -1144,7 +1144,7 @@ async def _resource_manager_loop():
                         start_watcher()
                         _resource_state["watcher_restarts"] += 1
                 except Exception as e:
-                    logger.debug(f"Watcher recovery check failed: {e}")
+                    logger.debug("Watcher recovery check failed [%s]", type(e).__name__)
 
             # ── 5. PERIODIC TTL CLEANUP ──
             if RAG_AVAILABLE:
@@ -1174,7 +1174,7 @@ async def _resource_manager_loop():
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.error(f"Resource manager error: {e}")
+            safe_errors.log_exception(logger, "Resource manager error", e)
             await asyncio.sleep(10)
 
 
@@ -1261,7 +1261,7 @@ async def _ai_self_heal_loop():
                     data = resp.json()
                     llm_response = data.get("message", {}).get("content", "").strip()
             except Exception as e:
-                logger.warning(f"Self-heal LLM call failed: {e}")
+                logger.warning("Self-heal LLM call failed [%s]", type(e).__name__)
                 continue
 
             # ── Step 3: Parse and execute repair ──
@@ -1319,7 +1319,7 @@ async def _ai_self_heal_loop():
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.error(f"Self-heal loop error: {e}")
+            safe_errors.log_exception(logger, "Self-heal loop error", e)
             await asyncio.sleep(30)
 
 
@@ -1393,7 +1393,7 @@ async def _rag_bootstrap() -> None:
         start_watcher()
         logger.info("File watcher started")
     except Exception as e:
-        logger.error(f"RAG startup failed: {e}")
+        safe_errors.log_exception(logger, "RAG startup failed", e)
 
 
 async def _post_startup_cloud_and_models() -> None:
@@ -1446,7 +1446,7 @@ async def lifespan(app: FastAPI):
         logger.info(f"Loaded {len(loaded) // 2} conversation turns from DB")
         init_budget_from_db()
     except Exception as e:
-        logger.error(f"Persistence startup failed: {e}")
+        safe_errors.log_exception(logger, "Persistence startup failed", e)
 
     post_startup_task = asyncio.create_task(_post_startup_cloud_and_models())
 
@@ -1487,13 +1487,13 @@ async def lifespan(app: FastAPI):
             stop_watcher()
             logger.info("File watcher stopped")
         except Exception as e:
-            logger.error(f"Watcher shutdown failed: {e}")
+            safe_errors.log_exception(logger, "Watcher shutdown failed", e)
 
     if EXTENSIONS_AVAILABLE:
         try:
             await shutdown_extensions()
         except Exception as e:
-            logger.error(f"Extensions shutdown failed: {e}")
+            safe_errors.log_exception(logger, "Extensions shutdown failed", e)
 
 
 app = FastAPI(title="deltai", lifespan=lifespan)
@@ -1814,7 +1814,7 @@ def build_rag_context(
         context_parts.append("[END CONTEXT]\n")
         return "\n\n".join(context_parts)
     except Exception as e:
-        logger.error(f"RAG query failed: {e}")
+        safe_errors.log_exception(logger, "RAG query failed", e)
         return ""
 
 
@@ -2020,7 +2020,7 @@ async def chat(req: ChatRequest):
                             local_messages.append({"role": "tool", "content": result})
 
             except Exception as e:
-                logger.error(f"Split Phase 1 exception: {e}")
+                safe_errors.log_exception(logger, "Split Phase 1 exception", e)
                 yield (
                     json.dumps(
                         {
@@ -2434,7 +2434,7 @@ def clear_chat_history():
     try:
         db_clear_history()
     except Exception as e:
-        logger.warning(f"Failed to clear DB history: {e}")
+        logger.warning("Failed to clear DB history [%s]", type(e).__name__)
     return {"ok": True, "message": "History cleared"}
 
 
@@ -2606,7 +2606,7 @@ async def _ingest_pipeline_worker():
                 )
             except Exception as e:
                 _ingest_metrics["errors"] += len(batch)
-                logger.warning(f"Ingest pipeline batch failed: {e}")
+                logger.warning("Ingest pipeline batch failed [%s]", type(e).__name__)
 
             _ingest_metrics["last_flush"] = _time.time()
 
@@ -2630,7 +2630,7 @@ async def _ingest_pipeline_worker():
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.error(f"Ingest pipeline error: {e}")
+            safe_errors.log_exception(logger, "Ingest pipeline error", e)
             await asyncio.sleep(1)
 
 

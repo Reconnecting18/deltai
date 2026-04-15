@@ -56,7 +56,7 @@ def _run_allowlisted(argv: list[str], timeout: float = 120.0) -> tuple[int, str,
     except subprocess.TimeoutExpired:
         return 124, "", f"{exe}: timed out after {timeout}s"
     except OSError as e:
-        return 1, "", str(e)
+        return 1, "", "os error"
 
 
 def _parse_checkupdates_line(line: str) -> dict[str, str] | None:

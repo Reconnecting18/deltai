@@ -110,7 +110,7 @@ def _init_whisper():
         logger.info(f"Whisper model loaded: {WHISPER_MODEL} ({device})")
         return _whisper_model
     except Exception as e:
-        logger.error(f"Failed to load Whisper: {e}")
+        safe_errors.log_exception(logger, "Failed to load Whisper", e)
         _stt_available = False
         return None
 
@@ -176,7 +176,7 @@ def transcribe_audio(audio_bytes: bytes, language: str = "en") -> dict:
             "segments": segment_list,
         }
     except Exception as e:
-        logger.error(f"Transcription failed: {e}")
+        safe_errors.log_exception(logger, "Transcription failed", e)
         return {"error": safe_errors.public_error_detail(e), "text": ""}
     finally:
         try:
@@ -274,13 +274,13 @@ async def synthesize_speech(
     except ImportError:
         pass
     except Exception as e:
-        logger.warning(f"edge-tts failed: {e}")
+        logger.warning("edge-tts failed [%s]", type(e).__name__)
 
     # Fallback: Windows SAPI (System.Speech)
     try:
         return await _windows_tts(clean)
     except Exception as e:
-        logger.error(f"All TTS backends failed: {e}")
+        safe_errors.log_exception(logger, "All TTS backends failed", e)
         return {"error": f"TTS unavailable: {safe_errors.public_error_detail(e)}"}
 
 
@@ -445,5 +445,5 @@ def record_audio(duration: float = 5.0, sample_rate: int = 16000) -> bytes:
 
         return buf.getvalue()
     except Exception as e:
-        logger.error(f"Recording failed: {e}")
+        safe_errors.log_exception(logger, "Recording failed", e)
         return b""

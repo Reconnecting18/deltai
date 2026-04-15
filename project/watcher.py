@@ -8,6 +8,8 @@ import logging
 import os
 import time
 
+import safe_errors
+
 from memory import KNOWLEDGE_PATH, SUPPORTED_EXTENSIONS, ingest_file, remove_file
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
@@ -71,7 +73,7 @@ class KnowledgeHandler(FileSystemEventHandler):
                     f"Error ingesting {os.path.basename(path)}: {result.get('reason', '?')}"
                 )
         except Exception as e:
-            logger.error(f"Ingest failed for {os.path.basename(path)}: {e}")
+            safe_errors.log_exception(logger, f"Ingest failed for {os.path.basename(path)}", e)
 
     def on_created(self, event):
         if event.is_directory:
@@ -100,7 +102,7 @@ class KnowledgeHandler(FileSystemEventHandler):
                         f"Removed {result['removed']} chunks for {os.path.basename(event.src_path)}"
                     )
             except Exception as e:
-                logger.error(f"Remove failed: {e}")
+                safe_errors.log_exception(logger, "Remove failed", e)
 
     def on_moved(self, event):
         if event.is_directory:

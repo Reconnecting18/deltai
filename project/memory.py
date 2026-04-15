@@ -140,10 +140,10 @@ def get_embeddings(texts: list[str]) -> list[list[float]]:
             data = resp.json()
             return data["embeddings"]
     except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException) as e:
-        logger.error(f"Embedding request failed: {e}")
+        safe_errors.log_exception(logger, "Embedding request failed", e)
         raise
     except Exception as e:
-        logger.error(f"Unexpected embedding error: {e}")
+        safe_errors.log_exception(logger, "Unexpected embedding error", e)
         raise
 
 
@@ -259,7 +259,7 @@ def _demote_to_cold(chunk_ids: list[str], collection) -> int:
         collection.delete(ids=chunk_ids)
         return demoted
     except Exception as e:
-        logger.warning(f"Cold demotion failed: {e}")
+        logger.warning("Cold demotion failed [%s]", type(e).__name__)
         return 0
 
 
@@ -316,7 +316,7 @@ def _search_cold_tier(
         results.sort(key=lambda x: x["distance"])
         return results[:n_results]
     except Exception as e:
-        logger.debug(f"Cold tier search failed: {e}")
+        logger.debug("Cold tier search failed [%s]", type(e).__name__)
         return []
 
 
@@ -341,7 +341,7 @@ def compact_warm_to_cold() -> dict:
         demoted = _demote_to_cold(old_data["ids"], collection)
         return {"demoted": demoted, "checked": len(old_data["ids"])}
     except Exception as e:
-        logger.warning(f"Warm-to-cold compaction failed: {e}")
+        logger.warning("Warm-to-cold compaction failed [%s]", type(e).__name__)
         return {
             "demoted": 0,
             "checked": 0,
@@ -416,7 +416,7 @@ def ingest_file(filepath: str) -> dict:
             # Delete old chunks
             collection.delete(ids=existing["ids"])
     except Exception as e:
-        logger.warning(f"Change detection check failed for {rel_path}: {e}")
+        logger.warning("Change detection check failed for %s [%s]", rel_path, type(e).__name__)
 
     # Chunk the content
     chunks = chunk_text(content, rel_path)
@@ -1065,7 +1065,7 @@ def get_memory_stats() -> dict:
                 except OSError:
                     pass
     except OSError as e:
-        logger.debug(f"ChromaDB disk size scan failed: {e}")
+        logger.debug("ChromaDB disk size scan failed [%s]", type(e).__name__)
 
     result = {
         "total_chunks": count,
@@ -1115,7 +1115,7 @@ def _freshen_metadata(collection, chunk_id: str, tags: list[str] | None = None, 
             update_meta["tags"] = json.dumps(tags)
         collection.update(ids=[chunk_id], metadatas=[update_meta])
     except Exception as e:
-        logger.debug(f"Freshen metadata failed for {chunk_id}: {e}")
+        logger.debug("Freshen metadata failed for %s [%s]", chunk_id, type(e).__name__)
 
 
 # ── INGEST CONNECTOR ─────────────────────────────────────────────────────
@@ -1340,7 +1340,7 @@ def cleanup_expired() -> dict:
         return {"removed": len(expired_ids), "checked": checked}
 
     except Exception as e:
-        logger.warning(f"TTL cleanup primary method failed, trying fallback: {e}")
+        logger.warning("TTL cleanup primary method failed, trying fallback [%s]", type(e).__name__)
         # Fallback: if $and filter fails (older ChromaDB), use the old approach
         # but only fetch ingested entries, not knowledge files
         try:
