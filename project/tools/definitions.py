@@ -297,13 +297,13 @@ DIAGNOSTIC_TOOLS = [
         "type": "function",
         "function": {
             "name": "self_diagnostics",
-            "description": "Run deltai self-diagnostics. With no arguments, checks all subsystems (Ollama, ChromaDB, GPU/VRAM, voice, watcher, backup models, critical paths). With a subsystem specified, runs a deep check with fix suggestions. Use when something seems broken, slow, or after tool failures.",
+            "description": "Run deltai self-diagnostics. With no arguments, checks all subsystems (Ollama, ChromaDB, GPU/VRAM, watcher, backup models, critical paths). With a subsystem specified, runs a deep check with fix suggestions. Use when something seems broken, slow, or after tool failures.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "subsystem": {
                         "type": "string",
-                        "description": "Optional: deep-check one subsystem. One of: ollama, chromadb, gpu, voice, watcher, backup, paths. Omit for full sweep.",
+                        "description": "Optional: deep-check one subsystem. One of: ollama, chromadb, gpu, watcher, backup, paths. Omit for full sweep.",
                     }
                 },
                 "required": [],

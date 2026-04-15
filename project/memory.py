@@ -514,7 +514,6 @@ _SYNONYMS = {
     "race": ["racing", "telemetry", "sim", "LMU"],
     "telemetry": ["race", "data", "ingest", "metrics"],
     "ingest": ["import", "connector", "push", "context"],
-    "voice": ["STT", "TTS", "Whisper", "Kokoro", "speech"],
     "config": ["configuration", "settings", "env", "parameters"],
     "error": ["exception", "failure", "bug", "crash"],
     "file": ["document", "knowledge", "source"],

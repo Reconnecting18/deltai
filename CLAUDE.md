@@ -25,7 +25,6 @@ For short agent onboarding (Cursor entry point), see [AGENTS.md](AGENTS.md).
 - A task automation engine (natural language → shell/tool execution)
 - A system performance advisor (monitors resources, suggests and applies optimizations)
 - A RAG knowledge store (ingest any documents/notes, query them naturally)
-- An optional voice interface (STT/TTS loop)
 - An optional fine-tuning pipeline for local model improvement
 
 ### What deltai is NOT
@@ -126,10 +125,6 @@ Python 3.11 typically ships with SQLite 3.39+ (WAL-capable). JSON1 support must 
 
 Optional. QLoRA fine-tuning (Qwen2.5-3B via PEFT/TRL), adapter management (TIES merge, versioning), knowledge distillation, iterative distillation, DPO, smart auto-capture, daily cycle orchestrator.
 
-### Voice (project/voice/)
-
-Optional. STT: faster-whisper. TTS: edge-tts / Piper. Full loop: `POST /voice/chat`.
-
 ### Collector (project/collector.py)
 
 Web training data collection: Wikipedia (HF datasets streaming), arXiv XML API, Semantic Scholar, general web via trafilatura. SHA256 dedup via SQLite.
@@ -166,7 +161,6 @@ See `project/extensions/README.md` for the full authoring guide, `project/extens
 | `project/extensions/arch_update_guard/` | Optional Arch news/wiki ingest + pacman evidence (`/ext/arch_update_guard/…`) |
 | `project/training.py` | QLoRA, adapters, distillation, dataset CRUD, auto-capture, daily cycle |
 | `project/collector.py` | Web data collection for training |
-| `project/voice/` | STT/TTS package |
 | `project/watcher.py` | Watchdog file watcher for `data/knowledge/` |
 | `project/anthropic_client.py` | Cloud inference (dormant until ANTHROPIC_API_KEY set) |
 | `project/static/index.html` | Dashboard UI (single file — HTML + CSS + JS) |
@@ -217,10 +211,6 @@ DELTAI_SMALL_MODEL=qwen2.5:3b-instruct-q4_K_M
 # Cloud (optional)
 ANTHROPIC_API_KEY=
 CLOUD_BUDGET_DAILY=5.00
-
-# Voice
-VOICE_ENABLED=false
-TTS_VOICE=en-US-AndrewNeural
 
 # Training
 HF_BASE_MODEL=Qwen/Qwen2.5-3B-Instruct
@@ -310,7 +300,7 @@ The repo is `Reconnecting18/deltai`.
 
 ## Current Status
 
-deltai is in early development. The FastAPI backend, router, RAG, tools, training, and voice modules are mature in features but still being **generalized for Linux-first, user-choice operation** (docs, defaults, and naming now target that story).
+deltai is in early development. The FastAPI backend, router, RAG, tools, and training modules are mature in features but still being **generalized for Linux-first, user-choice operation** (docs, defaults, and naming now target that story).
 
 - [x] systemd user service unit in-repo (`systemd/user/delta-daemon.service`) and XDG-style env vars
 - [ ] Linux-appropriate defaults everywhere (`run_shell` vs legacy PowerShell naming on the host)

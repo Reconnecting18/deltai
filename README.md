@@ -40,7 +40,6 @@ deltai is designed around Linux values:
 | **RAG memory** | Ingest your documents, notes, man pages, or any context — query it naturally |
 | **Plugin API** | Any external service can push context in (`POST /ingest`) or register tools |
 | **Local-first AI** | VRAM-aware model routing — uses the best model your hardware can run |
-| **Voice** | Optional STT/TTS loop for hands-free operation |
 
 deltai is **not** a GUI assistant, not a desktop environment replacement, and not a telemetry or game integration. It is a backend intelligence service that other tools and scripts can talk to.
 
@@ -66,8 +65,8 @@ deltai is **not** a GUI assistant, not a desktop environment replacement, and no
 │  │ Quant    │ │ + Cold   │ │ plugins  │ │ + Adapters      │ │
 │  └──────────┘ └──────────┘ └──────────┘ └─────────────────┘ │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌─────────────────┐ │
-│  │ Persist  │ │ Voice    │ │ ReAct    │ │ Resource        │ │
-│  │ SQLite   │ │ STT/TTS  │ │ Reasoning│ │ Self-Manager    │ │
+│  │ Persist  │ │ Session  │ │ ReAct    │ │ Resource        │ │
+│  │ SQLite   │ │ History  │ │ Reasoning│ │ Self-Manager    │ │
 │  └──────────┘ └──────────┘ └──────────┘ └─────────────────┘ │
 └─────────────────────────┬────────────────────────────────────┘
                           │
@@ -181,10 +180,6 @@ DELTAI_SMALL_MODEL=qwen2.5:3b-instruct-q4_K_M  # Fallback (small) model
 # ── Cloud (optional — completely dormant until key is set) ──────────────────
 ANTHROPIC_API_KEY=
 CLOUD_BUDGET_DAILY=5.00          # Hard daily spend cap in USD
-
-# ── Voice (optional) ────────────────────────────────────────────────────────
-VOICE_ENABLED=false
-TTS_VOICE=en-US-AndrewNeural     # edge-tts voice name
 
 # ── Intelligence ────────────────────────────────────────────────────────────
 REACT_ENABLED=true               # Structured reasoning loop (Think/Act/Observe)
@@ -327,7 +322,6 @@ deltai/
 │   ├── anthropic_client.py       Cloud inference (dormant until API key set)
 │   ├── training.py               QLoRA, adapters, distillation, auto-capture
 │   ├── collector.py              Web training data collection
-│   ├── voice/                    STT (faster-whisper) + TTS (edge-tts)
 │   ├── watcher.py                Watchdog for knowledge/ dir
 │   ├── tools/
 │   │   ├── definitions.py        Tool JSON schemas + filter_tools()
@@ -404,16 +398,6 @@ deltai/
 | POST | `/training/start` | Start fine-tuning |
 | GET | `/training/status` | Progress, loss |
 | GET | `/training/weaknesses` | Weak domains from quality feedback |
-
-### Voice (optional)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/voice/stt` | Audio → transcription |
-| POST | `/voice/tts` | Text → audio |
-| POST | `/voice/chat` | Full voice loop |
-
----
 
 ## Stream Protocol
 

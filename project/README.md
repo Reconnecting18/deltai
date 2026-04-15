@@ -66,7 +66,6 @@ python tests/verify_distill.py
 | `memory.py` | ChromaDB RAG |
 | `training.py` / `training_build.py` | Fine-tuning and adapter workflows |
 | `tools/` | Tool definitions and executor |
-| `voice/` | Optional STT/TTS/RVC |
 | `static/` | Single-file dashboard |
 | `tests/` | Verification scripts |
 

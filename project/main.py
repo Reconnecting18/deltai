@@ -1,5 +1,4 @@
 import asyncio
-import base64
 import json
 import logging
 import os
@@ -14,18 +13,16 @@ import psutil
 import safe_errors
 from anthropic_client import stream_chat as anthropic_stream
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (
     FileResponse,
     JSONResponse,
     PlainTextResponse,
-    Response,
     StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
 from path_guard import realpath_under
-from path_safety import safe_preset_name
 from persistence import (
     _serialize_embedding,
     find_similar_traces,
@@ -117,19 +114,6 @@ try:
 except ImportError as e:
     logger.warning("Training system unavailable [%s]", type(e).__name__)
 
-
-# ── VOICE IMPORTS ─────────────────────────────────────────────────────
-VOICE_AVAILABLE = False
-try:
-    from voice import (
-        get_voice_status,
-        synthesize_speech,
-        transcribe_audio,
-    )
-
-    VOICE_AVAILABLE = True
-except ImportError as e:
-    logger.warning("Voice system unavailable [%s]", type(e).__name__)
 
 # ── EXTENSIONS IMPORTS ─────────────────────────────────────────────────
 EXTENSIONS_AVAILABLE = False
@@ -1825,7 +1809,6 @@ class ChatRequest(BaseModel):
     message: str
     deep: bool = False
     force_local: bool = False
-    voice_input: bool = False  # True when input came from speech — helps model correct STT errors
 
 
 MAX_TOOL_ROUNDS = 6
@@ -1895,9 +1878,6 @@ async def chat(req: ChatRequest):
             if rag_context:
                 chunk_count = rag_context.count("[Source:")
                 yield json.dumps({"t": "rag", "n": chunk_count}) + "\n"
-
-            if req.voice_input:
-                pass
 
             # ── Phase 1: Local tool gathering ──
             yield (
@@ -2149,12 +2129,8 @@ async def chat(req: ChatRequest):
 
             full_response = ""
 
-            cloud_message = req.message
-            if req.voice_input:
-                cloud_message = f"[Voice input — may contain transcription errors. Interpret the intended meaning.]\n{req.message}"
-
             async for line in anthropic_stream(
-                message=cloud_message,
+                message=req.message,
                 model=decision.model,
                 rag_context=rag_context,
                 tools=TOOLS,
@@ -2192,16 +2168,10 @@ async def chat(req: ChatRequest):
         return StreamingResponse(stream_cloud(), media_type="application/x-ndjson")
 
     # ── OLLAMA PATH (with tool calling) ─────────────────────
-    voice_prefix = ""
-    if req.voice_input:
-        voice_prefix = (
-            "[Voice input — may contain transcription errors. Interpret the intended meaning.]\n"
-        )
-
     if rag_context:
-        user_content = f"{voice_prefix}{rag_context}\n{req.message}"
+        user_content = f"{rag_context}\n{req.message}"
     else:
-        user_content = f"{voice_prefix}{req.message}" if voice_prefix else req.message
+        user_content = req.message
 
     messages = _get_smart_history(max_tokens=decision.num_ctx) + [
         {"role": "user", "content": user_content}
@@ -3012,16 +2982,6 @@ async def system_health():
     # Anthropic API
     results["anthropic"] = "ready" if is_cloud_available_sync() else "standby"
 
-    # Voice
-    if VOICE_AVAILABLE:
-        try:
-            vs = get_voice_status()
-            results["voice"] = "online" if vs.get("enabled") else "disabled"
-        except Exception:
-            results["voice"] = "degraded"
-    else:
-        results["voice"] = "unavailable"
-
     # Telemetry API (conditional — only when configured)
     if TELEMETRY_API_URL:
         try:
@@ -3393,371 +3353,6 @@ def training_verify_retention(req: RetentionRequest):
         baseline_model=req.baseline,
         min_pass_rate=req.min_pass_rate,
     )
-
-
-# ── VOICE ENDPOINTS ──────────────────────────────────────────────────
-
-
-class TTSRequest(BaseModel):
-    text: str
-    voice: str | None = None
-    rate: str | None = None
-    pitch: str | None = None
-
-
-@app.get("/voice/status")
-def voice_status():
-    """Voice subsystem status."""
-    if not VOICE_AVAILABLE:
-        return {
-            "enabled": False,
-            "error": "Voice module not loaded",
-            "stt": {"status": "unavailable"},
-            "tts": {"status": "unavailable"},
-        }
-    return get_voice_status()
-
-
-@app.post("/voice/warm")
-async def voice_warm():
-    """Pre-warm the Whisper STT model. Call when voice mode activates to avoid cold start."""
-    if not VOICE_AVAILABLE:
-        return {"ok": False, "error": "Voice module not loaded"}
-    try:
-        await asyncio.to_thread(
-            transcribe_audio,
-            b"RIFF$\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x80>\x00\x00\x00}\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00",
-        )
-        return {"ok": True, "stt": "warmed"}
-    except Exception as e:
-        return {"ok": False, "error": safe_errors.public_error_detail(e)}
-
-
-@app.post("/voice/stt")
-async def voice_stt(request: Request):
-    """Transcribe uploaded audio to text.
-
-    Accepts raw audio bytes (WAV, MP3, FLAC) via POST body.
-    """
-    if not VOICE_AVAILABLE:
-        return {"error": "Voice module not available"}
-    body = await request.body()
-    if not body:
-        return {"error": "No audio data received"}
-    if len(body) > 25 * 1024 * 1024:  # 25MB limit
-        return {"error": "Audio file too large (max 25MB)"}
-    result = await asyncio.to_thread(transcribe_audio, body)
-    return result
-
-
-@app.post("/voice/tts")
-async def voice_tts(req: TTSRequest):
-    """Convert text to speech audio. Returns audio bytes."""
-    if not VOICE_AVAILABLE:
-        return JSONResponse({"error": "Voice module not available"}, status_code=503)
-    result = await synthesize_speech(req.text, voice=req.voice, rate=req.rate, pitch=req.pitch)
-    if "error" in result:
-        logger.error("Voice TTS failed (detail omitted from logs and response)")
-        return JSONResponse({"error": "Voice synthesis failed"}, status_code=500)
-    return Response(
-        content=result["audio"],
-        media_type=f"audio/{result['format']}",
-        headers={
-            "Content-Disposition": f"inline; filename=deltai_speech.{result['format']}",
-            "X-Duration-Estimate": str(result.get("duration_estimate", 0)),
-        },
-    )
-
-
-@app.post("/voice/chat")
-async def voice_chat(request: Request, voice: str = None, rate: str = None):
-    """Full voice loop: transcribe audio → chat → synthesize response.
-
-    POST raw audio → returns JSON with transcription + base64 audio response.
-    Optional query params: voice (TTS voice ID), rate (TTS speed e.g. "+15%").
-    """
-    if not VOICE_AVAILABLE:
-        return {"error": "Voice module not available"}
-    body = await request.body()
-    if not body:
-        return {"error": "No audio data"}
-
-    # Step 1: Transcribe
-    stt_result = await asyncio.to_thread(transcribe_audio, body)
-    if "error" in stt_result or not stt_result.get("text"):
-        return {"error": stt_result.get("error", "No speech detected"), "stt": stt_result}
-
-    user_text = stt_result["text"]
-
-    # Step 2: Chat
-    decision = await route(message=user_text, force_cloud=False, force_local=False)
-
-    greeting_response = _check_greeting(user_text)
-    if greeting_response:
-        response_text = greeting_response
-    else:
-        rag_context = build_rag_context(user_text)
-        voice_hint = (
-            "[Voice input — may contain transcription errors. Interpret the intended meaning.]\n"
-        )
-        user_content = (
-            f"{voice_hint}{rag_context}\n{user_text}" if rag_context else f"{voice_hint}{user_text}"
-        )
-        msg_list = _get_history() + [{"role": "user", "content": user_content}]
-
-        async with httpx.AsyncClient(timeout=120) as client:
-            data, err, used_model, is_emergency = await _inference_with_emergency_fallback(
-                client,
-                decision.model,
-                msg_list,
-                TOOLS,
-                decision.backup_model,
-                num_gpu=decision.num_gpu,
-                num_ctx=decision.num_ctx,
-            )
-        if data is None:
-            response_text = "Systems encountered an error. Try again."
-        else:
-            response_text = data.get("message", {}).get("content", "No response generated.")
-
-        _append_to_history(user_text, response_text)
-
-    # Step 3: TTS (use custom voice/rate if provided via query params)
-    tts_result = await synthesize_speech(response_text, voice=voice, rate=rate)
-    audio_b64 = None
-    if "audio" in tts_result:
-        audio_b64 = base64.b64encode(tts_result["audio"]).decode("ascii")
-
-    return {
-        "stt": {"text": user_text, "language": stt_result.get("language", "en")},
-        "response": response_text,
-        "tts": {
-            "audio_base64": audio_b64,
-            "format": tts_result.get("format", "mp3"),
-            "duration_estimate": tts_result.get("duration_estimate", 0),
-        }
-        if audio_b64
-        else {"error": tts_result.get("error", "TTS failed")},
-        "route": decision.to_dict(),
-    }
-
-
-# ── NEW VOICE PIPELINE (Phase 1 — Piper + RVC + Effects) ─────────────────
-
-try:
-    from voice import configure as voice_configure
-    from voice import speak as voice_speak
-    from voice.voice_config import DEFAULT_CONFIG as _voice_cfg
-
-    VOICE_PIPELINE_AVAILABLE = True
-except ImportError:
-    VOICE_PIPELINE_AVAILABLE = False
-
-
-@app.post("/api/voice/speak")
-async def api_voice_speak(req: dict):
-    """Speak text through the new voice pipeline (Piper → RVC → effects → playback)."""
-    if not VOICE_PIPELINE_AVAILABLE:
-        return JSONResponse({"error": "Voice pipeline module not available"}, status_code=503)
-    text = req.get("text", "")
-    priority = req.get("priority", "normal")
-    if not text.strip():
-        return {"error": "Empty text"}
-    try:
-        await voice_speak(text, priority=priority)
-        return {"ok": True, "text": text, "priority": priority}
-    except Exception as e:
-        return JSONResponse({"error": safe_errors.public_error_detail(e)}, status_code=500)
-
-
-@app.get("/api/voice/config")
-async def api_voice_config_get():
-    """Return current voice pipeline configuration."""
-    if not VOICE_PIPELINE_AVAILABLE:
-        return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
-    import dataclasses
-
-    return dataclasses.asdict(_voice_cfg)
-
-
-@app.put("/api/voice/config")
-async def api_voice_config_put(req: dict):
-    """Update voice pipeline configuration at runtime."""
-    if not VOICE_PIPELINE_AVAILABLE:
-        return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
-    try:
-        voice_configure(req)
-        return {"ok": True, "updated": list(req.keys())}
-    except Exception:
-        logger.exception("Failed to update voice pipeline configuration")
-        return JSONResponse({"error": "Internal server error"}, status_code=500)
-
-
-@app.get("/api/voice/presets")
-async def api_voice_presets_list():
-    """List saved voice presets."""
-    if not VOICE_PIPELINE_AVAILABLE:
-        return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
-    import os
-
-    preset_dir = os.path.expanduser("~/.local/share/deltai/voice/presets")
-    presets = []
-    if os.path.isdir(preset_dir):
-        for f in os.listdir(preset_dir):
-            if f.endswith(".json"):
-                presets.append(f.replace(".json", ""))
-    return {"presets": presets}
-
-
-@app.post("/api/voice/presets")
-async def api_voice_preset_save(req: dict):
-    """Save current config as a named preset."""
-    if not VOICE_PIPELINE_AVAILABLE:
-        return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
-    raw_name = req.get("name", "")
-    try:
-        name = safe_preset_name(raw_name)
-    except ValueError:
-        return JSONResponse({"error": "Invalid preset name"}, status_code=400)
-    try:
-        _voice_cfg.save_preset(name)
-        return {"ok": True, "name": name}
-    except Exception as e:
-        return JSONResponse({"error": safe_errors.public_error_detail(e)}, status_code=500)
-
-
-@app.get("/api/voice/status")
-async def api_voice_pipeline_status():
-    """Return voice pipeline health and component status."""
-    if not VOICE_PIPELINE_AVAILABLE:
-        return {"available": False, "error": "Voice pipeline module not loaded"}
-    status = {
-        "available": True,
-        "tts": {"engine": "piper", "ready": False},
-        "rvc": {"ready": False, "model_loaded": False},
-        "effects": {"ready": True},
-        "playback": {"ready": False},
-    }
-    try:
-        from voice.tts_engine import PiperTTS
-
-        status["tts"]["ready"] = PiperTTS is not None
-    except Exception:
-        pass
-    try:
-        from voice.voice_converter import VoiceConverter
-
-        vc = VoiceConverter()
-        status["rvc"]["model_loaded"] = vc.is_loaded
-    except Exception:
-        pass
-    import importlib.util
-
-    status["playback"]["ready"] = importlib.util.find_spec("sounddevice") is not None
-    return status
-
-
-@app.post("/api/voice/test")
-async def api_voice_test():
-    """Speak a test phrase and return timing breakdown."""
-    if not VOICE_PIPELINE_AVAILABLE:
-        return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
-    import time
-
-    timings = {}
-    test_text = "All systems nominal. Voice pipeline test complete."
-    try:
-        from voice.post_processor import PostProcessor
-        from voice.tts_engine import PiperTTS
-        from voice.voice_config import DEFAULT_CONFIG
-
-        tts = PiperTTS(DEFAULT_CONFIG)
-        pp = PostProcessor(DEFAULT_CONFIG)
-        t0 = time.time()
-        audio = tts.synthesize(test_text)
-        timings["tts_ms"] = round((time.time() - t0) * 1000)
-        if audio is not None:
-            t0 = time.time()
-            processed = pp.process(audio)
-            timings["effects_ms"] = round((time.time() - t0) * 1000)
-            timings["audio_samples"] = len(processed)
-            timings["duration_s"] = round(len(processed) / 22050, 2)
-        else:
-            timings["tts_ms"] = 0
-            timings["note"] = "Piper TTS not installed — install piper-tts for local voice"
-        return {"ok": True, "text": test_text, "timings": timings}
-    except Exception as e:
-        return {"ok": False, "error": safe_errors.public_error_detail(e), "timings": timings}
-
-
-# ── VOICE TRAINING ENDPOINTS ────────────────────────────────────────────
-
-
-@app.post("/api/voice/train/prepare")
-async def api_voice_train_prepare():
-    """Prepare training dataset from raw audio files."""
-    if not VOICE_PIPELINE_AVAILABLE:
-        return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
-    try:
-        from voice.train_rvc import prepare_dataset
-
-        stats = await asyncio.to_thread(prepare_dataset)
-        return {"ok": True, **stats}
-    except Exception as e:
-        return JSONResponse({"error": safe_errors.public_error_detail(e)}, status_code=500)
-
-
-@app.post("/api/voice/train/start")
-async def api_voice_train_start(req: dict = None):
-    """Start RVC model training in background."""
-    if not VOICE_PIPELINE_AVAILABLE:
-        return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
-    try:
-        from voice.train_rvc import train
-
-        output_name = (req or {}).get("model_name", None)
-        train(output_name=output_name)
-        return {"ok": True, "status": "training started"}
-    except RuntimeError as e:
-        return JSONResponse({"error": safe_errors.public_error_detail(e)}, status_code=409)
-    except Exception as e:
-        return JSONResponse({"error": safe_errors.public_error_detail(e)}, status_code=500)
-
-
-@app.get("/api/voice/train/status")
-async def api_voice_train_status():
-    """Get RVC training progress."""
-    if not VOICE_PIPELINE_AVAILABLE:
-        return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
-    from voice.train_rvc import get_training_state
-
-    return get_training_state()
-
-
-@app.post("/api/voice/train/stop")
-async def api_voice_train_stop():
-    """Abort RVC training."""
-    if not VOICE_PIPELINE_AVAILABLE:
-        return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
-    from voice.train_rvc import stop_training
-
-    stop_training()
-    return {"ok": True, "status": "abort requested"}
-
-
-@app.post("/api/voice/train/export")
-async def api_voice_train_export(req: dict = None):
-    """Export trained model for inference."""
-    if not VOICE_PIPELINE_AVAILABLE:
-        return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
-    try:
-        from voice.train_rvc import export_model
-
-        output_name = (req or {}).get("model_name", None)
-        result = await asyncio.to_thread(export_model, output_name=output_name)
-        return {"ok": True, **result}
-    except Exception as e:
-        return JSONResponse({"error": safe_errors.public_error_detail(e)}, status_code=500)
 
 
 # ── STATS ───────────────────────────────────────────────────────────────

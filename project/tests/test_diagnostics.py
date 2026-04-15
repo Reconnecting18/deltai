@@ -119,7 +119,7 @@ def test_diag_full():
     result = self_diagnostics()
     assert "deltai SELF-DIAGNOSTICS" in result, "Missing header"
     # Should mention all subsystems
-    for subsystem in ["Ollama", "ChromaDB", "GPU", "Voice", "Watcher", "Paths", "Backup"]:
+    for subsystem in ["Ollama", "ChromaDB", "GPU", "Watcher", "Paths", "Backup"]:
         assert subsystem in result or subsystem.lower() in result.lower(), (
             f"Missing subsystem: {subsystem}"
         )
