@@ -76,9 +76,7 @@ project/extensions/*/
 # Temp
 *.tmp
 *.bak
-voice_tests/
 test_tts.mp3
-test_voice_pipeline.mp3
 project/tests/test_chromadb/
 project/tests/test_deltai.db
 project/tests/training_data/

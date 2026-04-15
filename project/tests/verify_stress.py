@@ -125,23 +125,6 @@ def verify_fix_3():
 verify_fix_3()
 
 
-# Fix 4: PowerShell injection fixed in voice TTS
-@test("Fix 4: Windows SAPI TTS uses temp file instead of inline text")
-def verify_fix_4():
-    import inspect
-
-    import voice
-
-    src = inspect.getsource(voice._windows_tts)
-    assert "ReadAllText" in src or "Get-Content" in src or "text_path" in src, (
-        "Windows TTS should read text from temp file, not inline"
-    )
-    assert "text_path" in src, "Should write to temp text file before passing to PowerShell"
-
-
-verify_fix_4()
-
-
 # Fix 5: WAL pragma only in init_db
 @test("Fix 5: WAL pragma set once in init_db, not per connection")
 def verify_fix_5():

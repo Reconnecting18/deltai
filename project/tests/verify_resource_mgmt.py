@@ -227,7 +227,7 @@ test_diag_full()
 def test_diag_deep():
     from tools.executor import self_diagnostics
 
-    subsystems = ["ollama", "chromadb", "gpu", "voice", "watcher", "backup", "paths"]
+    subsystems = ["ollama", "chromadb", "gpu", "watcher", "backup", "paths"]
     for sub in subsystems:
         result = self_diagnostics(subsystem=sub)
         assert "ERROR" not in result or "ERROR:" not in result.split("\n")[0], (

@@ -1135,20 +1135,6 @@ def _diag_full() -> str:
     except Exception:
         lines.append("GPU:       UNAVAILABLE")
 
-    # Voice
-    try:
-        from voice import VOICE_ENABLED, get_voice_status
-
-        if VOICE_ENABLED:
-            vs = get_voice_status()
-            stt = vs.get("stt", {}).get("status", "?")
-            tts = vs.get("tts", {}).get("status", "?")
-            lines.append(f"Voice:     ONLINE (STT: {stt}, TTS: {tts})")
-        else:
-            lines.append("Voice:     DISABLED")
-    except ImportError:
-        lines.append("Voice:     NOT INSTALLED")
-
     # Watcher
     try:
         from watcher import watcher_running
@@ -1308,22 +1294,6 @@ def _diag_deep(subsystem: str) -> str:
             lines.append(f"GPU unavailable: {_TOOL_ERR}")
         return "\n".join(lines)
 
-    elif subsystem == "voice":
-        lines = ["VOICE DEEP DIAGNOSTICS", "=" * 40]
-        try:
-            from voice import VOICE_ENABLED, get_voice_status
-
-            vs = get_voice_status()
-            lines.append(f"Enabled: {VOICE_ENABLED}")
-            lines.append(f"STT:     {vs.get('stt', {})}")
-            lines.append(f"TTS:     {vs.get('tts', {})}")
-            if not VOICE_ENABLED:
-                lines.append("\nFIX: Set VOICE_ENABLED=true in .env")
-        except ImportError:
-            lines.append("Voice module not installed")
-            lines.append("FIX: pip install faster-whisper edge-tts")
-        return "\n".join(lines)
-
     elif subsystem == "watcher":
         lines = ["WATCHER DEEP DIAGNOSTICS", "=" * 40]
         try:
@@ -1385,7 +1355,7 @@ def _diag_deep(subsystem: str) -> str:
         return "\n".join(lines)
 
     else:
-        return f"ERROR: Unknown subsystem '{subsystem}'. Options: ollama, chromadb, gpu, voice, watcher, backup, paths"
+        return f"ERROR: Unknown subsystem '{subsystem}'. Options: ollama, chromadb, gpu, watcher, backup, paths"
 
 
 def manage_ollama_models(action: str, model: str = None) -> str:

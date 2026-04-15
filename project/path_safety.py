@@ -19,7 +19,7 @@ _PRESET_NAME = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def safe_preset_name(name: str) -> str:
-    """Validate a user-provided voice preset name as a single safe filename stem."""
+    """Validate a user-provided preset name as a single safe filename stem."""
     if not isinstance(name, str):
         raise ValueError("Preset name must be a string.")
     safe = name.strip()
