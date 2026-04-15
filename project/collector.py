@@ -125,7 +125,7 @@ def _write_example(dataset_name: str, instruction: str, output: str, category: s
             f.write(json.dumps(example, ensure_ascii=False) + "\n")
         return True
     except Exception as e:
-        logger.warning(f"Failed to write example to {dataset_name}: {e}")
+        safe_errors.log_exception(logger, f"Failed to write example to {dataset_name}", e)
         return False
 
 
@@ -146,7 +146,7 @@ def _write_wiki_offset(offset: int):
         with open(_WIKI_OFFSET_FILE, "w") as f:
             f.write(str(offset))
     except OSError as e:
-        logger.warning(f"Could not save Wikipedia offset: {e}")
+        safe_errors.log_exception(logger, "Could not save Wikipedia offset", e)
 
 
 # ── Domain detection ──────────────────────────────────────────────────────────
@@ -288,7 +288,7 @@ def collect_wikipedia_batch(batch_size: int = 2000, dry_run: bool = False) -> di
         result["errors"] += 1
         result["error"] = safe_errors.public_error_detail(e)
         result["status"] = "error"
-        logger.error(f"Wikipedia collection error: {e}")
+        safe_errors.log_exception(logger, "Wikipedia collection error", e)
 
     return result
 
@@ -373,7 +373,7 @@ def collect_arxiv_batch(max_per_cat: int = 25, dry_run: bool = False) -> dict:
 
         except Exception as e:
             result["errors"] += 1
-            logger.warning(f"arXiv error for {cat_id}: {e}")
+            safe_errors.log_exception(logger, f"arXiv error for {cat_id}", e)
 
     result["status"] = "ok" if result["errors"] == 0 else "partial"
     logger.info(
@@ -489,7 +489,7 @@ def collect_openf1_batch(seasons: list[int] = None, dry_run: bool = False) -> di
     except Exception as e:
         result["errors"] += 1
         result["error"] = safe_errors.public_error_detail(e)
-        logger.error(f"OpenF1 collection error: {e}")
+        safe_errors.log_exception(logger, "OpenF1 collection error", e)
 
     result["status"] = "ok" if result["errors"] == 0 else "partial"
     logger.info(
@@ -583,7 +583,7 @@ def collect_papers_batch(max_per_query: int = 10, dry_run: bool = False) -> dict
 
         except Exception as e:
             result["errors"] += 1
-            logger.warning(f"Semantic Scholar error for '{query}': {e}")
+            safe_errors.log_exception(logger, f"Semantic Scholar error for '{query}'", e)
 
     result["status"] = "ok" if result["errors"] == 0 else "partial"
     logger.info(f"Semantic Scholar: wrote {result['written']}, skipped {result['skipped']}")

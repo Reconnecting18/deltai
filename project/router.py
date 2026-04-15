@@ -646,7 +646,7 @@ def resolve_adapter_model(base_model: str, adapter_domain: str | None) -> tuple[
 
         return base_model, None
     except Exception as e:
-        logger.debug(f"MoLoRA resolution failed: {e}")
+        logger.debug("MoLoRA resolution failed [%s]", type(e).__name__)
         return base_model, None
 
 
@@ -688,7 +688,7 @@ async def is_cloud_available() -> bool:
             logger.warning(f"Cloud check failed: HTTP {resp.status_code}")
         return reachable
     except Exception as e:
-        logger.warning(f"Cloud unreachable: {e}")
+        logger.warning("Cloud unreachable [%s]", type(e).__name__)
         _last_connectivity_check = now
         _last_connectivity_result = False
         return False
@@ -725,7 +725,7 @@ def init_budget_from_db():
         _daily_cloud_reset_date = today
         logger.info(f"Budget loaded from DB: ${_daily_cloud_spend:.4f} for {today}")
     except Exception as e:
-        logger.warning(f"Could not load budget from DB: {e}")
+        logger.warning("Could not load budget from DB [%s]", type(e).__name__)
 
 
 def _check_budget() -> bool:
@@ -767,7 +767,7 @@ def record_cloud_usage(input_tokens: int, output_tokens: int, model: str):
 
         save_budget(_daily_cloud_reset_date or time.strftime("%Y-%m-%d"), _daily_cloud_spend)
     except Exception as e:
-        logger.warning(f"Failed to persist budget: {e}")
+        logger.warning("Failed to persist budget [%s]", type(e).__name__)
 
 
 def get_budget_status() -> dict:
@@ -835,7 +835,7 @@ async def check_model_health(model: str) -> bool:
             data = resp.json()
             return "message" in data
     except Exception as e:
-        logger.warning(f"Health check failed for {model}: {e}")
+        logger.warning("Health check failed for %s [%s]", model, type(e).__name__)
         return False
 
 
@@ -855,7 +855,7 @@ async def check_model_exists(model: str) -> bool:
             models = [m.get("name", "") for m in resp.json().get("models", [])]
             return any(model in m or m.startswith(model + ":") for m in models)
     except Exception as e:
-        logger.warning(f"Model existence check failed for {model}: {e}")
+        logger.warning("Model existence check failed for %s [%s]", model, type(e).__name__)
         return False
 
 

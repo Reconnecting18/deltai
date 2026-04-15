@@ -397,7 +397,7 @@ async def stream_chat(client: httpx.AsyncClient, message: str):
         if response_started:
             console.print("\n  [dim](cancelled)[/]\n")
     except Exception as e:
-        console.print(f"\n  [danger]ERROR: {e}[/]\n")
+        console.print(f"\n  [danger]ERROR: {type(e).__name__}[/]\n")
 
 
 # ── SLASH COMMANDS ─────────────────────────────────────────────────────
