@@ -9,7 +9,6 @@ import os
 import time
 
 import safe_errors
-
 from memory import KNOWLEDGE_PATH, SUPPORTED_EXTENSIONS, ingest_file, remove_file
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer

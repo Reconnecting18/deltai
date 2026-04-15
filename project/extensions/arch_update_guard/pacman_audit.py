@@ -55,7 +55,7 @@ def _run_allowlisted(argv: list[str], timeout: float = 120.0) -> tuple[int, str,
         return proc.returncode, proc.stdout or "", proc.stderr or ""
     except subprocess.TimeoutExpired:
         return 124, "", f"{exe}: timed out after {timeout}s"
-    except OSError as e:
+    except OSError as _:
         return 1, "", "os error"
 
 

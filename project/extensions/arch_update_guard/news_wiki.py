@@ -1,10 +1,14 @@
 """
-Fetch Arch Linux news RSS and ArchWiki snippets; push digest text into deltai via POST /ingest.
+arch_update_guard news/wiki ingest helpers.
+
+Fetches Arch Linux RSS + ArchWiki context and pushes a digest into deltai via
+POST /ingest so RAG can include update-risk context in extension decisions.
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 import time
 import xml.etree.ElementTree as ET
 from typing import Any
@@ -21,6 +25,7 @@ DEFAULT_BASE = "http://127.0.0.1:8000"
 # Simple in-process rate limit for RSS/wiki fetches (seconds)
 _MIN_REFRESH_INTERVAL = 45.0
 _last_refresh_ts: float = 0.0
+_refresh_lock = threading.Lock()
 
 
 def _base_url() -> str:
@@ -196,14 +201,15 @@ def refresh_news_digest_to_rag(
     """
     global _last_refresh_ts
     now = time.monotonic()
-    if not force and (now - _last_refresh_ts) < _MIN_REFRESH_INTERVAL:
-        return {
-            "status": "skipped",
-            "reason": (
-                f"rate_limited (min interval {_MIN_REFRESH_INTERVAL}s; use force=true to override)"
-            ),
-        }
-    _last_refresh_ts = now
+    with _refresh_lock:
+        if not force and (now - _last_refresh_ts) < _MIN_REFRESH_INTERVAL:
+            return {
+                "status": "skipped",
+                "reason": (
+                    f"rate_limited (min interval {_MIN_REFRESH_INTERVAL}s; use force=true to override)"
+                ),
+            }
+        _last_refresh_ts = now
 
     items, err = fetch_arch_news_rss()
     if err:
@@ -244,14 +250,15 @@ async def refresh_news_digest_to_rag_async(
     """Async variant for FastAPI routes (same logic as refresh_news_digest_to_rag)."""
     global _last_refresh_ts
     now = time.monotonic()
-    if not force and (now - _last_refresh_ts) < _MIN_REFRESH_INTERVAL:
-        return {
-            "status": "skipped",
-            "reason": (
-                f"rate_limited (min interval {_MIN_REFRESH_INTERVAL}s; use force=true to override)"
-            ),
-        }
-    _last_refresh_ts = now
+    with _refresh_lock:
+        if not force and (now - _last_refresh_ts) < _MIN_REFRESH_INTERVAL:
+            return {
+                "status": "skipped",
+                "reason": (
+                    f"rate_limited (min interval {_MIN_REFRESH_INTERVAL}s; use force=true to override)"
+                ),
+            }
+        _last_refresh_ts = now
 
     # Run blocking fetch in thread to not block event loop
     import asyncio
