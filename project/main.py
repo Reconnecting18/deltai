@@ -13,13 +13,12 @@ import psutil
 import safe_errors
 from anthropic_client import stream_chat as anthropic_stream
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (
     FileResponse,
     JSONResponse,
     PlainTextResponse,
-    Response,
     StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
