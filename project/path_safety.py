@@ -15,6 +15,17 @@ _EXPORT_FORMATS = frozenset({"alpaca", "sharegpt", "chatml"})
 
 # Basenames only from os.listdir(DATASETS_PATH) — conservative allowlist
 _JSONL_BASENAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.jsonl$")
+_PRESET_NAME = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def safe_preset_name(name: str) -> str:
+    """Validate a user-provided voice preset name as a single safe filename stem."""
+    if not isinstance(name, str):
+        raise ValueError("Preset name must be a string.")
+    safe = name.strip()
+    if not safe or not _PRESET_NAME.fullmatch(safe):
+        raise ValueError("Invalid preset name")
+    return safe
 
 
 def safe_dataset_basename(name: str) -> str:

@@ -25,6 +25,7 @@ from fastapi.responses import (
 )
 from fastapi.staticfiles import StaticFiles
 from path_guard import realpath_under
+from path_safety import safe_preset_name
 from persistence import (
     _serialize_embedding,
     find_similar_traces,
@@ -3613,9 +3614,11 @@ async def api_voice_preset_save(req: dict):
     """Save current config as a named preset."""
     if not VOICE_PIPELINE_AVAILABLE:
         return JSONResponse({"error": "Voice pipeline not available"}, status_code=503)
-    name = req.get("name", "").strip()
-    if not name:
-        return JSONResponse({"error": "Preset name required"}, status_code=400)
+    raw_name = req.get("name", "")
+    try:
+        name = safe_preset_name(raw_name)
+    except ValueError:
+        return JSONResponse({"error": "Invalid preset name"}, status_code=400)
     try:
         _voice_cfg.save_preset(name)
         return {"ok": True, "name": name}
