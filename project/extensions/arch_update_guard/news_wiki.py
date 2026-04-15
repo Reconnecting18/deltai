@@ -61,8 +61,8 @@ async def _ingest_async(source: str, context: str, *, ttl: int, tags: list[str])
                 body = {"raw": r.text[:500]}
             return {"http_status": r.status_code, "body": body}
     except httpx.RequestError as e:
-        logger.warning("ingest request failed: %s", e)
-        return {"http_status": None, "body": {"status": "error", "reason": str(e)}}
+        logger.warning("ingest request failed", exc_info=True)
+        return {"http_status": None, "body": {"status": "error", "reason": "ingest request failed"}}
 
 
 def fetch_arch_news_rss(timeout: float = 30.0) -> tuple[list[dict[str, str]], str | None]:
