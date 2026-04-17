@@ -3,14 +3,17 @@ deltai Tool Executor — runs tools safely and returns results.
 Each tool function returns a string result that gets fed back to the model.
 """
 
+import ast
 import json
 import logging
+import operator
 import os
 import subprocess
 
 import path_guard
 import psutil
 import safe_errors
+import url_safety
 
 _LOG = logging.getLogger("deltai.executor")
 _TOOL_ERR = "An unexpected error occurred"
@@ -474,12 +477,33 @@ def fetch_url(url: str, max_chars: int = 8000) -> str:
         if len(url) > 2000:
             return "ERROR: URL too long"
 
+        try:
+            url_safety.validate_http_url_for_fetch(url)
+        except ValueError as e:
+            return f"ERROR: {e}"
+
         max_chars = max(500, min(_coerce_int(max_chars, 8000), 20000))
+
+        def _hook_validate_request(request) -> None:
+            url_safety.validate_http_url_for_fetch(str(request.url))
 
         try:
             import trafilatura as _trafilatura  # type: ignore
 
-            downloaded = _trafilatura.fetch_url(url)
+            import httpx as _httpx
+
+            with _httpx.Client(
+                event_hooks={"request": [_hook_validate_request]},
+                follow_redirects=True,
+                timeout=15.0,
+            ) as client:
+                resp = client.get(
+                    url,
+                    headers={"User-Agent": "deltai/1.0 (local AI assistant)"},
+                )
+            if resp.status_code != 200:
+                return f"ERROR: HTTP {resp.status_code} from {url}"
+            downloaded = resp.text
             if not downloaded:
                 return f"ERROR: Could not download content from {url}"
             text = _trafilatura.extract(
@@ -499,12 +523,15 @@ def fetch_url(url: str, max_chars: int = 8000) -> str:
 
             import httpx as _httpx
 
-            resp = _httpx.get(
-                url,
-                headers={"User-Agent": "deltai/1.0 (local AI assistant)"},
-                timeout=15.0,
+            with _httpx.Client(
+                event_hooks={"request": [_hook_validate_request]},
                 follow_redirects=True,
-            )
+                timeout=15.0,
+            ) as client:
+                resp = client.get(
+                    url,
+                    headers={"User-Agent": "deltai/1.0 (local AI assistant)"},
+                )
             if resp.status_code != 200:
                 return f"ERROR: HTTP {resp.status_code} from {url}"
             html = resp.text
@@ -552,6 +579,90 @@ _CALC_SAFE_BUILTINS = {
     "None": None,
 }
 
+_CALC_BINOPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
+
+
+def _calc_eval_node(node: ast.AST, math_mod, stats_mod) -> object:
+    if isinstance(node, ast.Expression):
+        return _calc_eval_node(node.body, math_mod, stats_mod)
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, (int, float, bool)) or node.value is None:
+            return node.value
+        raise ValueError("invalid constant")
+    if isinstance(node, ast.UnaryOp):
+        if not isinstance(node.op, (ast.UAdd, ast.USub)):
+            raise ValueError("invalid unary op")
+        v = _calc_eval_node(node.operand, math_mod, stats_mod)
+        return +v if isinstance(node.op, ast.UAdd) else -v
+    if isinstance(node, ast.BinOp):
+        left = _calc_eval_node(node.left, math_mod, stats_mod)
+        right = _calc_eval_node(node.right, math_mod, stats_mod)
+        op_fn = _CALC_BINOPS.get(type(node.op))
+        if op_fn is None:
+            raise ValueError("invalid binary op")
+        return op_fn(left, right)
+    if isinstance(node, ast.List):
+        return [_calc_eval_node(elt, math_mod, stats_mod) for elt in node.elts]
+    if isinstance(node, ast.Tuple):
+        return tuple(_calc_eval_node(elt, math_mod, stats_mod) for elt in node.elts)
+    if isinstance(node, ast.Attribute):
+        if isinstance(node.value, ast.Name) and node.value.id == "math":
+            if node.attr.startswith("_"):
+                raise ValueError("forbidden attribute")
+            return getattr(math_mod, node.attr)
+        if isinstance(node.value, ast.Name) and node.value.id == "statistics":
+            if node.attr.startswith("_"):
+                raise ValueError("forbidden attribute")
+            return getattr(stats_mod, node.attr)
+        raise ValueError("invalid attribute")
+    if isinstance(node, ast.Call):
+        if node.keywords:
+            raise ValueError("keyword arguments not allowed")
+        fn = _calc_resolve_callable(node.func, math_mod, stats_mod)
+        args = [_calc_eval_node(a, math_mod, stats_mod) for a in node.args]
+        return fn(*args)
+    if isinstance(node, ast.Name):
+        if node.id in _CALC_SAFE_BUILTINS:
+            return _CALC_SAFE_BUILTINS[node.id]
+        raise ValueError("invalid name")
+    raise ValueError("unsupported expression")
+
+
+def _calc_resolve_callable(node: ast.AST, math_mod, stats_mod):
+    if isinstance(node, ast.Name):
+        fn = _CALC_SAFE_BUILTINS.get(node.id)
+        if fn is None:
+            raise ValueError("forbidden call")
+        return fn
+    if isinstance(node, ast.Attribute):
+        if isinstance(node.value, ast.Name) and node.value.id == "math":
+            if node.attr.startswith("_"):
+                raise ValueError("forbidden")
+            return getattr(math_mod, node.attr)
+        if isinstance(node.value, ast.Name) and node.value.id == "statistics":
+            if node.attr.startswith("_"):
+                raise ValueError("forbidden")
+            return getattr(stats_mod, node.attr)
+    raise ValueError("forbidden call")
+
+
+def _calculate_safe(expression: str) -> object:
+    import math
+    import statistics
+
+    tree = ast.parse(expression, mode="eval")
+    if not isinstance(tree, ast.Expression):
+        raise ValueError("invalid parse")
+    return _calc_eval_node(tree, math, statistics)
+
 
 def calculate(expression: str, description: str = None) -> str:
     """Evaluate a mathematical expression in a sandboxed Python environment."""
@@ -588,11 +699,7 @@ def calculate(expression: str, description: str = None) -> str:
             if b in expr_lower:
                 return f"ERROR: Blocked operation in expression: {b.strip()}"
 
-        import math
-        import statistics
-
-        safe_globals = {"__builtins__": _CALC_SAFE_BUILTINS, "math": math, "statistics": statistics}
-        result = eval(expression, safe_globals)
+        result = _calculate_safe(expression)
 
         desc = f" ({description})" if description else ""
         if isinstance(result, float):
@@ -731,18 +838,17 @@ def solve_math(operation: str, expression: str, variable: str = "x", point: str 
 
         var = symbols(variable) if variable else x
 
-        # Parse expression safely
+        # Parse expression safely (sympify replaces eval for matrix / eigenvalues)
         if operation == "matrix" or operation == "eigenvalues":
-            # Matrix operations need eval with controlled namespace
-            safe_eval_ns = {
+            sympify_ns = {
                 "__builtins__": {},
                 "Matrix": Matrix,
                 "Rational": Rational,
                 "symbols": symbols,
                 "sqrt": sqrt,
             }
-            safe_eval_ns.update(safe_locals)
-            expr = eval(expression, safe_eval_ns)
+            sympify_ns.update(safe_locals)
+            expr = sympify(expression, locals=sympify_ns)
         else:
             expr = sympify(expression, locals=safe_locals)
 

@@ -64,9 +64,9 @@ BACKUP_FILES = [
 MAX_FILE_SIZE = 500 * 1024 * 1024
 
 
-def _file_md5(path: Path) -> str:
-    """Calculate MD5 hash for change detection."""
-    h = hashlib.md5()
+def _file_sha256(path: Path) -> str:
+    """Calculate SHA-256 hash for change detection."""
+    h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(8192), b""):
             h.update(chunk)
@@ -137,11 +137,11 @@ def backup(dry_run: bool = False):
 
         try:
             # Check if file already exists with same hash (skip if unchanged)
-            local_md5 = _file_md5(local_path)
+            local_sha256 = _file_sha256(local_path)
             try:
                 head = s3.head_object(Bucket=S3_BUCKET, Key=s3_key)
-                remote_etag = head.get("ETag", "").strip('"')
-                if remote_etag == local_md5:
+                remote_sha = (head.get("Metadata") or {}).get("sha256")
+                if remote_sha == local_sha256:
                     skipped += 1
                     continue
             except s3.exceptions.ClientError:
@@ -150,7 +150,7 @@ def backup(dry_run: bool = False):
             file_size = local_path.stat().st_size
             s3.upload_file(
                 str(local_path), S3_BUCKET, s3_key,
-                ExtraArgs={"Metadata": {"md5": local_md5}},
+                ExtraArgs={"Metadata": {"sha256": local_sha256}},
             )
             uploaded += 1
             total_bytes += file_size
