@@ -1,0 +1,9 @@
+# CodeQL models-as-data: treat paths returned by path_guard.realpath_under as safe for
+# py/path-injection sinks. Runtime behavior: realpath + expanduser + normpath, then must
+# equal the anchor or start with anchor + os.sep (see project/path_guard.py).
+extensions:
+  - addsTo:
+      pack: codeql/python-all
+      extensible: barrierModel
+    data:
+      - ["path_guard", "Member[realpath_under].ReturnValue", "path-injection"]

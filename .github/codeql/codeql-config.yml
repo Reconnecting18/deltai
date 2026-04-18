@@ -2,6 +2,11 @@
 # https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning/customizing-your-advanced-setup-for-code-scanning
 #
 # Triage open alerts by rule (local): scripts/export-code-scanning-alerts.ps1 (GitHub CLI + gh auth login).
+#
+# In-repo model pack (resolved via codeql-workspace.yml): path_guard.realpath_under barriers for py/path-injection.
+packs:
+  python:
+    - deltai/deltai-python-models
 paths-ignore:
   - "**/node_modules/**"
   - "**/.venv/**"

@@ -1,0 +1,8 @@
+# Local CodeQL model pack: extends codeql/python-all with MaD rows for this repository.
+name: deltai/deltai-python-models
+version: 0.0.1
+library: true
+extensionTargets:
+  codeql/python-all: "*"
+dataExtensions:
+  - "*.model.yml"

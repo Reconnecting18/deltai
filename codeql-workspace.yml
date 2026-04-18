@@ -1,0 +1,3 @@
+# Makes the in-repo model pack resolvable during CodeQL database create/analyze (including GitHub code scanning).
+provide:
+  - ".github/codeql/deltai-python-models/qlpack.yml"
