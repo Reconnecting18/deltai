@@ -10,6 +10,8 @@ import re
 from pathlib import Path
 from typing import IO, Literal
 
+from path_guard import realpath_under
+
 # Export formats allowed by export_dataset()
 _EXPORT_FORMATS = frozenset({"alpaca", "sharegpt", "chatml"})
 
@@ -82,28 +84,25 @@ def safe_jsonl_basename(fname: str) -> str | None:
 
 def require_path_under(path: str, root: str) -> str:
     """Resolve ``path`` and ensure it lies under ``root`` (realpath + expanduser)."""
-    p = Path(os.path.realpath(os.path.expanduser(path)))
-    r = Path(os.path.realpath(os.path.expanduser(root)))
-    try:
-        p.relative_to(r)
-    except ValueError as e:
-        raise ValueError("path is outside allowed directory") from e
-    return os.fspath(p)
+    return realpath_under(root, path)
 
 
 def exists_under(path: str, root: str) -> bool:
     """``os.path.exists`` after ``require_path_under`` (CodeQL py/path-injection)."""
-    return os.path.exists(require_path_under(path, root))
+    validated = realpath_under(root, path)
+    return os.path.exists(validated)
 
 
 def remove_under(path: str, root: str) -> None:
     """``os.remove`` after ``require_path_under``."""
-    os.remove(require_path_under(path, root))
+    validated = realpath_under(root, path)
+    os.remove(validated)
 
 
 def getsize_under(path: str, root: str) -> int:
     """``os.path.getsize`` after ``require_path_under``."""
-    return os.path.getsize(require_path_under(path, root))
+    validated = realpath_under(root, path)
+    return os.path.getsize(validated)
 
 
 def open_text(
@@ -117,4 +116,5 @@ def open_text(
     Open a text file only after verifying ``path`` resolves under ``root``.
     Uses ``Path.open`` so CodeQL can connect ``require_path_under`` to the sink.
     """
-    return Path(require_path_under(path, root)).open(mode, encoding=encoding)
+    validated = realpath_under(root, path)
+    return Path(validated).open(mode, encoding=encoding)

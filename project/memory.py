@@ -1356,5 +1356,9 @@ def cleanup_expired() -> dict:
                 collection.delete(ids=expired_ids)
             return {"removed": len(expired_ids), "checked": len(ingest_data["ids"])}
         except Exception as e2:
-            logger.warning(f"TTL cleanup failed (both methods): {e2}")
-            return {"removed": 0, "checked": 0, "error": str(e2)}
+            safe_errors.log_exception(logger, "TTL cleanup failed (both methods)", e2)
+            return {
+                "removed": 0,
+                "checked": 0,
+                "error": safe_errors.public_error_detail(e2),
+            }

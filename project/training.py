@@ -21,6 +21,7 @@ import time
 
 import httpx
 import safe_errors
+from path_guard import realpath_under
 from path_safety import (
     exists_under,
     getsize_under,
@@ -521,11 +522,12 @@ def merge_adapters(
         del merged_delta, base_state
         gc.collect()
 
-        # Save merged model
-        os.makedirs(merged_dir, exist_ok=True)
-        final_model.save_pretrained(merged_dir)
+        # Save merged model (validated path for filesystem sinks / CodeQL)
+        merged_work = realpath_under(ADAPTERS_PATH, merged_dir)
+        os.makedirs(merged_work, exist_ok=True)
+        final_model.save_pretrained(merged_work)
         tokenizer = AutoTokenizer.from_pretrained(HF_BASE_MODEL, trust_remote_code=True)
-        tokenizer.save_pretrained(merged_dir)
+        tokenizer.save_pretrained(merged_work)
         logger.info("Merged model saved under adapters root")
 
         del final_model
@@ -533,7 +535,7 @@ def merge_adapters(
 
         # Convert to GGUF
         logger.info("Converting merged model to GGUF...")
-        _convert_to_gguf(merged_dir, gguf_file, LORA_QUANT_METHOD)
+        _convert_to_gguf(merged_work, gguf_file, LORA_QUANT_METHOD)
 
         # Register in Ollama
         system_prompt = _read_system_prompt("deltai-qwen3b")
@@ -541,7 +543,7 @@ def merge_adapters(
 
         # Cleanup merged dir
         try:
-            shutil.rmtree(merged_dir)
+            shutil.rmtree(merged_work)
         except OSError:
             pass
 
@@ -567,8 +569,11 @@ def merge_adapters(
         logger.error("Adapter merge failed")
         # Cleanup
         try:
-            shutil.rmtree(merged_dir)
+            merged_cleanup = realpath_under(ADAPTERS_PATH, merged_dir)
+            shutil.rmtree(merged_cleanup)
         except OSError:
+            pass
+        except ValueError:
             pass
         return {"status": "error", "reason": safe_errors.public_error_detail(e)}
 
@@ -1518,10 +1523,9 @@ def _convert_to_gguf(merged_dir: str, output_gguf: str, quant_method: str = "Q4_
             remove_under(f16_gguf, GGUF_PATH)
     else:
         # No quantize binary — rename f16 as final (larger but functional)
-        os.rename(
-            require_path_under(f16_gguf, GGUF_PATH),
-            require_path_under(output_gguf, GGUF_PATH),
-        )
+        src_gguf = realpath_under(GGUF_PATH, f16_gguf)
+        dst_gguf = realpath_under(GGUF_PATH, output_gguf)
+        os.rename(src_gguf, dst_gguf)
         logger.warning("llama-quantize not found — using f16 GGUF (larger file size)")
 
 
