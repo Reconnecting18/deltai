@@ -36,6 +36,14 @@ def _runtime_dir() -> Path:
     return Path("/tmp")
 
 
+def _env_flag_enabled(var_name: str, default: bool = True) -> bool:
+    """Parse DELTA_AI_REPORTS-style env: unset defaults to True; 0/false/no/off disables."""
+    raw = os.getenv(var_name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() not in ("0", "false", "no", "off")
+
+
 @dataclass(frozen=True)
 class Settings:
     """Strongly-typed DELTA runtime settings."""
@@ -48,6 +56,8 @@ class Settings:
     config_dir: Path
     cache_dir: Path
     sqlite_path: Path
+    reports_dir: Path
+    ai_reports_enabled: bool
     ollama_url: str
     ollama_dev_model: str
     ollama_fast_model: str
@@ -61,6 +71,10 @@ def load_settings() -> Settings:
     config_dir = Path(os.getenv("DELTA_CONFIG_DIR", str(_xdg_config_home() / APP_DIRNAME)))
     cache_dir = Path(os.getenv("DELTA_CACHE_DIR", str(_xdg_cache_home() / APP_DIRNAME)))
     sqlite_path = Path(os.getenv("DELTA_SQLITE_PATH", str(data_dir / "delta.db")))
+    reports_dir = Path(
+        os.getenv("DELTA_REPORTS_DIR", str(data_dir / "ai_reports"))
+    ).expanduser()
+    ai_reports_enabled = _env_flag_enabled("DELTA_AI_REPORTS", default=True)
     runtime_dir = _runtime_dir() / APP_DIRNAME
 
     return Settings(
@@ -72,6 +86,8 @@ def load_settings() -> Settings:
         config_dir=config_dir,
         cache_dir=cache_dir,
         sqlite_path=sqlite_path,
+        reports_dir=reports_dir,
+        ai_reports_enabled=ai_reports_enabled,
         ollama_url=os.getenv("OLLAMA_URL", "http://127.0.0.1:11434"),
         ollama_dev_model=os.getenv("DELTA_MODEL_DEV", "qwen2.5-coder:32b"),
         ollama_fast_model=os.getenv("DELTA_MODEL_FAST", "qwen2.5:7b"),

@@ -19,6 +19,7 @@ from delta.agents.workflow import WorkflowAgent
 from delta.config import Settings
 from delta.orchestrator.context import build_request_context
 from delta.orchestrator.intents import classify_intent
+from delta.storage.reports import write_ai_report
 
 
 class Orchestrator:
@@ -41,11 +42,61 @@ class Orchestrator:
         session_id: str | None = None,
     ) -> dict[str, str]:
         """Classify an intent and route it to an agent."""
+        s = self.settings
         if not query.strip():
-            return {"status": "error", "output": "Query is empty", "agent": "none"}
+            result = {"status": "error", "output": "Query is empty", "agent": "none"}
+            write_ai_report(
+                reports_dir=s.reports_dir,
+                enabled=s.ai_reports_enabled,
+                category="orchestrator",
+                status="error",
+                fields={
+                    "query": query,
+                    "output": result["output"],
+                    "agent": result["agent"],
+                    "intent": None,
+                    "session_id": session_id,
+                    "request_source": source,
+                    "error": {"detail": "empty_query"},
+                },
+            )
+            return result
 
         _ = build_request_context(source=source, session_id=session_id)
         intent = classify_intent(query)
         agent = self._agents.get(intent) or self._agents["workflow"]
-        output = await agent.run(query=query, source=source, session_id=session_id)
+        try:
+            output = await agent.run(query=query, source=source, session_id=session_id)
+        except Exception as exc:
+            write_ai_report(
+                reports_dir=s.reports_dir,
+                enabled=s.ai_reports_enabled,
+                category="orchestrator",
+                status="error",
+                fields={
+                    "query": query,
+                    "output": str(exc),
+                    "agent": agent.name,
+                    "intent": intent,
+                    "session_id": session_id,
+                    "request_source": source,
+                    "error": {"detail": type(exc).__name__},
+                },
+            )
+            return {"status": "error", "output": str(exc), "agent": agent.name}
+
+        write_ai_report(
+            reports_dir=s.reports_dir,
+            enabled=s.ai_reports_enabled,
+            category="orchestrator",
+            status="ok",
+            fields={
+                "query": query,
+                "output": output,
+                "agent": agent.name,
+                "intent": intent,
+                "session_id": session_id,
+                "request_source": source,
+            },
+        )
         return {"status": "ok", "output": output, "agent": agent.name}

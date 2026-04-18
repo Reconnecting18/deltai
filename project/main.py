@@ -296,6 +296,18 @@ def _append_to_history(user_message: str, assistant_response: str, chat_metadata
             except Exception:
                 pass
 
+    try:
+        from delta.storage.reports import write_chat_turn_report
+
+        write_chat_turn_report(
+            user_message=user_message,
+            assistant_response=assistant_response,
+            chat_metadata=metadata,
+            status="ok",
+        )
+    except ImportError:
+        pass
+
 
 def _get_history() -> list[dict]:
     """Return a copy of conversation history for injection into message arrays."""
@@ -2282,6 +2294,20 @@ async def chat(req: ChatRequest):
                         friendly = "All models are offline. Check Ollama and model availability."
                     else:
                         friendly = "Backend error. Please try again."
+                    try:
+                        from delta.storage.reports import write_chat_turn_report
+
+                        _chat_metadata["latency_ms"] = (_time.time() - _chat_start_time) * 1000
+                        write_chat_turn_report(
+                            user_message=req.message,
+                            assistant_response="",
+                            chat_metadata={**_chat_metadata, "route": decision.to_dict()},
+                            status="error",
+                            user_visible_error=friendly,
+                            internal_detail=err or "",
+                        )
+                    except ImportError:
+                        pass
                     yield json.dumps({"t": "error", "c": friendly}) + "\n"
                     yield json.dumps({"t": "done"}) + "\n"
                     return
@@ -2388,6 +2414,20 @@ async def chat(req: ChatRequest):
                     friendly = "All models are offline. Check Ollama and model availability."
                 else:
                     friendly = "Backend error. Please try again."
+                try:
+                    from delta.storage.reports import write_chat_turn_report
+
+                    _chat_metadata["latency_ms"] = (_time.time() - _chat_start_time) * 1000
+                    write_chat_turn_report(
+                        user_message=req.message,
+                        assistant_response="",
+                        chat_metadata={**_chat_metadata, "route": decision.to_dict()},
+                        status="error",
+                        user_visible_error=friendly,
+                        internal_detail=err or "",
+                    )
+                except ImportError:
+                    pass
                 yield json.dumps({"t": "error", "c": friendly}) + "\n"
             yield json.dumps({"t": "done", "turns": len(_conversation_history) // 2}) + "\n"
 

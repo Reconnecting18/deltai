@@ -121,6 +121,18 @@ Tool categories:
 SQLite (WAL mode, short-lived connections). Path: **`DELTA_SQLITE_PATH`** (same default as `systemd/user/delta-daemon.service`), else legacy **`SQLITE_PATH`**, else `~/.local/share/deltai/delta.db`. Tables: `conversation_history`, `cloud_budget`, `reasoning_traces`, `quality_scores`, `routing_feedback`, `knowledge_gaps`.
 Python 3.11 typically ships with SQLite 3.39+ (WAL-capable). JSON1 support must also be enabled in the Python `sqlite3` build for reasoning-trace JSON queries.
 
+### AI reports (`src/delta/storage/reports.py`, JSON on disk)
+
+Human-readable audit trail for debugging and transparency. Default root: **`$DELTA_DATA_DIR/ai_reports/`** (override with **`DELTA_REPORTS_DIR`**). Disable file writes with **`DELTA_AI_REPORTS=0`** (or `false` / `no` / `off`).
+
+Layout:
+
+- `ai_reports/orchestrator/YYYY-MM-DD/*.json` — one file per `delta-daemon` orchestrated request (`POST /v1/execute`, IPC).
+- `ai_reports/chat/YYYY-MM-DD/*.json` — one file per completed `POST /chat` turn when the installed `delta` package is importable from `project/`.
+- `ai_reports/errors/YYYY-MM-DD/*.json` — copy of any report with `"status": "error"` (orchestrator or chat).
+
+Each file includes `schema_version`, `written_at`, `source`, `status`, plus query/output/metadata fields. Training cycle summaries remain under **`data/training/daily_reports/`** (unchanged).
+
 ### Training (`project/extensions/training/pipeline.py`, import as `training`)
 
 Optional. QLoRA fine-tuning (Qwen2.5-3B via PEFT/TRL), adapter management (TIES merge, versioning), knowledge distillation, iterative distillation, DPO, smart auto-capture, daily cycle orchestrator.
@@ -153,6 +165,7 @@ See `project/extensions/README.md` for the full authoring guide, `project/extens
 | `project/memory.py` | ChromaDB RAG, hierarchical storage, iterative retrieval, dedup, ingest |
 | `project/quality.py` | Response quality scorer, drives capture + routing feedback + gap detection |
 | `project/persistence.py` | SQLite backing store — history, budget, traces, quality, routing, gaps |
+| `src/delta/storage/reports.py` | JSON AI reports under `DELTA_DATA_DIR/ai_reports/` (orchestrator + chat + errors) |
 | `project/tools/definitions.py` | Tool schemas, `filter_tools()`, `_merge_extension_tools()` |
 | `project/tools/executor.py` | Tool execution with retry + safety, `register_handler()` |
 | `project/extensions/__init__.py` | Extension loader — `load_extensions()`, `get_extension_tools()`, `shutdown_extensions()` |
