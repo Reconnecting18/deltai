@@ -35,7 +35,7 @@ def _run_allowlisted(argv: list[str], timeout: float = 120.0) -> tuple[int, str,
         pass
     elif argv[:2] == ["pacman", "-Qi"] and len(argv) == 3 and _validate_pkg(argv[2]):
         pass
-    elif argv[:3] == ["pactree", "-ru"] and len(argv) == 4 and _validate_pkg(argv[3]):
+    elif argv[:2] == ["pactree", "-ru"] and len(argv) == 3 and _validate_pkg(argv[2]):
         pass
     else:
         raise ValueError(f"argv not allowlisted: {argv}")
