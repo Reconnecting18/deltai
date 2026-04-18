@@ -124,7 +124,7 @@ After each turn, [project/main.py](../project/main.py) calls `smart_auto_capture
 
 ### C.3 Nightly / unattended cycle
 
-- **Script:** [scripts/daily_training.py](../scripts/daily_training.py) — dry-run: `python scripts/daily_training.py --dry-run`
+- **Script:** [project/extensions/training/daily_training.py](../project/extensions/training/daily_training.py) — thin entry: [scripts/daily_training.py](../scripts/daily_training.py); dry-run: `python scripts/daily_training.py --dry-run`
 - **Scheduler:** systemd user timer or cron (Linux).
 
 ### C.4 Adapter surgery (domain LoRA slots)
@@ -138,7 +138,7 @@ After each turn, [project/main.py](../project/main.py) calls `smart_auto_capture
 | Promote | `POST /adapters/promote/{name}` |
 | Rollback | `POST /adapters/rollback` |
 
-Example adapter domains include `racing`, `engineering`, `personality`, `reasoning`, `telemetry`, and `audio` — treat niche domains as optional slots; see `ADAPTER_DOMAINS` in [project/training.py](../project/training.py).
+Example adapter domains include `racing`, `engineering`, `personality`, `reasoning`, `telemetry`, and `audio` — treat niche domains as optional slots; see `ADAPTER_DOMAINS` in [project/extensions/training/pipeline.py](../project/extensions/training/pipeline.py).
 
 ### C.5 DPO (when negatives exist)
 

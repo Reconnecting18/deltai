@@ -64,7 +64,7 @@ python tests/verify_distill.py
 | `main.py` | FastAPI app, endpoints, streaming, integrations |
 | `router.py` | VRAM-aware model routing |
 | `memory.py` | ChromaDB RAG |
-| `training.py` / `training_build.py` | Fine-tuning and adapter workflows |
+| `extensions/training/pipeline.py` / `build.py` | Fine-tuning and adapter workflows (import as `training` via shim) |
 | `tools/` | Tool definitions and executor |
 | `static/` | Single-file dashboard |
 | `tests/` | Verification scripts |

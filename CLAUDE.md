@@ -121,7 +121,7 @@ Tool categories:
 SQLite (WAL mode, short-lived connections). Path: **`DELTA_SQLITE_PATH`** (same default as `systemd/user/delta-daemon.service`), else legacy **`SQLITE_PATH`**, else `~/.local/share/deltai/delta.db`. Tables: `conversation_history`, `cloud_budget`, `reasoning_traces`, `quality_scores`, `routing_feedback`, `knowledge_gaps`.
 Python 3.11 typically ships with SQLite 3.39+ (WAL-capable). JSON1 support must also be enabled in the Python `sqlite3` build for reasoning-trace JSON queries.
 
-### Training (project/training.py)
+### Training (`project/extensions/training/pipeline.py`, import as `training`)
 
 Optional. QLoRA fine-tuning (Qwen2.5-3B via PEFT/TRL), adapter management (TIES merge, versioning), knowledge distillation, iterative distillation, DPO, smart auto-capture, daily cycle orchestrator.
 
@@ -159,7 +159,7 @@ See `project/extensions/README.md` for the full authoring guide, `project/extens
 | `project/extensions/README.md` | Extension authoring guide |
 | `project/extensions/example_extension/` | Working extension template |
 | `project/extensions/arch_update_guard/` | Optional Arch news/wiki ingest + pacman evidence (`/ext/arch_update_guard/…`) |
-| `project/training.py` | QLoRA, adapters, distillation, dataset CRUD, auto-capture, daily cycle |
+| `project/extensions/training/pipeline.py` | QLoRA, adapters, distillation, dataset CRUD, auto-capture, daily cycle (`import training` via shim) |
 | `project/collector.py` | Web data collection for training |
 | `project/watcher.py` | Watchdog file watcher for `data/knowledge/` |
 | `project/anthropic_client.py` | Cloud inference (dormant until ANTHROPIC_API_KEY set) |
@@ -172,8 +172,8 @@ See `project/extensions/README.md` for the full authoring guide, `project/extens
 | `project/tests/verify_distill.py` | 34-test distillation suite |
 | `systemd/user/delta-daemon.service` | systemd user unit for `delta-daemon` |
 | `scripts/backup_s3.py` | S3 backup (full/incremental/restore) |
-| `scripts/daily_training.py` | Nightly autonomous training orchestrator |
-| `scripts/collect_training_data.py` | Standalone web data collector |
+| `project/extensions/training/daily_training.py` (also `scripts/daily_training.py`) | Nightly autonomous training orchestrator |
+| `project/extensions/training/collect_training_data.py` (also `scripts/collect_training_data.py`) | Standalone web data collector |
 | `docs/local-model-workflow.md` | Operator guide: RAG, models, adapters |
 
 ---

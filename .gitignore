@@ -70,6 +70,7 @@ tools/llama.cpp/
 project/extensions/*/
 !project/extensions/example_extension/
 !project/extensions/arch_update_guard/
+!project/extensions/training/
 !project/extensions/__init__.py
 !project/extensions/README.md
 

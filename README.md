@@ -320,9 +320,11 @@ deltai/
 │   ├── quality.py                Response quality scoring (6-signal heuristic)
 │   ├── persistence.py            SQLite — history, budget, traces, quality, gaps
 │   ├── anthropic_client.py       Cloud inference (dormant until API key set)
-│   ├── training.py               QLoRA, adapters, distillation, auto-capture
+│   ├── training.py               Shim → extensions/training/pipeline.py
 │   ├── collector.py              Web training data collection
 │   ├── watcher.py                Watchdog for knowledge/ dir
+│   ├── extensions/
+│   │   └── training/             QLoRA, datasets, daily cycle, collection CLIs
 │   ├── tools/
 │   │   ├── definitions.py        Tool JSON schemas + filter_tools()
 │   │   └── executor.py           Tool execution with retry + safety checks
@@ -345,8 +347,8 @@ deltai/
 │   └── training/                 Datasets, adapters, GGUF exports
 ├── scripts/
 │   ├── backup_s3.py              S3 backup (full/incremental/restore)
-│   ├── daily_training.py         Autonomous training orchestrator
-│   └── collect_training_data.py  Web data collector
+│   ├── daily_training.py         Wrapper → project/extensions/training/daily_training.py
+│   └── collect_training_data.py  Wrapper → project/extensions/training/collect_training_data.py
 └── docs/
     └── local-model-workflow.md   Operator guide: RAG, models, adapters
 ```
