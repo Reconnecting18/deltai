@@ -3,10 +3,8 @@
 #
 # Triage open alerts by rule (local): scripts/export-code-scanning-alerts.ps1 (GitHub CLI + gh auth login).
 #
-# In-repo model pack (resolved via codeql-workspace.yml): path_guard.realpath_under barriers for py/path-injection.
-packs:
-  python:
-    - deltai/deltai-python-models
+# In-repo MaD pack (.github/codeql/deltai-python-models) is for local CodeQL workspace use only; listing it
+# under packs: would pull from GHCR in Code Scanning. Publish the pack if you need it in CI.
 paths-ignore:
   - "**/node_modules/**"
   - "**/.venv/**"
