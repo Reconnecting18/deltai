@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -83,7 +82,9 @@ def test_reports_enabled_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert reports.reports_enabled_from_env() is False
 
 
-def test_write_chat_turn_report_respects_disable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_write_chat_turn_report_respects_disable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     root = tmp_path / "ai_reports"
     monkeypatch.setenv("DELTA_REPORTS_DIR", str(root))
     monkeypatch.setenv("DELTA_AI_REPORTS", "false")

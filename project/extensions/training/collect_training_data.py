@@ -32,13 +32,13 @@ Configuration (.env):
   WEB_COLLECT_MAX_PER_SOURCE=200
 """
 
-import sys
-import os
-import json
-import time
-import logging
 import argparse
 import datetime
+import json
+import logging
+import os
+import sys
+import time
 
 # ── Path setup ──────────────────────────────────────────────────────────────
 # This file lives at project/extensions/training/collect_training_data.py
@@ -93,7 +93,7 @@ def _print_report(report: dict):
 
     sources = report.get("sources", {})
     if sources:
-        print(f"\nPer-source breakdown:")
+        print("\nPer-source breakdown:")
         for src, r in sources.items():
             status = r.get("status", "?")
             written = r.get("written", 0)

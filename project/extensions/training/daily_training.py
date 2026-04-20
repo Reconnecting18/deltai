@@ -37,13 +37,13 @@ Configuration (.env):
   WEB_COLLECT_MAX_PER_SOURCE=200
 """
 
-import sys
-import os
-import json
-import time
-import logging
 import argparse
 import datetime
+import json
+import logging
+import os
+import sys
+import time
 
 # ── Path setup: ensure project/ is importable ──────────────────────────────
 # This file lives at project/extensions/training/daily_training.py
@@ -158,7 +158,7 @@ def _print_report(report_path: str):
     phases = report.get("phases", {})
 
     guards = phases.get("guards", {})
-    print(f"\n[Guards]")
+    print("\n[Guards]")
     print(f"  VRAM free: {guards.get('vram_free_mb', '?')} MB")
     print(f"  Focus workload: {guards.get('focus_workload_active', guards.get('sim_running', '?'))}")
     print(f"  VRAM OK: {guards.get('vram_ok', '?')}")
@@ -188,7 +188,7 @@ def _print_report(report_path: str):
         print(f"  {ds['dataset']} ({ds['domain']}): {ds['examples']} examples")
 
     train = phases.get("training", {})
-    print(f"\n[Training]")
+    print("\n[Training]")
     print(f"  Domain:  {train.get('domain', '?')}")
     print(f"  Status:  {train.get('status', '?')}")
     if train.get("blend"):

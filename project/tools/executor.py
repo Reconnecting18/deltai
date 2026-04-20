@@ -488,9 +488,8 @@ def fetch_url(url: str, max_chars: int = 8000) -> str:
             url_safety.validate_http_url_for_fetch(str(request.url))
 
         try:
-            import trafilatura as _trafilatura  # type: ignore
-
             import httpx as _httpx
+            import trafilatura as _trafilatura  # type: ignore
 
             with _httpx.Client(
                 event_hooks={"request": [_hook_validate_request]},

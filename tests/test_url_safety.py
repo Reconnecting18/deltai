@@ -1,7 +1,6 @@
 """Unit tests for project.url_safety (SSRF gate for fetch_url)."""
 
 import pytest
-
 from url_safety import validate_http_url_for_fetch
 
 

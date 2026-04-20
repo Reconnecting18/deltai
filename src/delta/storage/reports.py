@@ -6,7 +6,7 @@ import json
 import logging
 import os
 import secrets
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -44,7 +44,7 @@ def ensure_reports_layout(reports_dir: Path) -> None:
 
 
 def _report_filename() -> str:
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     suffix = secrets.token_hex(4)
     return f"{ts}_{suffix}.json"
 
@@ -62,13 +62,13 @@ def write_ai_report(
         return None
     try:
         ensure_reports_layout(reports_dir)
-        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        day = datetime.now(UTC).strftime("%Y-%m-%d")
         subdir = reports_dir / category / day
         subdir.mkdir(parents=True, exist_ok=True)
         fname = _report_filename()
         doc: dict[str, Any] = {
             "schema_version": REPORT_SCHEMA_VERSION,
-            "written_at": datetime.now(timezone.utc).isoformat(),
+            "written_at": datetime.now(UTC).isoformat(),
             "source": category,
             "status": status,
             **fields,
