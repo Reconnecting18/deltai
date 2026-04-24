@@ -53,7 +53,7 @@ deltai is **not** a GUI assistant, not a desktop environment replacement, and no
 │  ┌──────────┐ ┌──────────┐ ┌────────────┐ ┌──────────────┐  │
 │  │ CLI      │ │ Browser  │ │ Electron   │ │ External     │  │
 │  │ (curl /  │ │ dashboard│ │ (optional) │ │ scripts/apps │  │
-│  │  delta)  │ │ :8000    │ │            │ │ via HTTP     │  │
+│  │  deltai) │ │ :8000    │ │            │ │ via HTTP     │  │
 │  └──────────┘ └──────────┘ └────────────┘ └──────────────┘  │
 └─────────────────────────┬────────────────────────────────────┘
                           │ NDJSON streaming / REST
@@ -113,11 +113,20 @@ python -c "import sqlite3; c=sqlite3.connect(':memory:'); c.execute(\"select jso
 git clone https://github.com/Reconnecting18/deltai
 cd deltai
 
-# Backend
+# Backend (manual)
 python -m venv venv
 source venv/bin/activate
 pip install -e .[dev]
 ```
+
+Or use the bundled setup script (same result: venv, editable install, copies `project/.env.example` if `.env` is missing):
+
+```bash
+bash scripts/setup_linux.sh
+source venv/bin/activate
+```
+
+After install, these commands are on your `PATH` (while the venv is active): **`deltai-server`** starts the HTTP API (`project/main.py` via uvicorn on `127.0.0.1:8000` by default), and **`deltai`** opens the rich terminal client that talks to that API.
 
 The core package metadata now includes ChromaDB, so a standard `pip install .`
 is enough for runtime installs. Use `pip install -e .[dev]` when developing.
@@ -142,11 +151,14 @@ See [Configuration](#configuration) below for all options.
 ### 4. Run
 
 ```bash
-# Option A — run directly
+# Option A — from repo root with venv active (recommended on Linux)
+deltai-server --reload   # add --reload only in development
+
+# Option B — classic uvicorn (must cd into project/)
 cd project && source venv/bin/activate
 uvicorn main:app --reload --host 127.0.0.1 --port 8000
 
-# Option B — install the DELTA user daemon (optional; separate from uvicorn chat app)
+# Option C — install the DELTA user daemon (optional; separate from uvicorn chat app)
 cp systemd/user/delta-daemon.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now delta-daemon
@@ -157,6 +169,9 @@ systemctl --user enable --now delta-daemon
 ```bash
 # Open the dashboard in a browser
 xdg-open http://localhost:8000
+
+# Or the rich terminal client (same machine, default http://localhost:8000)
+deltai
 
 # Or use the CLI (curl)
 curl -X POST http://localhost:8000/chat \

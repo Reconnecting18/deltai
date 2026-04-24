@@ -180,6 +180,8 @@ See `project/extensions/README.md` for the full authoring guide and `project/ext
 | `project/watcher.py` | Watchdog file watcher for `data/knowledge/` |
 | `project/anthropic_client.py` | Cloud inference (dormant until ANTHROPIC_API_KEY set) |
 | `project/static/index.html` | Dashboard UI (single file — HTML + CSS + JS) |
+| `src/delta/cli/` | Installed console scripts: `deltai` (terminal client → `project/cli.py`), `deltai-server` (uvicorn `project/main.py`) |
+| `scripts/setup_linux.sh` | Optional one-shot venv + `pip install -e .[dev]` + copy `project/.env.example` |
 | `project/.env.example` | Template for `project/.env` |
 | `project/.env` | Runtime configuration (not committed) |
 | `project/tests/verify_full.py` | 46-test core verification suite |

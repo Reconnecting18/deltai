@@ -895,10 +895,9 @@ async def main():
             console.print(
                 Panel(
                     f"Cannot reach deltai backend at {base_url}\n\n"
-                    "Start the backend first:\n"
-                    "  cd ~/deltai/project\n"
-                    "  .\\venv\\Scripts\\activate\n"
-                    "  uvicorn main:app --port 8000",
+                    "Start the backend first (from the repo, with venv active):\n"
+                    "  deltai-server\n"
+                    "Or: cd project && uvicorn main:app --host 127.0.0.1 --port 8000",
                     border_style="danger",
                     title="[danger]CONNECTION FAILED[/]",
                 )
