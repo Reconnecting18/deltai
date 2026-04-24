@@ -32,6 +32,11 @@ def _resolve_sqlite_path() -> str:
 _db_path = _resolve_sqlite_path()
 
 
+def get_sqlite_path() -> str:
+    """Return the resolved SQLite database path (same as systemd / DELTA_SQLITE_PATH)."""
+    return _resolve_sqlite_path()
+
+
 def _connect() -> sqlite3.Connection:
     """Open a short-lived connection. Caller should use `with` or close manually."""
     os.makedirs(os.path.dirname(_db_path), exist_ok=True)
@@ -113,6 +118,12 @@ def init_db():
                 created_at REAL
             )
         """)
+        try:
+            from core.arch_update_guard.schema import init_arch_guard_tables
+
+            init_arch_guard_tables(conn)
+        except Exception as ag_exc:
+            logger.warning("arch_update_guard tables init skipped: %s", ag_exc)
         conn.commit()
     logger.info(f"Persistence DB initialized: {_db_path}")
 

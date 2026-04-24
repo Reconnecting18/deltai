@@ -470,6 +470,19 @@ if _TELEMETRY_API_URL:
         TOOL_MAP[t["function"]["name"]] = t
 
 
+# ── ARCH UPDATE GUARD (core) ───────────────────────────────────────────
+try:
+    from core.arch_update_guard.tools_defs import ARCH_GUARD_TOOLS
+
+    for t in ARCH_GUARD_TOOLS:
+        name = t.get("function", {}).get("name")
+        if name and name not in TOOL_MAP:
+            TOOLS.append(t)
+            TOOL_MAP[name] = t
+except Exception:
+    pass
+
+
 # ── EXTENSION TOOLS ─────────────────────────────────────────────────────
 # Tools contributed by user extensions (project/extensions/).
 # The extensions loader calls _merge_extension_tools() after load_extensions().
@@ -503,8 +516,14 @@ _TELEMETRY_TOOL_NAMES = {
 # Universal tools always included
 _UNIVERSAL_TOOLS = {"search_knowledge", "calculate"}
 
-# Arch update guard extension (project/extensions/arch_update_guard/)
-_ARCH_EXT_TOOL_NAMES = {"arch_pending_updates_report", "arch_refresh_news_digest"}
+# Arch update guard (project/core/arch_update_guard/)
+_ARCH_EXT_TOOL_NAMES = {
+    "arch_pending_updates_report",
+    "arch_refresh_news_digest",
+    "arch_create_update_snapshot",
+    "arch_compare_snapshots",
+    "arch_rollback_plan",
+}
 
 # Domain-specific tool sets
 TOOL_DOMAIN_MAP = {
