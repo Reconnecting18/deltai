@@ -152,7 +152,7 @@ User-space extension system. Any subdirectory inside `project/extensions/` that 
 
 Extensions are loaded **after** the core app is initialised. A broken extension is skipped with a warning and never prevents deltai from starting. Personal extension directories are gitignored by default (see `.gitignore`); add `-f` to `git add` to opt a specific extension into version control.
 
-See `project/extensions/README.md` for the full authoring guide, `project/extensions/example_extension/` for a minimal template, and `project/extensions/arch_update_guard/` for an optional Arch Linux news/pacman evidence extension.
+See `project/extensions/README.md` for the full authoring guide and `project/extensions/example_extension/` for a minimal template. Arch Linux update guard (news, pacman evidence, snapshots, diffs, rollback API) lives in `project/core/arch_update_guard/` and loads from core (not extensions).
 
 ---
 
@@ -171,7 +171,7 @@ See `project/extensions/README.md` for the full authoring guide, `project/extens
 | `project/extensions/__init__.py` | Extension loader — `load_extensions()`, `get_extension_tools()`, `shutdown_extensions()` |
 | `project/extensions/README.md` | Extension authoring guide |
 | `project/extensions/example_extension/` | Working extension template |
-| `project/extensions/arch_update_guard/` | Optional Arch news/wiki ingest + pacman evidence (`/ext/arch_update_guard/…`) |
+| `project/core/arch_update_guard/` | Arch news/wiki ingest + pacman evidence + SQLite snapshots/diffs/rollback (`/arch-guard/…`, legacy `/ext/arch_update_guard/…`) |
 | `project/extensions/training/pipeline.py` | QLoRA, adapters, distillation, dataset CRUD, auto-capture, daily cycle (`import training` via shim) |
 | `project/collector.py` | Web data collection for training |
 | `project/watcher.py` | Watchdog file watcher for `data/knowledge/` |
