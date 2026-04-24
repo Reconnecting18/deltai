@@ -17,6 +17,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+import path_guard
+
 logger = logging.getLogger("deltai.extensions.server_network")
 
 _HOST_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$")
@@ -25,9 +27,28 @@ _USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$", re.IGNORECASE)
 _LABEL_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
 
 
+def _home_real() -> str:
+    return os.path.realpath(os.path.expanduser("~"))
+
+
 def _data_dir() -> str:
-    base = os.path.expanduser(os.getenv("DELTA_DATA_DIR", "~/.local/share/deltai"))
-    return os.path.abspath(base)
+    """
+    Registry root must resolve under the real home directory (path-injection safe).
+    """
+    home = _home_real()
+    raw = (os.getenv("DELTA_DATA_DIR") or "").strip()
+    if not raw:
+        return path_guard.realpath_under(home, os.path.join(os.path.expanduser("~"), ".local", "share", "deltai"))
+    return path_guard.realpath_under(home, os.path.expanduser(raw))
+
+
+def _resolve_identity_file(path: str) -> str:
+    """Private key path must be a regular file under the real home directory."""
+    home = _home_real()
+    resolved = path_guard.realpath_under(home, os.path.expanduser(path.strip()))
+    if not os.path.isfile(resolved):
+        raise ValueError("identity_file must exist and be a regular file")
+    return resolved
 
 
 def registry_path() -> str:
@@ -144,14 +165,7 @@ def add_server(
     notes_s = (notes or "").strip()[:4000] if notes else ""
     id_path = None
     if identity_file:
-        p = os.path.expanduser(str(identity_file).strip())
-        ap = os.path.abspath(p)
-        if not os.path.isfile(ap):
-            raise ValueError("identity_file must exist and be a regular file")
-        home = os.path.abspath(os.path.expanduser("~"))
-        if not (ap == home or ap.startswith(home + os.sep)):
-            raise ValueError("identity_file must be under your home directory")
-        id_path = ap
+        id_path = _resolve_identity_file(str(identity_file))
 
     data = _load_raw()
     servers: list[dict[str, Any]] = data["servers"]
@@ -206,14 +220,7 @@ def update_server(
         if clear_identity_file:
             s["identity_file"] = None
         elif identity_file is not None:
-            p = os.path.expanduser(str(identity_file).strip())
-            ap = os.path.abspath(p)
-            if not os.path.isfile(ap):
-                raise ValueError("identity_file must exist and be a regular file")
-            home = os.path.abspath(os.path.expanduser("~"))
-            if not (ap == home or ap.startswith(home + os.sep)):
-                raise ValueError("identity_file must be under your home directory")
-            s["identity_file"] = ap
+            s["identity_file"] = _resolve_identity_file(str(identity_file))
         s["updated_at"] = _utc_now()
         _save_raw(data)
         return dict(s)
@@ -267,6 +274,7 @@ def probe_server(server_id: str, timeout_sec: int = 8) -> dict[str, Any]:
     try:
         proc = subprocess.run(
             cmd,
+            shell=False,
             capture_output=True,
             text=True,
             timeout=max(3, min(60, int(timeout_sec))),
@@ -293,6 +301,7 @@ def run_remote_command(server_id: str, command: str, timeout_sec: int = 120) -> 
     try:
         proc = subprocess.run(
             cmd,
+            shell=False,
             capture_output=True,
             text=True,
             timeout=max(5, min(600, int(timeout_sec))),
@@ -320,6 +329,7 @@ def run_remote_script(server_id: str, script: str, timeout_sec: int = 300) -> di
     try:
         proc = subprocess.run(
             cmd,
+            shell=False,
             input=body,
             capture_output=True,
             text=True,

@@ -281,48 +281,58 @@ def run():
 
     # === 7b. server_network registry (extension logic) ===
     print("\n--- 7b. Server network registry ---")
-    import tempfile
+    import uuid
 
     from extensions import server_network
     from extensions.server_network import registry as srv_reg
 
     _orig_data = os.environ.get("DELTA_DATA_DIR")
-    with tempfile.TemporaryDirectory() as tmp:
-        os.environ["DELTA_DATA_DIR"] = tmp
-        try:
-            p = srv_reg.registry_path()
-            check("server_network registry under data dir", p.startswith(os.path.abspath(tmp)))
-            if os.path.isfile(p):
-                os.remove(p)
-            rec = srv_reg.add_server("10.0.0.1", "testuser", port=2222, label="lab", tags=["a"])
-            check("server_network add_server", rec.get("host") == "10.0.0.1" and rec.get("port") == 2222)
-            lst = srv_reg.list_servers()
-            check("server_network list_servers", len(lst) == 1)
-            got = srv_reg.get_server(rec["id"])
-            check("server_network get_server", got is not None and got["user"] == "testuser")
-            srv_reg.update_server(rec["id"], notes="n1")
-            got2 = srv_reg.get_server(rec["id"])
-            check("server_network update_server", got2 and got2.get("notes") == "n1")
-            ok_del = srv_reg.remove_server(rec["id"])
-            check("server_network remove_server", ok_del and srv_reg.list_servers() == [])
-            # filter_tools uses core TOOLS; merge extension defs like main does at startup
-            from tools.definitions import TOOLS, _merge_extension_tools, filter_tools
+    _sn_tmp = os.path.join(
+        os.path.expanduser("~"), ".cache", f"deltai-server-network-test-{uuid.uuid4().hex}"
+    )
+    os.makedirs(_sn_tmp, exist_ok=True)
+    try:
+        os.environ["DELTA_DATA_DIR"] = _sn_tmp
+        p = srv_reg.registry_path()
+        check("server_network registry under data dir", p.startswith(os.path.realpath(_sn_tmp)))
+        if os.path.isfile(p):
+            os.remove(p)
+        rec = srv_reg.add_server("10.0.0.1", "testuser", port=2222, label="lab", tags=["a"])
+        check("server_network add_server", rec.get("host") == "10.0.0.1" and rec.get("port") == 2222)
+        lst = srv_reg.list_servers()
+        check("server_network list_servers", len(lst) == 1)
+        got = srv_reg.get_server(rec["id"])
+        check("server_network get_server", got is not None and got["user"] == "testuser")
+        srv_reg.update_server(rec["id"], notes="n1")
+        got2 = srv_reg.get_server(rec["id"])
+        check("server_network update_server", got2 and got2.get("notes") == "n1")
+        ok_del = srv_reg.remove_server(rec["id"])
+        check("server_network remove_server", ok_del and srv_reg.list_servers() == [])
+        # filter_tools uses core TOOLS; merge extension defs like main does at startup
+        from tools.definitions import TOOLS, _merge_extension_tools, filter_tools
 
-            _merge_extension_tools(server_network.TOOLS)
-            ft = filter_tools(TOOLS, query="list my homelab servers over ssh")
-            fnames = {t["function"]["name"] for t in ft}
-            check(
-                "filter_tools includes server_network (tier 1)",
-                "server_network_list" in fnames and "server_network_probe" in fnames,
-            )
-            # Handlers accept kwargs like execute_tool (regression)
-            out = server_network._list_handler()
-            check("server_network_list handler", "registry_path" in out and "servers" in out)
-        finally:
-            if _orig_data is None:
-                os.environ.pop("DELTA_DATA_DIR", None)
-            else:
-                os.environ["DELTA_DATA_DIR"] = _orig_data
+        _merge_extension_tools(server_network.TOOLS)
+        ft = filter_tools(TOOLS, query="list my homelab servers over ssh")
+        fnames = {t["function"]["name"] for t in ft}
+        check(
+            "filter_tools includes server_network (tier 1)",
+            "server_network_list" in fnames and "server_network_probe" in fnames,
+        )
+        # Handlers accept kwargs like execute_tool (regression)
+        out = server_network._list_handler()
+        check("server_network_list handler", "registry_path" in out and "servers" in out)
+    finally:
+        if _orig_data is None:
+            os.environ.pop("DELTA_DATA_DIR", None)
+        else:
+            os.environ["DELTA_DATA_DIR"] = _orig_data
+        try:
+            rp = os.path.join(_sn_tmp, "local_server_network.json")
+            if os.path.isfile(rp):
+                os.remove(rp)
+            os.rmdir(_sn_tmp)
+        except OSError:
+            pass
 
     # === 8. ANTHROPIC CLIENT ===
     print("\n--- 8. Anthropic Client ---")
