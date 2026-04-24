@@ -33,12 +33,17 @@ Domain-specific automation (e.g. distro maintenance assistants) belongs in `proj
 ## How to run (development)
 
 ```bash
-# Backend (run from project/ — main.py lives here)
+# Backend — quick setup on Linux (venv + editable install + .env template)
 cd deltai
-python -m venv venv && source venv/bin/activate
-pip install -e .[dev]
-cd project
-uvicorn main:app --reload --host 127.0.0.1 --port 8000
+bash scripts/setup_linux.sh
+source venv/bin/activate
+deltai-server --reload   # HTTP API; omit --reload in production
+
+# Same without the script: venv, pip install -e .[dev], then either deltai-server
+# or: cd project && uvicorn main:app --reload --host 127.0.0.1 --port 8000
+
+# Terminal client to the running API (natural language → tools/tasks)
+deltai
 
 # Desktop shell (optional)
 cd app && npm install && npm start
