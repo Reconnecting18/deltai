@@ -4,6 +4,7 @@ Server network extension — inventory of local Linux servers and bounded SSH au
 Stores a small JSON registry under DELTA_DATA_DIR (see registry.registry_path).
 The model can list/add/update/remove servers and run commands only on registered hosts
 (no arbitrary ssh targets). Uses BatchMode=yes (non-interactive; keys or ssh-agent).
+OpenSSH uses normal host key verification (known_hosts); add hosts out-of-band before probe/run.
 """
 
 from __future__ import annotations
@@ -255,7 +256,6 @@ def _run_script_handler(server_id: str, script: str, timeout_sec: int = 300) -> 
 def setup(app) -> None:
     from fastapi import APIRouter
     from pydantic import BaseModel
-
     from tools.executor import register_handler
 
     register_handler("server_network_list", _list_handler)

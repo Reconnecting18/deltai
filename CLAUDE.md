@@ -154,7 +154,7 @@ Extensions are loaded **after** the core app is initialised. A broken extension 
 
 See `project/extensions/README.md` for the full authoring guide and `project/extensions/example_extension/` for a minimal template. Arch Linux update guard (news, pacman evidence, snapshots, diffs, rollback API) lives in `project/core/arch_update_guard/` and loads from core (not extensions).
 
-**Local server network (`project/extensions/server_network/`):** JSON inventory of SSH-accessible Linux hosts under `$DELTA_DATA_DIR/local_server_network.json` (when set, `DELTA_DATA_DIR` must resolve under the real home directory), HTTP under `/ext/server_network/`, and tools `server_network_*` for list/add/update/remove, probe, and bounded remote `run_command` / `run_script` (only registered hosts; `BatchMode=yes`, `shell=False`). `filter_tools()` includes these when the query matches network/server patterns.
+**Local server network (`project/extensions/server_network/`):** JSON inventory of SSH-accessible Linux hosts under `$DELTA_DATA_DIR/local_server_network.json` (when set, `DELTA_DATA_DIR` must resolve under the real home directory), HTTP under `/ext/server_network/`, and tools `server_network_*` for list/add/update/remove, probe, and bounded remote `run_command` / `run_script` (only registered hosts; `BatchMode=yes`, `shell=False`; normal OpenSSH `known_hosts` verification — register host keys before non-interactive use). `filter_tools()` includes these when the query matches network/server patterns.
 
 ---
 
