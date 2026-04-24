@@ -13,6 +13,8 @@ from typing import Any
 import httpx
 import safe_errors
 
+from .guards import validated_http_service_url
+
 logger = logging.getLogger("deltai.arch_update_guard.news")
 
 ARCH_NEWS_RSS = "https://archlinux.org/feeds/news/"
@@ -27,7 +29,10 @@ _refresh_lock = threading.Lock()
 def _base_url() -> str:
     import os
 
-    return os.environ.get("DELTAI_BASE_URL", DEFAULT_BASE).rstrip("/")
+    raw = os.environ.get("DELTAI_BASE_URL", DEFAULT_BASE)
+    return validated_http_service_url(
+        raw, mode="ingest", default=DEFAULT_BASE
+    ).rstrip("/")
 
 
 def _ingest_sync(source: str, context: str, *, ttl: int, tags: list[str]) -> dict[str, Any]:
