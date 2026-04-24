@@ -19,12 +19,9 @@ TOOLS = ARCH_GUARD_TOOLS
 def setup(app) -> None:
     from tools.executor import register_handler
 
-    from .api import mount_all
-    from . import news_wiki
-    from . import pacman_audit
+    from . import news_wiki, pacman_audit, rollback, tracker
     from . import snapshots as snap_mod
-    from . import tracker
-    from . import rollback
+    from .api import mount_all
 
     def _arch_pending_updates_report_handler(include_reverse_deps: bool = False) -> str:
         data = pacman_audit.get_pending_updates(

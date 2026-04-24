@@ -3,18 +3,16 @@
 from __future__ import annotations
 
 import logging
-import time
 import sqlite3
+import time
 
 from fastapi import APIRouter, Request
+from persistence import get_sqlite_path
 from pydantic import BaseModel
 
-from persistence import get_sqlite_path
-
-from . import rollback
-from . import snapshots as snap
+from . import rollback, tracker
 from . import settings as ag_settings
-from . import tracker
+from . import snapshots as snap
 from .news_wiki import refresh_news_digest_to_rag_async
 from .pacman_audit import get_pending_updates
 from .schema import init_arch_guard_tables
