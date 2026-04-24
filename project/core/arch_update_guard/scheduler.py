@@ -53,5 +53,5 @@ async def scheduler_loop(stop_event: asyncio.Event) -> None:
             logger.warning("arch_guard scheduler tick failed: %s", exc)
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=60.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass

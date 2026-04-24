@@ -13,8 +13,8 @@ from typing import Any
 
 from persistence import get_sqlite_path
 
-from .schema import init_arch_guard_tables
 from . import snapshots as snap
+from .schema import init_arch_guard_tables
 
 
 def _connect() -> sqlite3.Connection:

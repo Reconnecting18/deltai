@@ -11,10 +11,10 @@ from typing import Any
 
 from persistence import get_sqlite_path
 
+from . import snapshots as snap
 from .collector import parse_pacman_q_list
 from .pacman_audit import get_pending_updates
 from .schema import init_arch_guard_tables
-from . import snapshots as snap
 
 
 def _connect() -> sqlite3.Connection:

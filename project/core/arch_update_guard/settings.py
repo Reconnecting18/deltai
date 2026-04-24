@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import os
 import sqlite3
-import time
 from typing import Any
 
 _DEFAULT_INTERVAL = 3600.0

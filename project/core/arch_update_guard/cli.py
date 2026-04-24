@@ -39,13 +39,14 @@ def main() -> int:
     init_db()
 
     import sqlite3
+
     from persistence import get_sqlite_path
 
-    from core.arch_update_guard.schema import init_arch_guard_tables
-    from core.arch_update_guard import settings as ag_settings
-    from core.arch_update_guard import tracker
-    from core.arch_update_guard import snapshots as snap
     from core.arch_update_guard import rollback as rb
+    from core.arch_update_guard import settings as ag_settings
+    from core.arch_update_guard import snapshots as snap
+    from core.arch_update_guard import tracker
+    from core.arch_update_guard.schema import init_arch_guard_tables
 
     path = get_sqlite_path()
 
