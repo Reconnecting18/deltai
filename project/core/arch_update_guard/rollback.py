@@ -14,6 +14,7 @@ from typing import Any
 from persistence import get_sqlite_path
 
 from . import snapshots as snap
+from .guards import canonical_etc_path
 from .schema import init_arch_guard_tables
 
 
@@ -48,10 +49,13 @@ def plan_rollback(snapshot_id: str) -> dict[str, Any]:
         for path, info in cfg.items():
             if not isinstance(info, dict) or "content" not in info:
                 continue
+            canon = canonical_etc_path(str(path))
+            if canon is None:
+                continue
             steps.append(
                 {
                     "action": "restore_etc_file",
-                    "path": path,
+                    "path": canon,
                     "bytes": len((info.get("content") or "").encode("utf-8")),
                     "requires_root": True,
                 }
@@ -123,9 +127,11 @@ def execute_rollback(
             content = info.get("content")
             if content is None:
                 continue
-            p = path
-            if not p.startswith("/etc/"):
-                job_steps.append({"path": p, "skipped": True, "reason": "not under /etc"})
+            p = canonical_etc_path(str(path))
+            if p is None:
+                job_steps.append(
+                    {"path": path, "skipped": True, "reason": "not under /etc"}
+                )
                 continue
             try:
                 parent = os.path.dirname(p)
@@ -146,16 +152,17 @@ def execute_rollback(
             for path, info in cfg.items():
                 if not isinstance(info, dict) or "content" not in info:
                     continue
-                if not path.startswith("/etc/"):
+                canon = canonical_etc_path(str(path))
+                if canon is None:
                     continue
-                rel = path.lstrip("/").replace(os.sep, "_")
+                rel = canon.lstrip("/").replace(os.sep, "_")
                 out = os.path.join(staging, rel)
                 try:
                     with open(out, "w", encoding="utf-8", errors="replace") as f:
                         f.write(info.get("content") or "")
                     job_steps.append(
                         {
-                            "path": path,
+                            "path": canon,
                             "written_to": out,
                             "note": "Copy to target as root, or re-run with sudo and apply_etc.",
                         }

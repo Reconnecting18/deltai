@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 
+from .guards import canonical_etc_path, validated_http_service_url
 from .pacman_audit import capture_pacman_q, get_pending_updates
 
 # Optional key configs under /etc (no traversal)
@@ -26,10 +27,7 @@ _MAX_FILE_BYTES = 512 * 1024
 
 
 def _safe_etc_path(path: str) -> str | None:
-    p = os.path.realpath(os.path.expanduser(path.strip()))
-    if not p.startswith("/etc/") or ".." in path:
-        return None
-    return p
+    return canonical_etc_path(path)
 
 
 def _read_bounded(path: str) -> tuple[str | None, str | None]:
@@ -88,7 +86,10 @@ def parse_pacman_q_list(stdout: str) -> dict[str, str]:
 
 
 def _ollama_tags() -> dict[str, Any]:
-    base = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
+    raw = os.getenv("OLLAMA_URL", "http://localhost:11434")
+    base = validated_http_service_url(
+        raw, mode="ollama", default="http://localhost:11434"
+    ).rstrip("/")
     try:
         with httpx.Client(timeout=15.0) as c:
             r = c.get(f"{base}/api/tags")
