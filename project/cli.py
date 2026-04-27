@@ -438,6 +438,10 @@ async def cmd_help(client, args):
 
     console.print()
     console.print(table)
+    console.print(
+        "  [dim]Host shell (outside this REPL):[/] [cmd]deltai reference[/]  "
+        "[dim]·[/] [cmd]arch-update-guard --help[/]  [dim]·[/] [cmd]deltai --help[/]"
+    )
     console.print()
 
 

@@ -180,6 +180,7 @@ See `project/extensions/README.md` for the full authoring guide and `project/ext
 | `project/watcher.py` | Watchdog file watcher for `data/knowledge/` |
 | `project/anthropic_client.py` | Cloud inference (dormant until ANTHROPIC_API_KEY set) |
 | `project/static/index.html` | Dashboard UI (single file — HTML + CSS + JS) |
+| `src/delta/interfaces/cli_reference.py` | Plain-text terminal reference for `deltai reference [--topic …]` (systemd, `curl` Arch guard API, REPL slash commands, model tool names) |
 | `project/.env.example` | Template for `project/.env` |
 | `project/.env` | Runtime configuration (not committed) |
 | `project/tests/verify_full.py` | 46-test core verification suite |

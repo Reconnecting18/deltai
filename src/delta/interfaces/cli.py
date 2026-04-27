@@ -17,6 +17,7 @@ import httpx
 from delta import __version__
 from delta.config import Settings, load_settings
 from delta.core import set_plugin_enabled, upsert_plugin_enabled
+from delta.interfaces.cli_reference import TOPIC_CHOICES, render_reference
 
 _EXIT_OK = 0
 _EXIT_ERR = 1
@@ -37,6 +38,8 @@ Start the daemon (systemd user unit):
   systemctl --user enable --now delta-daemon
 
 Legacy full-stack REPL (TCP :8000, /chat) remains: python project/cli.py
+
+Command lists: deltai reference [--topic TOPIC]
 """
 
 
@@ -217,6 +220,11 @@ def cmd_plugin_unload(settings: Settings, name: str) -> int:
     return _EXIT_OK
 
 
+def cmd_reference(topic: str) -> int:
+    print(render_reference(topic), end="")
+    return _EXIT_OK
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="deltai",
@@ -229,6 +237,19 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("version", help="Print package version.")
 
     sub.add_parser("paths", help="Print resolved XDG and socket paths.")
+
+    ref = sub.add_parser(
+        "reference",
+        help="Print terminal command reference (systemd, curl, arch-update-guard, REPL).",
+    )
+    ref.add_argument(
+        "--topic",
+        dest="reference_topic",
+        choices=list(TOPIC_CHOICES),
+        default="all",
+        metavar="TOPIC",
+        help="Section: %(choices)s (default: all).",
+    )
 
     hp = sub.add_parser("health", help="GET /health on the daemon HTTP socket.")
     hp.add_argument(
@@ -327,6 +348,8 @@ def run(argv: list[str] | None = None) -> int:
         return cmd_version()
     if args.command == "paths":
         return cmd_paths(settings)
+    if args.command == "reference":
+        return cmd_reference(args.reference_topic)
     if args.command == "health":
         path = args.daemon_socket or settings.daemon_socket_path
         return cmd_health(path)
