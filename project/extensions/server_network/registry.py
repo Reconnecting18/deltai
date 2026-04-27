@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import path_guard
+import shell_validation
 
 logger = logging.getLogger("deltai.extensions.server_network")
 
@@ -295,8 +296,10 @@ def run_remote_command(server_id: str, command: str, timeout_sec: int = 120) -> 
     cmd_line = (command or "").strip()
     if not cmd_line:
         raise ValueError("command must be non-empty")
-    if len(cmd_line) > 16000:
-        raise ValueError("command too long")
+    try:
+        cmd_line = shell_validation.validated_bash_c_command(cmd_line, max_len=16000)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(str(exc)) from exc
     cmd = _ssh_base(rec) + [cmd_line]
     try:
         proc = subprocess.run(
@@ -320,11 +323,12 @@ def run_remote_script(server_id: str, script: str, timeout_sec: int = 300) -> di
     rec = get_server(server_id)
     if not rec:
         raise ValueError("server not found")
-    body = script or ""
+    try:
+        body = shell_validation.validated_remote_stdin_script(script or "", max_len=64000)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(str(exc)) from exc
     if not body.strip():
         raise ValueError("script must be non-empty")
-    if len(body) > 64000:
-        raise ValueError("script too long")
     cmd = _ssh_base(rec) + ["bash", "-s"]
     try:
         proc = subprocess.run(
