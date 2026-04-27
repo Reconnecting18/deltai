@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import socket
 import sys
 from typing import Any
@@ -15,12 +16,15 @@ import httpx
 
 from delta import __version__
 from delta.config import Settings, load_settings
+from delta.core import set_plugin_enabled, upsert_plugin_enabled
 
 _EXIT_OK = 0
 _EXIT_ERR = 1
 _EXIT_USAGE = 2
 
 _HTTP_BASE = "http://127.0.0.1"
+
+logger = logging.getLogger("delta.cli")
 
 
 def _epilog() -> str:
@@ -169,6 +173,50 @@ def cmd_ipc(
     return _EXIT_OK
 
 
+def cmd_plugin_install(settings: Settings, name: str, module_stem: str) -> int:
+    """Enable a plugin row in extensions.toml if the module file exists."""
+    plugin_dir = settings.data_dir / "plugins"
+    path = plugin_dir / f"{module_stem}.py"
+    if not path.is_file():
+        print(
+            f"plugin install: missing {path} — create the module first "
+            f"(or pass --module STEM if the file uses another name).",
+            file=sys.stderr,
+        )
+        return _EXIT_USAGE
+    config_path = settings.config_dir / "extensions.toml"
+    upsert_plugin_enabled(
+        config_path,
+        name=name,
+        module_stem=module_stem,
+        enabled=True,
+        auto_start=True,
+    )
+    logger.info("Plugin %r enabled in %s", name, config_path)
+    print(
+        f"Plugin {name!r} enabled in {config_path}. "
+        "Restart delta-daemon (systemctl --user restart delta-daemon) so on_init runs.",
+    )
+    return _EXIT_OK
+
+
+def cmd_plugin_unload(settings: Settings, name: str) -> int:
+    """Set enabled=false for a plugin; on_shutdown runs when the daemon stops."""
+    config_path = settings.config_dir / "extensions.toml"
+    if not set_plugin_enabled(config_path, name, enabled=False):
+        print(
+            f"plugin unload: no plugin named {name!r} in {config_path}.",
+            file=sys.stderr,
+        )
+        return _EXIT_ERR
+    logger.info("Plugin %r disabled in %s", name, config_path)
+    print(
+        f"Plugin {name!r} disabled in {config_path}. "
+        "on_shutdown runs when delta-daemon stops; restart to unload it from memory.",
+    )
+    return _EXIT_OK
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="deltai",
@@ -241,6 +289,31 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Query text (words). If omitted, read stdin (non-TTY).",
     )
 
+    plug = sub.add_parser(
+        "plugin",
+        help="Manage optional daemon plugins (extensions.toml + ~/.local/share/deltai/plugins/).",
+    )
+    plug_sub = plug.add_subparsers(dest="plugin_cmd", required=True)
+
+    pin = plug_sub.add_parser(
+        "install",
+        help="Enable a plugin (requires plugins/<module>.py on disk).",
+    )
+    pin.add_argument("name", help="Registry name for this plugin.")
+    pin.add_argument(
+        "--module",
+        dest="module_stem",
+        metavar="STEM",
+        default=None,
+        help="File stem under plugins/ if different from name (default: same as name).",
+    )
+
+    pun = plug_sub.add_parser(
+        "unload",
+        help="Disable a plugin in config (daemon runs on_shutdown on stop).",
+    )
+    pun.add_argument("name", help="Registry name to disable.")
+
     return p
 
 
@@ -273,6 +346,12 @@ def run(argv: list[str] | None = None) -> int:
             args.session_id,
             args.json,
         )
+    if args.command == "plugin":
+        if args.plugin_cmd == "install":
+            stem = args.module_stem if args.module_stem is not None else args.name
+            return cmd_plugin_install(settings, args.name, stem)
+        if args.plugin_cmd == "unload":
+            return cmd_plugin_unload(settings, args.name)
     raise RuntimeError(f"unhandled command: {args.command!r}")
 
 

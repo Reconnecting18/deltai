@@ -34,6 +34,24 @@ def test_subcommand_help() -> None:
     assert exc.value.code == 0
 
 
+def test_plugin_subcommand_help() -> None:
+    with pytest.raises(SystemExit) as exc:
+        cli.run(["plugin", "--help"])
+    assert exc.value.code == 0
+
+
+def test_plugin_install_help() -> None:
+    with pytest.raises(SystemExit) as exc:
+        cli.run(["plugin", "install", "--help"])
+    assert exc.value.code == 0
+
+
+def test_plugin_unload_help() -> None:
+    with pytest.raises(SystemExit) as exc:
+        cli.run(["plugin", "unload", "--help"])
+    assert exc.value.code == 0
+
+
 def test_execute_requires_query_when_tty(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     assert cli.run(["execute"]) == 2
