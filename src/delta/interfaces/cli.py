@@ -1,5 +1,285 @@
 """CLI interface entrypoint.
 
-This module will expose a user-facing command-line experience that sends
-requests to the DELTA daemon over Unix socket or local HTTP socket.
+User-facing commands that talk to delta-daemon (HTTP over UDS) or raw IPC.
 """
+
+from __future__ import annotations
+
+import argparse
+import json
+import socket
+import sys
+from typing import Any
+
+import httpx
+
+from delta import __version__
+from delta.config import Settings, load_settings
+
+_EXIT_OK = 0
+_EXIT_ERR = 1
+_EXIT_USAGE = 2
+
+_HTTP_BASE = "http://127.0.0.1"
+
+
+def _epilog() -> str:
+    return """Environment:
+  DELTA_DAEMON_SOCKET   Unix socket for HTTP API (default under $XDG_RUNTIME_DIR/deltai/).
+  DELTA_IPC_SOCKET      Line-delimited JSON IPC socket (orchestrator).
+  DELTA_DATA_DIR, DELTA_CONFIG_DIR, DELTA_CACHE_DIR, DELTA_SQLITE_PATH
+
+Start the daemon (systemd user unit):
+  systemctl --user enable --now delta-daemon
+
+Legacy full-stack REPL (TCP :8000, /chat) remains: python project/cli.py
+"""
+
+
+def daemon_http_client(socket_path: str) -> httpx.Client:
+    """HTTP client that speaks to uvicorn bound to a Unix domain socket."""
+    transport = httpx.HTTPTransport(uds=socket_path)
+    return httpx.Client(transport=transport, base_url=_HTTP_BASE, timeout=120.0)
+
+
+def cmd_version() -> int:
+    print(__version__)
+    return _EXIT_OK
+
+
+def cmd_paths(settings: Settings) -> int:
+    print(f"data_dir={settings.data_dir}")
+    print(f"config_dir={settings.config_dir}")
+    print(f"cache_dir={settings.cache_dir}")
+    print(f"sqlite_path={settings.sqlite_path}")
+    print(f"reports_dir={settings.reports_dir}")
+    print(f"daemon_socket_path={settings.daemon_socket_path}")
+    print(f"ipc_socket_path={settings.ipc_socket_path}")
+    print(f"ollama_url={settings.ollama_url}")
+    return _EXIT_OK
+
+
+def cmd_health(socket_path: str) -> int:
+    try:
+        with daemon_http_client(socket_path) as client:
+            r = client.get("/health")
+    except (OSError, httpx.HTTPError) as exc:
+        print(f"health: cannot reach daemon at {socket_path}: {exc}", file=sys.stderr)
+        return _EXIT_ERR
+    if r.status_code != 200:
+        print(f"health: HTTP {r.status_code}: {r.text}", file=sys.stderr)
+        return _EXIT_ERR
+    try:
+        data = r.json()
+    except json.JSONDecodeError:
+        print("health: invalid JSON response", file=sys.stderr)
+        return _EXIT_ERR
+    if data.get("status") != "ok":
+        print(f"health: unexpected payload: {data!r}", file=sys.stderr)
+        return _EXIT_ERR
+    print(json.dumps(data))
+    return _EXIT_OK
+
+
+def _resolve_query(query_parts: list[str]) -> str | None:
+    if query_parts:
+        return " ".join(query_parts).strip() or None
+    if sys.stdin.isatty():
+        return None
+    return sys.stdin.read().strip() or None
+
+
+def cmd_execute(
+    socket_path: str,
+    query_parts: list[str],
+    session_id: str | None,
+    as_json: bool,
+) -> int:
+    query = _resolve_query(query_parts)
+    if not query:
+        print("execute: provide QUERY words or pipe query on stdin", file=sys.stderr)
+        return _EXIT_USAGE
+    payload: dict[str, Any] = {"query": query, "source": "cli"}
+    if session_id:
+        payload["session_id"] = session_id
+    try:
+        with daemon_http_client(socket_path) as client:
+            r = client.post("/v1/execute", json=payload)
+    except (OSError, httpx.HTTPError) as exc:
+        print(f"execute: cannot reach daemon at {socket_path}: {exc}", file=sys.stderr)
+        return _EXIT_ERR
+    if r.status_code != 200:
+        print(f"execute: HTTP {r.status_code}: {r.text}", file=sys.stderr)
+        return _EXIT_ERR
+    try:
+        data = r.json()
+    except json.JSONDecodeError:
+        print("execute: invalid JSON response", file=sys.stderr)
+        return _EXIT_ERR
+    if as_json:
+        print(json.dumps(data))
+    else:
+        print(data.get("output", ""))
+    if data.get("status") == "error":
+        return _EXIT_ERR
+    return _EXIT_OK
+
+
+def cmd_ipc(
+    ipc_socket_path: str,
+    query_parts: list[str],
+    session_id: str | None,
+    as_json: bool,
+) -> int:
+    query = _resolve_query(query_parts)
+    if not query:
+        print("ipc: provide QUERY words or pipe query on stdin", file=sys.stderr)
+        return _EXIT_USAGE
+    payload: dict[str, Any] = {"query": query, "source": "cli-ipc"}
+    if session_id:
+        payload["session_id"] = session_id
+    line = (json.dumps(payload) + "\n").encode("utf-8")
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.connect(ipc_socket_path)
+            sock.sendall(line)
+            buf = bytearray()
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                buf.extend(chunk)
+                if b"\n" in buf:
+                    break
+    except OSError as exc:
+        print(f"ipc: cannot connect to {ipc_socket_path}: {exc}", file=sys.stderr)
+        return _EXIT_ERR
+    raw = bytes(buf).split(b"\n", 1)[0].decode("utf-8", errors="replace")
+    try:
+        data = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        print(f"ipc: invalid JSON response: {raw!r}", file=sys.stderr)
+        return _EXIT_ERR
+    if as_json:
+        print(json.dumps(data))
+    else:
+        print(data.get("output", ""))
+    if data.get("status") == "error":
+        return _EXIT_ERR
+    return _EXIT_OK
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="deltai",
+        description="deltai — terminal access to the local delta-daemon.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_epilog(),
+    )
+    sub = p.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("version", help="Print package version.")
+
+    sub.add_parser("paths", help="Print resolved XDG and socket paths.")
+
+    hp = sub.add_parser("health", help="GET /health on the daemon HTTP socket.")
+    hp.add_argument(
+        "--socket",
+        dest="daemon_socket",
+        metavar="PATH",
+        help="Override DELTA_DAEMON_SOCKET (HTTP over UDS).",
+    )
+
+    ep = sub.add_parser("execute", help="POST /v1/execute with a query.")
+    ep.add_argument(
+        "--socket",
+        dest="daemon_socket",
+        metavar="PATH",
+        help="Override DELTA_DAEMON_SOCKET (HTTP over UDS).",
+    )
+    ep.add_argument(
+        "--session",
+        dest="session_id",
+        metavar="ID",
+        help="Optional session id passed to the orchestrator.",
+    )
+    ep.add_argument(
+        "--json",
+        action="store_true",
+        help="Print full JSON response instead of output text only.",
+    )
+    ep.add_argument(
+        "query_parts",
+        nargs="*",
+        help="Query text (words). If omitted, read stdin (non-TTY).",
+    )
+
+    ip = sub.add_parser(
+        "ipc",
+        help="Send one line-delimited JSON request on DELTA_IPC_SOCKET.",
+    )
+    ip.add_argument(
+        "--ipc-socket",
+        dest="ipc_socket",
+        metavar="PATH",
+        help="Override DELTA_IPC_SOCKET.",
+    )
+    ip.add_argument(
+        "--session",
+        dest="session_id",
+        metavar="ID",
+        help="Optional session id passed to the orchestrator.",
+    )
+    ip.add_argument(
+        "--json",
+        action="store_true",
+        help="Print full JSON response instead of output text only.",
+    )
+    ip.add_argument(
+        "query_parts",
+        nargs="*",
+        help="Query text (words). If omitted, read stdin (non-TTY).",
+    )
+
+    return p
+
+
+def run(argv: list[str] | None = None) -> int:
+    argv = argv if argv is not None else sys.argv[1:]
+    settings = load_settings()
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+
+    if args.command == "version":
+        return cmd_version()
+    if args.command == "paths":
+        return cmd_paths(settings)
+    if args.command == "health":
+        path = args.daemon_socket or settings.daemon_socket_path
+        return cmd_health(path)
+    if args.command == "execute":
+        path = args.daemon_socket or settings.daemon_socket_path
+        return cmd_execute(
+            path,
+            list(args.query_parts),
+            args.session_id,
+            args.json,
+        )
+    if args.command == "ipc":
+        ipc_path = args.ipc_socket or settings.ipc_socket_path
+        return cmd_ipc(
+            ipc_path,
+            list(args.query_parts),
+            args.session_id,
+            args.json,
+        )
+    raise RuntimeError(f"unhandled command: {args.command!r}")
+
+
+def main() -> None:
+    """Console script entrypoint (setuptools)."""
+    sys.exit(run())
+
+
+if __name__ == "__main__":
+    main()
