@@ -156,13 +156,19 @@ systemctl --user daemon-reload
 systemctl --user enable --now delta-daemon
 ```
 
+**Two runtimes:** Option A is the **full project stack** in [`project/main.py`](project/main.py) — browser dashboard, `POST /chat`, ingest, and training on **TCP** `:8000`. Option B runs **`delta-daemon`** ([`src/delta/daemon/app.py`](src/delta/daemon/app.py)) on a **Unix socket** (`DELTA_DAEMON_SOCKET`), with `GET /health` and `POST /v1/execute`; it is not the same process or port as Option A. Use the `deltai` / `delta` CLI against Option B; use `curl` to `:8000` only for Option A.
+
 ### 5. Use it
 
 ```bash
-# Open the dashboard in a browser
+# Optional: installed package CLI (talks to delta-daemon on the Unix socket — use Option B first)
+deltai reference
+deltai health
+
+# Project dev server (Option A) — browser dashboard
 xdg-open http://localhost:8000
 
-# Or use the CLI (curl)
+# Or curl the project app on :8000
 curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "What processes are using the most memory?"}' \
@@ -271,7 +277,7 @@ Items tagged `"alert"` are forwarded to connected WebSocket clients as real-time
 
 ### Tool System
 
-deltai has a structured tool system with domain-aware filtering (19 tools pre-filtered to 5–8 per query):
+deltai has a structured tool system with domain-aware filtering (the catalog can grow with extensions; each query gets a small relevant subset, typically on the order of 5–8 tools):
 
 | Category | Tools |
 |----------|-------|

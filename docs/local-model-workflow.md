@@ -4,6 +4,8 @@ Operator guide for pushing **local** Qwen quality without changing model archite
 
 **Paths:** Replace `~/deltai/` with your repo’s `data/` layout if you use a clone. Env defaults live in [project/memory.py](../project/memory.py) (`KNOWLEDGE_PATH`, `CHROMADB_PATH`, `OLLAMA_URL`).
 
+**HTTP on `127.0.0.1:8000`:** Examples below assume the **project** FastAPI app (`uvicorn main:app` from `project/`). Ingest, `/chat`, and training are on that server; the packaged `delta-daemon` (Unix socket) is a different entrypoint—see [AGENTS.md](../AGENTS.md) and [CLAUDE.md](../CLAUDE.md).
+
 ---
 
 ## How the three pillars connect

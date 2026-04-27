@@ -2,9 +2,15 @@
 
 Short context for Cursor, Copilot, and other coding agents. **Full architecture, endpoints, stream protocol, and development workflow live in [CLAUDE.md](CLAUDE.md).** Update that file when behavior or structure changes.
 
+## Two runtimes (do not confuse them)
+
+- **Project dev app** — [`project/main.py`](project/main.py) via `uvicorn` on **TCP** `127.0.0.1:8000`: `POST /chat` (NDJSON), ingest, training, WebSocket, dashboard. This is what `curl` examples targeting `:8000` use.
+- **Packaged daemon** — `delta-daemon` ([`src/delta/daemon/app.py`](src/delta/daemon/app.py)) on a **Unix domain socket** (`DELTA_DAEMON_SOCKET`): `GET /health`, `POST /v1/execute` (orchestrator). The [`deltai`](src/delta/interfaces/cli.py) / `delta` CLI talks to this socket (`deltai health`, `deltai reference`, etc.), not to `:8000` by default.
+- **Git branches** — keep a long-lived `personal` branch in sync with `main` (merge or rebase); see [docs/git-workflow.md](docs/git-workflow.md).
+
 ## What this is
 
-deltai is a modular AI extension system for Linux. It runs as a **systemd user service** (no root required), exposes an HTTP/WebSocket API on `localhost:8000`, and provides: local LLM routing (Ollama), RAG memory (ChromaDB), a structured tool system, task automation, and a plugin/ingest API for external services.
+deltai is a modular AI extension system for Linux. It runs in **user space** (no root required). For day-to-day hacking you usually run the **project** server on `localhost:8000`; the **systemd** user unit runs **`delta-daemon`** (UDS) for the packaged CLI and orchestrator. Capabilities: local LLM routing (Ollama), RAG memory (ChromaDB), a structured tool system, task automation, and a plugin/ingest API for external services.
 
 It is the open, user-controlled Linux answer to Copilot+Windows — built around Linux philosophies: user-space first, user choice, modularity, transparency, no lock-in.
 

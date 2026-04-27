@@ -20,7 +20,7 @@ For short agent onboarding (Cursor entry point), see [AGENTS.md](AGENTS.md).
 ### What deltai IS
 
 - A local AI intelligence layer (reasoning, memory, tool execution, model routing)
-- A systemd user service with an HTTP/WebSocket API
+- A systemd user service running the packaged **`delta-daemon`** (HTTP over a Unix socket) plus, separately, a **development** FastAPI app in `project/` on TCP `:8000`
 - A plugin API (`POST /ingest`, tool registration) for external services to push context in
 - A task automation engine (natural language → shell/tool execution)
 - A system performance advisor (monitors resources, suggests and applies optimizations)
@@ -55,6 +55,7 @@ External services, scripts, and cron jobs push context into deltai via `POST /in
 | `scripts/` | Standalone scripts (backup, training, data collection) |
 | `docs/` | Operator guides |
 | `data/` | Runtime data — gitignored (chromadb, sqlite, knowledge, training) |
+| `src/delta/` | Installed package: `delta-daemon`, `deltai` CLI, orchestrator, IPC, config |
 
 **Important:** `data/` is gitignored. Never commit `.env`, credentials, or anything under `data/`.
 
@@ -64,7 +65,7 @@ External services, scripts, and cron jobs push context into deltai via `POST /in
 
 ### Backend (project/main.py)
 
-FastAPI application served on `localhost:8000`. All features are implemented here. Entry point for the systemd service.
+FastAPI application for **development and full-stack use**: bind with `uvicorn main:app --host 127.0.0.1 --port 8000` from the `project/` directory. This is **not** the process started by `systemd` (that is **`delta-daemon`** — see below).
 
 Key subsystems:
 - **Chat endpoint** (`POST /chat`) — NDJSON streaming, three paths: local, cloud, split
@@ -74,6 +75,15 @@ Key subsystems:
 - **Resource self-manager** — background loop (30s): VRAM lifecycle, thermal, process priority, circuit breaker, memory compaction
 - **WebSocket alerts** (`/ws/alerts`) — forwards tagged ingest items to connected clients
 - **Training endpoints** — QLoRA, adapters, distillation, dataset CRUD
+
+### Packaged daemon (`src/delta/daemon/app.py`)
+
+The **`delta-daemon`** entrypoint ([`src/delta/daemon/server.py`](src/delta/daemon/server.py)) runs FastAPI with **uvicorn on a Unix domain socket** (`DELTA_DAEMON_SOCKET`, default under `$XDG_RUNTIME_DIR/deltai/`). Used by the in-repo [systemd user unit](systemd/user/delta-daemon.service) and by the **`deltai` / `delta` CLI** (HTTP over UDS).
+
+- **`GET /health`** — liveness JSON (`status`, `service`)
+- **`POST /v1/execute`** — orchestrator: JSON body `{"query": "...", "source": "...", "session_id": null}` → JSON response (`status`, `output`, `agent`). **Not** NDJSON streaming.
+
+At startup the daemon loads optional plugins, starts Unix-socket IPC ([`delta.ipc`](src/delta/ipc/unix_socket.py)), and wires [Orchestrator](src/delta/orchestrator/core.py). Ingest, `POST /chat`, and training live on **`project/main.py`**, not on this app.
 
 ### Router (project/router.py)
 
@@ -103,7 +113,7 @@ Features: multi-query expansion, source-grouped reranking, recency bias, semanti
 
 ### Tools (project/tools/)
 
-- `definitions.py` — JSON schemas for all tools; `filter_tools()` pre-filters 19 tools to 5–8 per query
+- `definitions.py` — JSON schemas for tools; the catalog grows at runtime (extensions, optional domains). `filter_tools()` narrows the **available** set to roughly 5–8 relevant tools per query
 - `executor.py` — type coercion, safety checks, retry on error
 
 Tool categories:
@@ -181,12 +191,14 @@ See `project/extensions/README.md` for the full authoring guide and `project/ext
 | `project/anthropic_client.py` | Cloud inference (dormant until ANTHROPIC_API_KEY set) |
 | `project/static/index.html` | Dashboard UI (single file — HTML + CSS + JS) |
 | `src/delta/interfaces/cli_reference.py` | Plain-text terminal reference for `deltai reference [--topic …]` (systemd, `curl` Arch guard API, REPL slash commands, model tool names) |
+| `src/delta/daemon/app.py` | Packaged FastAPI app: `/health`, `/v1/execute` on Unix socket (`delta-daemon`) |
+| `src/delta/daemon/server.py` | uvicorn entry for `delta-daemon` |
 | `project/.env.example` | Template for `project/.env` |
 | `project/.env` | Runtime configuration (not committed) |
-| `project/tests/verify_full.py` | 46-test core verification suite |
-| `project/tests/verify_stress.py` | 30-test stress simulation suite |
-| `project/tests/verify_resource_mgmt.py` | 29-test resource management suite |
-| `project/tests/verify_distill.py` | 34-test distillation suite |
+| `project/tests/verify_full.py` | Core verification script (subsystem checks; run after substantive `project/` changes) |
+| `project/tests/verify_stress.py` | Stress / load simulation suite |
+| `project/tests/verify_resource_mgmt.py` | Resource management verification suite |
+| `project/tests/verify_distill.py` | Distillation / training pipeline verification suite |
 | `systemd/user/delta-daemon.service` | systemd user unit for `delta-daemon` |
 | `scripts/backup_s3.py` | S3 backup (full/incremental/restore) |
 | `project/extensions/training/daily_training.py` (also `scripts/daily_training.py`) | Nightly autonomous training orchestrator |
@@ -198,7 +210,9 @@ See `project/extensions/README.md` for the full authoring guide and `project/ext
 
 ## Stream Protocol (frontend ↔ backend)
 
-`POST /chat` returns NDJSON (one JSON object per line):
+**Packaged daemon (`delta-daemon` on UDS):** `POST /v1/execute` is a **single JSON** request/response via the orchestrator (not NDJSON).
+
+**Project app** (`uvicorn` [`project/main.py`](project/main.py) on TCP `127.0.0.1:8000`): `POST /chat` streams NDJSON (one JSON object per line). Example events:
 
 ```
 {"t":"route","backend":"local","model":"...","tier":1,"reason":"...","split":false,"query_category":"..."}
@@ -270,7 +284,7 @@ DPO_ENABLED=false
 
 ## Security posture (operators)
 
-deltai targets **localhost** (`uvicorn --host 127.0.0.1`). There is **no app-level auth** on `POST /chat` or most APIs: anything that can reach the bind address is treated as trusted.
+The **project** app targets **loopback TCP** (`uvicorn --host 127.0.0.1`); **`delta-daemon`** listens on a **Unix domain socket** for the same user. There is **no app-level auth** on `POST /chat` (project) or on daemon routes reachable via that socket: anything that can reach the bind address (or the socket) is treated as trusted.
 
 - **Binding:** Do not expose the raw FastAPI app to `0.0.0.0` or a LAN address without a reverse proxy, firewall, and/or auth—**unauthenticated access equals full use of chat, tools, training, and RAG** for the Unix user running the process.
 - **`run_shell`:** The tool runs `bash -c` as that user. The keyword blocklist in `project/tools/executor.py` is **best effort only**, not a sandbox. Assume **arbitrary code execution** for that user if an attacker can drive tool calls.
