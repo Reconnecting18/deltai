@@ -1,8 +1,5 @@
 """
-arch_update_guard news/wiki ingest helpers.
-
-Fetches Arch Linux RSS + ArchWiki context and pushes a digest into deltai via
-POST /ingest so RAG can include update-risk context in extension decisions.
+Arch Linux RSS + ArchWiki context; POST digest to /ingest for RAG.
 """
 
 from __future__ import annotations
@@ -16,13 +13,14 @@ from typing import Any
 import httpx
 import safe_errors
 
-logger = logging.getLogger("deltai.extensions.arch_update_guard.news")
+from .guards import validated_http_service_url
+
+logger = logging.getLogger("deltai.arch_update_guard.news")
 
 ARCH_NEWS_RSS = "https://archlinux.org/feeds/news/"
 WIKI_API = "https://wiki.archlinux.org/api.php"
 DEFAULT_BASE = "http://127.0.0.1:8000"
 
-# Simple in-process rate limit for RSS/wiki fetches (seconds)
 _MIN_REFRESH_INTERVAL = 45.0
 _last_refresh_ts: float = 0.0
 _refresh_lock = threading.Lock()
@@ -31,11 +29,13 @@ _refresh_lock = threading.Lock()
 def _base_url() -> str:
     import os
 
-    return os.environ.get("DELTAI_BASE_URL", DEFAULT_BASE).rstrip("/")
+    raw = os.environ.get("DELTAI_BASE_URL", DEFAULT_BASE)
+    return validated_http_service_url(
+        raw, mode="ingest", default=DEFAULT_BASE
+    ).rstrip("/")
 
 
 def _ingest_sync(source: str, context: str, *, ttl: int, tags: list[str]) -> dict[str, Any]:
-    """POST one ingest item using synchronous httpx (tool handlers and threads)."""
     url = f"{_base_url()}/ingest"
     try:
         with httpx.Client(timeout=120.0) as client:
@@ -84,7 +84,6 @@ async def _ingest_async(source: str, context: str, *, ttl: int, tags: list[str])
 
 
 def fetch_arch_news_rss(timeout: float = 30.0) -> tuple[list[dict[str, str]], str | None]:
-    """Download and parse the official Arch news RSS feed."""
     try:
         with httpx.Client(timeout=timeout, follow_redirects=True) as client:
             r = client.get(ARCH_NEWS_RSS)
@@ -101,7 +100,6 @@ def fetch_arch_news_rss(timeout: float = 30.0) -> tuple[list[dict[str, str]], st
         safe_errors.log_exception(logger, "RSS parse error", exc)
         return [], "RSS parse error"
 
-    # RSS 2.0: channel/item
     channel = root.find("channel")
     if channel is not None:
         for el in channel.findall("item"):
@@ -117,7 +115,6 @@ def fetch_arch_news_rss(timeout: float = 30.0) -> tuple[list[dict[str, str]], st
 
 
 def fetch_wiki_snippet(query: str, timeout: float = 25.0) -> tuple[str | None, str | None]:
-    """Return plain-text extract for the best wiki search hit, or (None, error)."""
     q = query.strip()
     if not q:
         return None, "empty wiki_query"
@@ -181,7 +178,6 @@ def build_news_digest(items: list[dict[str, str]], max_items: int = 12) -> str:
             lines.append(f"Link: {it['link']}")
         desc = it.get("description") or ""
         if desc:
-            # strip simple HTML tags if present
             plain = desc.replace("<p>", "\n").replace("</p>", "\n")
             plain = plain.replace("<li>", "- ").replace("</li>", "\n")
             lines.append(plain.strip())
@@ -195,10 +191,6 @@ def refresh_news_digest_to_rag(
     force: bool = False,
     news_ttl_sec: int = 86400 * 14,
 ) -> dict[str, Any]:
-    """
-    Fetch RSS (+ optional wiki), POST combined digest to /ingest.
-    Respects a short in-process rate limit unless force=True.
-    """
     global _last_refresh_ts
     now = time.monotonic()
     with _refresh_lock:
@@ -247,7 +239,6 @@ async def refresh_news_digest_to_rag_async(
     force: bool = False,
     news_ttl_sec: int = 86400 * 14,
 ) -> dict[str, Any]:
-    """Async variant for FastAPI routes (same logic as refresh_news_digest_to_rag)."""
     global _last_refresh_ts
     now = time.monotonic()
     with _refresh_lock:
@@ -260,7 +251,6 @@ async def refresh_news_digest_to_rag_async(
             }
         _last_refresh_ts = now
 
-    # Run blocking fetch in thread to not block event loop
     import asyncio
 
     items, err = await asyncio.to_thread(fetch_arch_news_rss)

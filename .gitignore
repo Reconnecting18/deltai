@@ -72,8 +72,8 @@ tools/llama.cpp/
 # To track an extension: git add -f project/extensions/my_feature/
 project/extensions/*/
 !project/extensions/example_extension/
-!project/extensions/arch_update_guard/
 !project/extensions/training/
+!project/extensions/server_network/
 !project/extensions/__init__.py
 !project/extensions/README.md
 

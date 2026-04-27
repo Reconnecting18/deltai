@@ -55,7 +55,7 @@ def _run_allowlisted(argv: list[str], timeout: float = 120.0) -> tuple[int, str,
         return proc.returncode, proc.stdout or "", proc.stderr or ""
     except subprocess.TimeoutExpired:
         return 124, "", f"{exe}: timed out after {timeout}s"
-    except OSError as _:
+    except OSError:
         return 1, "", "os error"
 
 
@@ -63,7 +63,6 @@ def _parse_checkupdates_line(line: str) -> dict[str, str] | None:
     line = line.strip()
     if not line or line.startswith("#"):
         return None
-    # "pkg  1.0-1 -> 1.1-1" (one or more spaces)
     m = re.match(r"^(\S+)\s+(\S+)\s+->\s+(\S+)$", line)
     if not m:
         return None
@@ -81,7 +80,6 @@ def _parse_pending_from_output(stdout: str, source: str) -> list[dict[str, str]]
 
 
 def _reverse_depends(pkg: str) -> tuple[list[str], str | None]:
-    """Return (local packages depending on pkg) via pactree -ru, or ([], error)."""
     code, out, err = _run_allowlisted(["pactree", "-ru", pkg])
     if code != 0:
         return [], (err or out or f"pactree exited {code}").strip() or None
@@ -90,7 +88,6 @@ def _reverse_depends(pkg: str) -> tuple[list[str], str | None]:
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        # pactree prints package names, possibly with provides
         tok = line.split()[0] if line.split() else ""
         if tok and _validate_pkg(tok) and tok not in names:
             names.append(tok)
@@ -102,11 +99,6 @@ def get_pending_updates(
     include_reverse_deps: bool = False,
     reverse_deps_limit: int = 5,
 ) -> dict[str, Any]:
-    """
-    List pending sync updates using checkupdates (preferred) or pacman -Qu.
-
-    include_reverse_deps: run pactree -ru for the first N pending packages (can be slow).
-    """
     errors: list[str] = []
     pending: list[dict[str, Any]] = []
     method = "none"
@@ -114,7 +106,6 @@ def get_pending_updates(
     if shutil.which("checkupdates"):
         method = "checkupdates"
         code, out, err = _run_allowlisted(["checkupdates"])
-        # checkupdates: 0 = upgrades available, 1 = already up to date (both success)
         if code not in (0, 1):
             errors.append(f"checkupdates failed (exit {code}): {(err or out).strip()}")
         else:
@@ -130,8 +121,6 @@ def get_pending_updates(
             for rec in _parse_pending_from_output(out, "pacman_-Qu"):
                 pending.append(rec)
         elif code == 1 and not combined:
-            # pacman -Qu: exit 1 with no stdout/stderr means nothing to upgrade
-            # (see Arch forums e.g. bbs.archlinux.org/viewtopic.php?id=301276).
             pass
         elif code != 0:
             msg = combined or f"exit {code}"
@@ -163,3 +152,8 @@ def get_pending_updates(
         "pending": pending,
         "errors": errors,
     }
+
+
+def capture_pacman_q() -> tuple[int, str, str]:
+    """Return (code, stdout, stderr) for full installed package list."""
+    return _run_allowlisted(["pacman", "-Q"], timeout=300.0)
