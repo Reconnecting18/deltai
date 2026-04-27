@@ -190,6 +190,10 @@ See `project/extensions/README.md` for the full authoring guide and `project/ext
 | `project/watcher.py` | Watchdog file watcher for `data/knowledge/` |
 | `project/prompts.py` | Shared system prompts (protocols) for cloud and local Ollama paths |
 | `project/anthropic_client.py` | Cloud inference (dormant until ANTHROPIC_API_KEY set); optional split-workload planner outline |
+| `project/mcp_bridge.py` | MCP (Model Context Protocol): tool catalog + `execute_tool` bridge (optional `mcp` extra) |
+| `project/mcp_http.py` | Optional Streamable HTTP MCP mount on FastAPI (`DELTAI_MCP_HTTP_*`) |
+| `project/deltai_mcp_stdio.py` | MCP stdio server entry (IDE clients); or use `deltai-mcp` launcher |
+| `src/delta/mcp/stdio_launcher.py` | Installed `deltai-mcp` script — runs `project/deltai_mcp_stdio.py` from repo root |
 | `project/static/index.html` | Dashboard UI (single file — HTML + CSS + JS) |
 | `src/delta/interfaces/cli_reference.py` | Plain-text terminal reference for `deltai reference [--topic …]` (systemd, `curl` Arch guard API, REPL slash commands, model tool names) |
 | `src/delta/daemon/app.py` | Packaged FastAPI app: `/health`, `/v1/execute` on Unix socket (`delta-daemon`) |
@@ -273,6 +277,11 @@ SMART_CAPTURE_ENABLED=true
 # DELTAI_SPLIT_PLANNER_ENABLED=false
 # DELTAI_SPLIT_PLANNER_MODEL=
 
+# MCP (install: pip install -e ".[mcp]" — stdio: deltai-mcp or python project/deltai_mcp_stdio.py)
+# DELTAI_MCP_HTTP_ENABLE=false
+# DELTAI_MCP_HTTP_PATH=/mcp
+# DELTAI_MCP_HTTP_KEY=
+
 # Resource management
 VRAM_TIER_AB_MIN_MB=5000
 WARM_TO_COLD_AGE_SEC=86400
@@ -301,6 +310,7 @@ The **project** app targets **loopback TCP** (`uvicorn --host 127.0.0.1`); **`de
 - **Binding:** Do not expose the raw FastAPI app to `0.0.0.0` or a LAN address without a reverse proxy, firewall, and/or auth—**unauthenticated access equals full use of chat, tools, training, and RAG** for the Unix user running the process.
 - **`run_shell`:** The tool runs `bash -c` as that user. The keyword blocklist in `project/tools/executor.py` is **best effort only**, not a sandbox. Assume **arbitrary code execution** for that user if an attacker can drive tool calls.
 - **`POST /ingest` (and related):** Optional shared secret: set **`DELTAI_INGEST_API_KEY`** in `project/.env`. When set, clients must send **`X-Deltai-Ingest-Key: <key>`** or **`Authorization: Bearer <key>`** for `POST /ingest`, `POST /ingest/batch`, `POST /ingest/cleanup`, `POST /memory/ingest`, and **`GET /ingest/pipeline/status`**. If unset, behavior matches prior releases (ingest open to the same network visibility as the daemon).
+- **MCP HTTP** (`DELTAI_MCP_HTTP_ENABLE`): Off by default. When enabled, the Streamable HTTP MCP app is mounted under **`DELTAI_MCP_HTTP_PATH`** (e.g. `/mcp`) with the same tool surface as chat. Optional **`DELTAI_MCP_HTTP_KEY`** enforces Bearer / `X-Deltai-Mcp-Key`. **Stdio MCP** (`deltai-mcp` / `project/deltai_mcp_stdio.py`) runs as the current OS user; no HTTP exposure.
 - **CORS:** Default **`allow_origins=["*"]`**. For browser access from a limited set of pages (e.g. after switching away from loopback), set **`DELTAI_CORS_ORIGINS`** to a comma-separated allowlist. Empty/unset keeps `*`.
 
 GitHub: **CodeQL** (SAST) and **Dependabot** complement each other; neither replaces firewall and deployment hygiene.

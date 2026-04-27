@@ -1565,6 +1565,13 @@ if EXTENSIONS_AVAILABLE:
     except Exception as _ext_err:
         logger.warning(f"Extensions failed to initialise: {_ext_err}")
 
+# ── MCP Streamable HTTP (optional; requires pip install -e ".[mcp]") ─────
+try:
+    from mcp_http import maybe_mount_mcp_http
+
+    maybe_mount_mcp_http(app)
+except ImportError:
+    pass
 
 # ── TEXT-AS-TOOL FALLBACK PARSER ────────────────────────────────────────
 

@@ -411,6 +411,16 @@ deltai/
 | GET | `/training/status` | Progress, loss |
 | GET | `/training/weaknesses` | Weak domains from quality feedback |
 
+### MCP (Model Context Protocol)
+
+Use the same tool catalog as chat from MCP-compatible clients (e.g. Cursor, Claude Desktop).
+
+| Install | `pip install -e ".[mcp]"` from the repo root |
+| Stdio | `deltai-mcp` (set `DELTAI_PROJECT_ROOT` to the repo if needed) or `cd project && python deltai_mcp_stdio.py` |
+| HTTP | Set `DELTAI_MCP_HTTP_ENABLE=true` — MCP Streamable HTTP is mounted under `DELTAI_MCP_HTTP_PATH` (default `/mcp`). Optional `DELTAI_MCP_HTTP_KEY` + `Authorization: Bearer` or `X-Deltai-Mcp-Key`. |
+
+Treat MCP like `/chat`: only expose on `127.0.0.1` unless you add your own auth and network controls.
+
 ## Stream Protocol
 
 `POST /chat` returns NDJSON (one JSON object per line):

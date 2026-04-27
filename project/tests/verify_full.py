@@ -342,6 +342,21 @@ def run():
     has_split = "split_mode" in anthropic_client.stream_chat.__code__.co_varnames
     check("split_mode parameter", has_split)
 
+    # === 9. MCP bridge (optional extra) ===
+    print("\n--- 9. MCP bridge ---")
+    try:
+        import mcp_bridge
+        import mcp.types  # noqa: F401
+
+        mcp_bridge.ensure_mcp_tool_catalog()
+        mcp_tools = mcp_bridge.ollama_catalog_to_mcp_tools()
+        check("mcp ollama_catalog_to_mcp_tools", len(mcp_tools) > 0)
+        srv = mcp_bridge.build_mcp_server()
+        check("mcp_bridge server builds", srv is not None)
+    except ImportError:
+        check("mcp extra (skipped)", True)
+        print("      (install with: pip install -e '../.[mcp]' from repo root)")
+
     # === SUMMARY ===
     print("\n" + "=" * 60)
     total = passed + failed

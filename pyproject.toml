@@ -31,9 +31,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=9.0.3",
-  "ruff>=0.5.0",
-  "mypy>=1.10.0"
+    "pytest>=9.0.3",
+    "ruff>=0.5.0",
+    "mypy>=1.10.0"
+]
+mcp = [
+    "mcp>=1.2.0",
 ]
 
 [project.scripts]
@@ -41,6 +44,7 @@ delta-daemon = "delta.daemon.server:main"
 deltai = "delta.interfaces.cli:main"
 delta = "delta.interfaces.cli:main"
 arch-update-guard = "delta.arch_guard_cli:main"
+deltai-mcp = "delta.mcp.stdio_launcher:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
