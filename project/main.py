@@ -11,7 +11,8 @@ from contextlib import asynccontextmanager
 import httpx
 import psutil
 import safe_errors
-from anthropic_client import split_workload_planner_outline, stream_chat as anthropic_stream
+from anthropic_client import split_workload_planner_outline
+from anthropic_client import stream_chat as anthropic_stream
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,7 +40,11 @@ from persistence import (
     trim_history,
 )
 from persistence import clear_history as db_clear_history
-from prompts import build_local_system_prompt, build_react_system_prompt, protocol_antifabrication_reminder
+from prompts import (
+    build_local_system_prompt,
+    build_react_system_prompt,
+    protocol_antifabrication_reminder,
+)
 from pydantic import BaseModel
 from router import (
     _pick_local_model,

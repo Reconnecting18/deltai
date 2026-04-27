@@ -345,8 +345,8 @@ def run():
     # === 9. MCP bridge (optional extra) ===
     print("\n--- 9. MCP bridge ---")
     try:
-        import mcp_bridge
         import mcp.types  # noqa: F401
+        import mcp_bridge
 
         mcp_bridge.ensure_mcp_tool_catalog()
         mcp_tools = mcp_bridge.ollama_catalog_to_mcp_tools()

@@ -70,7 +70,10 @@ markers = [
   "slow: long-running or integration tests (excluded from default CI via -m \"not slow\")",
 ]
 
-# POSIX-only asyncio APIs are omitted from Windows stubs; CI runs on Linux.
+# POSIX-only socket/IPC APIs are omitted from Windows stubs; CI runs on Linux.
 [[tool.mypy.overrides]]
 module = "delta.ipc.unix_socket"
+disable_error_code = ["attr-defined"]
+[[tool.mypy.overrides]]
+module = "delta.interfaces.cli"
 disable_error_code = ["attr-defined"]

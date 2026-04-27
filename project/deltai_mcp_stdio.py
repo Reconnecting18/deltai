@@ -21,7 +21,7 @@ def main() -> None:
         from mcp_bridge import run_stdio_async
     except ImportError as e:
         print(
-            "MCP extra required: pip install -e '.[mcp]'  (%s)" % e,
+            f"MCP extra required: pip install -e '.[mcp]'  ({e!s})",
             file=sys.stderr,
         )
         raise SystemExit(1) from e

@@ -39,9 +39,8 @@ def ensure_mcp_tool_catalog() -> None:
 
     load_dotenv()
 
-    from fastapi import FastAPI
-
     from extensions import get_extension_tools, load_extensions
+    from fastapi import FastAPI
     from tools.definitions import TOOLS, _merge_extension_tools
 
     stub = FastAPI()
@@ -54,7 +53,6 @@ def ensure_mcp_tool_catalog() -> None:
 def ollama_catalog_to_mcp_tools():
     """Build mcp.types.Tool list from the global TOOLS list."""
     import mcp.types as mtypes
-
     from tools.definitions import TOOLS
 
     out: list[mtypes.Tool] = []
@@ -81,7 +79,6 @@ def build_mcp_server():
     """
     import mcp.types as mtypes
     from mcp.server.lowlevel import Server
-
     from tools.executor import execute_tool
 
     server = Server(
