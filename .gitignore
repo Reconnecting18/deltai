@@ -71,6 +71,9 @@ data/knowledge/
 # External tools (cloned repos)
 tools/llama.cpp/
 
+# GitHub wiki working copy (often cloned as sibling directory)
+deltai.wiki/
+
 # Extensions — personal extensions are git-ignored by default.
 # To track an extension: git add -f project/extensions/my_feature/
 project/extensions/*/
