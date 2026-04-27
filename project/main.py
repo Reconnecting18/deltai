@@ -131,17 +131,15 @@ try:
 except ImportError as e:
     logger.warning("Extensions system unavailable [%s]", type(e).__name__)
 
-# ── ARCH UPDATE GUARD (core) ───────────────────────────────────────────
+# ── ARCH UPDATE GUARD (optional extension) ────────────────────────────
+# See project/extensions/arch_update_guard/ — present on personal; gitignored on main.
+arch_guard_scheduler_loop = None
 try:
-    from core.arch_update_guard import setup as arch_guard_setup
-    from core.arch_update_guard.scheduler import scheduler_loop as arch_guard_scheduler_loop
-
-    ARCH_GUARD_AVAILABLE = True
-except ImportError as e:
-    arch_guard_setup = None  # type: ignore[assignment]
-    arch_guard_scheduler_loop = None  # type: ignore[assignment]
-    ARCH_GUARD_AVAILABLE = False
-    logger.warning("arch_update_guard unavailable [%s]", type(e).__name__)
+    from extensions.arch_update_guard.scheduler import (
+        scheduler_loop as arch_guard_scheduler_loop,
+    )
+except ImportError:
+    pass
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 DELTAI_MODEL = os.getenv("DELTAI_MODEL", "deltai")
@@ -1491,7 +1489,7 @@ async def lifespan(app: FastAPI):
     self_heal_task = asyncio.create_task(_ai_self_heal_loop())
     ingest_task = asyncio.create_task(_ingest_pipeline_worker())
 
-    if ARCH_GUARD_AVAILABLE and arch_guard_scheduler_loop is not None:
+    if arch_guard_scheduler_loop is not None:
         arch_guard_stop = asyncio.Event()
         arch_guard_task = asyncio.create_task(arch_guard_scheduler_loop(arch_guard_stop))
 
@@ -1554,13 +1552,6 @@ app.add_middleware(
 )
 
 app.mount("/static", StaticFiles(directory=os.path.join(_HERE, "static")), name="static")
-
-# ── ARCH UPDATE GUARD (core) ────────────────────────────────────────────
-if ARCH_GUARD_AVAILABLE and arch_guard_setup is not None:
-    try:
-        arch_guard_setup(app)
-    except Exception as _ag_err:
-        logger.warning("arch_update_guard setup failed: %s", _ag_err)
 
 # ── EXTENSIONS ──────────────────────────────────────────────────────────
 if EXTENSIONS_AVAILABLE:

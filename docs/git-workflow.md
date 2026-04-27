@@ -6,9 +6,9 @@ deltai keeps a **small upstream core** and pushes optional features into [`proje
 
 | Branch | Purpose |
 |--------|---------|
-| **`main`** | Shareable upstream: daemon core plus extensions that are deliberately tracked (see [`.gitignore`](../.gitignore) `!project/extensions/...` exceptions). |
+| **`main`** | Shareable **lightweight** upstream: core daemon, router, RAG, shared tools, and a small set of always-tracked extensions (`example_extension`, `training`, `server_network` — see [`.gitignore`](../.gitignore)). Optional personal-only trees (e.g. Arch update guard) stay **untracked** on `main` (gitignored) so the default clone is minimal. |
 | **`feature/*`** | Short-lived work you intend to merge into `main` via PR (e.g. `feature/workstation-cloud-arch`). |
-| **`personal`** | Long-lived private overlay: versioned with `git push origin personal`, not merged wholesale into `main`. |
+| **`personal`** | Long-lived overlay: pull shared core with `main`, then add optional extensions and Cursor/IDE “plugin” config you want on every machine. **Example:** `git add -f project/extensions/arch_update_guard/` so Arch update guard is installed in your fork. Remove or stop tracking a directory to “uninstall” that overlay. Not merged wholesale into `main`. |
 
 Do **not** merge `personal` → `main` in bulk. Promote changes with cherry-picks or a fresh branch from `main` and a focused PR.
 
@@ -24,7 +24,7 @@ Do **not** merge `personal` → `main` in bulk. Promote changes with cherry-pick
 |----------------|-------------------|
 | Core daemon, router, RAG, shared tools | **`main`** (via PR) |
 | Extension you want **everyone** to get | **`main`**: add `!project/extensions/your_pkg/` in [`.gitignore`](../.gitignore) and commit the tree |
-| Extension **only for you** (multi-machine backup) | **`personal`**: keep the directory gitignored on `main`; track it only on `personal` with `git add -f project/extensions/your_pkg/` |
+| Extension **only for you** (e.g. Arch update guard) | **`personal`**: `project/extensions/*/` is gitignored by default. Keep `main` free of that tree; on `personal`, `git add -f project/extensions/arch_update_guard/` (or your package) so it versions with your branch. |
 | Secrets, local experiments you never push | [`.git/info/exclude`](https://git-scm.com/docs/gitignore) or local ignore; never commit |
 
 See [project/extensions/README.md](../project/extensions/README.md) for extension authoring.

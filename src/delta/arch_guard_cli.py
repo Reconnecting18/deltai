@@ -6,13 +6,13 @@ import os
 import pathlib
 import sys
 
-_ARCH_GUARD_REL = ("core", "arch_update_guard", "__init__.py")
+_ARCH_GUARD_REL = ("extensions", "arch_update_guard", "__init__.py")
 _ERR_HINT = (
     "arch-update-guard needs the deltai repo ``project/`` package on disk.\n"
     "  • Set DELTAI_PROJECT_ROOT or DELTA_PROJECT_ROOT to the repo root "
     "(parent of project/), or\n"
     "  • Run from inside the clone (we search upward for "
-    "project/core/arch_update_guard), or\n"
+    "project/extensions/arch_update_guard), or\n"
     "  • Use an editable install from the clone so paths resolve next to src/.\n"
 )
 
@@ -57,7 +57,7 @@ def main() -> int:
     project_str = str(project.resolve())
     if project_str not in sys.path:
         sys.path.insert(0, project_str)
-    from core.arch_update_guard.cli import main as inner
+    from extensions.arch_update_guard.cli import main as inner
 
     return inner()
 

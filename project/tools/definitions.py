@@ -482,13 +482,8 @@ def _merge_tools_into_catalog(tool_list: list) -> None:
             TOOL_MAP[name] = tool
 
 
-# ── ARCH UPDATE GUARD (core) ───────────────────────────────────────────
-try:
-    from core.arch_update_guard.tools_defs import ARCH_GUARD_TOOLS
-
-    _merge_tools_into_catalog(ARCH_GUARD_TOOLS)
-except Exception as exc:
-    _log.debug("arch_update_guard tools not merged: %s", exc, exc_info=True)
+# ── ARCH UPDATE GUARD tools — merged at runtime when extension is present
+# (project/extensions/arch_update_guard/; see main.py load_extensions + _merge_extension_tools)
 
 
 # ── EXTENSION TOOLS ─────────────────────────────────────────────────────
@@ -520,7 +515,7 @@ _TELEMETRY_TOOL_NAMES = {
 # Universal tools always included
 _UNIVERSAL_TOOLS = {"search_knowledge", "calculate"}
 
-# Arch update guard (project/core/arch_update_guard/)
+# Arch update guard (optional extension; see project/extensions/arch_update_guard/)
 _ARCH_EXT_TOOL_NAMES = {
     "arch_pending_updates_report",
     "arch_refresh_news_digest",

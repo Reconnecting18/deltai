@@ -1,1 +1,1 @@
-"""deltai core modules (fork-specific integrations live under core/)."""
+"""deltai core package (optional fork-specific subpackages; most optional features use project/extensions/)."""

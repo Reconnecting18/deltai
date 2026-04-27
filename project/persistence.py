@@ -119,7 +119,7 @@ def init_db():
             )
         """)
         try:
-            from core.arch_update_guard.schema import init_arch_guard_tables
+            from extensions.arch_update_guard.schema import init_arch_guard_tables
 
             init_arch_guard_tables(conn)
         except Exception as ag_exc:

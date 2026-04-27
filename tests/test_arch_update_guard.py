@@ -1,4 +1,4 @@
-"""Tests for project/core/arch_update_guard (non-Arch CI: mocks and imports)."""
+"""Tests for project/extensions/arch_update_guard (non-Arch CI: mocks and imports)."""
 
 from __future__ import annotations
 
@@ -11,6 +11,11 @@ from unittest import mock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+pytest.importorskip(
+    "extensions.arch_update_guard",
+    reason="optional extension not on main; use personal or git add -f project/extensions/arch_update_guard/",
+)
 
 
 @pytest.fixture()
@@ -35,7 +40,7 @@ def isolated_db(monkeypatch):
 
 
 def test_health_route_via_setup():
-    from core.arch_update_guard import setup
+    from extensions.arch_update_guard import setup
 
     app = FastAPI()
     setup(app)
@@ -48,7 +53,7 @@ def test_health_route_via_setup():
 
 
 def test_parse_checkupdates_line():
-    from core.arch_update_guard.pacman_audit import _parse_checkupdates_line
+    from extensions.arch_update_guard.pacman_audit import _parse_checkupdates_line
 
     assert _parse_checkupdates_line("alsa-lib  1:1.2.14-1 -> 1:1.2.15-1") == {
         "package": "alsa-lib",
@@ -60,7 +65,7 @@ def test_parse_checkupdates_line():
 
 
 def test_run_allowlisted_rejects_unknown_argv():
-    from core.arch_update_guard.pacman_audit import _run_allowlisted
+    from extensions.arch_update_guard.pacman_audit import _run_allowlisted
 
     with pytest.raises(ValueError, match="not allowlisted"):
         _run_allowlisted(["pacman", "-Syu"])
@@ -68,9 +73,9 @@ def test_run_allowlisted_rejects_unknown_argv():
 
 @pytest.mark.skipif(sys.platform != "linux", reason="pacman paths optional on non-Linux")
 def test_get_pending_updates_when_no_pacman_tools():
-    from core.arch_update_guard.pacman_audit import get_pending_updates
+    from extensions.arch_update_guard.pacman_audit import get_pending_updates
 
-    with mock.patch("core.arch_update_guard.pacman_audit.shutil.which", return_value=None):
+    with mock.patch("extensions.arch_update_guard.pacman_audit.shutil.which", return_value=None):
         out = get_pending_updates()
     assert out["pending_count"] == 0
     assert out["method"] == "none"
@@ -78,7 +83,7 @@ def test_get_pending_updates_when_no_pacman_tools():
 
 
 def test_get_pending_updates_mock_checkupdates():
-    from core.arch_update_guard import pacman_audit
+    from extensions.arch_update_guard import pacman_audit
 
     fake_out = "foo  1.0-1 -> 1.1-1\n"
 
@@ -102,7 +107,7 @@ def test_get_pending_updates_mock_checkupdates():
 
 @pytest.mark.skipif(sys.platform != "linux", reason="pacman paths optional on non-Linux")
 def test_get_pending_updates_pacman_qu_exit_1_empty_is_no_upgrades():
-    from core.arch_update_guard import pacman_audit
+    from extensions.arch_update_guard import pacman_audit
 
     def fake_which(name):
         if name == "checkupdates":
@@ -127,7 +132,7 @@ def test_get_pending_updates_pacman_qu_exit_1_empty_is_no_upgrades():
 
 
 def test_refresh_news_skipped_when_rate_limited():
-    from core.arch_update_guard import news_wiki
+    from extensions.arch_update_guard import news_wiki
 
     with mock.patch.object(news_wiki, "_last_refresh_ts", news_wiki.time.monotonic()):
         r = news_wiki.refresh_news_digest_to_rag(force=False)
@@ -135,14 +140,14 @@ def test_refresh_news_skipped_when_rate_limited():
 
 
 def test_tool_handlers_json_roundtrip():
-    from core.arch_update_guard import setup
+    from extensions.arch_update_guard import setup
     from tools.executor import execute_tool
 
     app = FastAPI()
     setup(app)
 
     with mock.patch(
-        "core.arch_update_guard.pacman_audit.get_pending_updates",
+        "extensions.arch_update_guard.pacman_audit.get_pending_updates",
         return_value={"pending": [], "pending_count": 0, "method": "test", "errors": []},
     ):
         s = execute_tool("arch_pending_updates_report", {"include_reverse_deps": False})
@@ -150,7 +155,7 @@ def test_tool_handlers_json_roundtrip():
     assert data["method"] == "test"
 
     with mock.patch(
-        "core.arch_update_guard.news_wiki.refresh_news_digest_to_rag",
+        "extensions.arch_update_guard.news_wiki.refresh_news_digest_to_rag",
         return_value={"status": "ok", "items_fetched": 0, "ingest": {}},
     ):
         s2 = execute_tool(
@@ -160,8 +165,8 @@ def test_tool_handlers_json_roundtrip():
 
 
 def test_create_snapshot_and_diff(isolated_db, monkeypatch):
-    from core.arch_update_guard import snapshots as snap
-    from core.arch_update_guard import tracker
+    from extensions.arch_update_guard import snapshots as snap
+    from extensions.arch_update_guard import tracker
 
     def payload1(**kw):
         return {
@@ -185,12 +190,12 @@ def test_create_snapshot_and_diff(isolated_db, monkeypatch):
             "errors": {"pacman_Q": None},
         }
 
-    monkeypatch.setattr("core.arch_update_guard.snapshots.build_snapshot_payload", payload1)
+    monkeypatch.setattr("extensions.arch_update_guard.snapshots.build_snapshot_payload", payload1)
 
     s1 = snap.create_snapshot(kind="manual", label="t1", trigger="test", backup_sqlite=False)
     sid1 = s1["snapshot_id"]
 
-    monkeypatch.setattr("core.arch_update_guard.snapshots.build_snapshot_payload", payload2)
+    monkeypatch.setattr("extensions.arch_update_guard.snapshots.build_snapshot_payload", payload2)
     s2 = snap.create_snapshot(kind="manual", label="t2", trigger="test", backup_sqlite=False)
     sid2 = s2["snapshot_id"]
 
@@ -199,7 +204,7 @@ def test_create_snapshot_and_diff(isolated_db, monkeypatch):
 
 
 def test_rollback_plan_unknown_snapshot(isolated_db):
-    from core.arch_update_guard import rollback
+    from extensions.arch_update_guard import rollback
 
     r = rollback.plan_rollback("00000000-0000-0000-0000-000000000000")
     assert r.get("ok") is False

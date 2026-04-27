@@ -35,7 +35,7 @@ It is the open, user-controlled Linux answer to Copilot+Windows — built around
 | Runtime data (gitignored) | `data/` |
 | Scripts | `scripts/` |
 
-Domain-specific automation (e.g. distro maintenance assistants) belongs in `project/extensions/`, not in `project/main.py` or core tool definitions, unless it is a generic primitive reused everywhere.
+Domain-specific automation (e.g. distro maintenance assistants) belongs in `project/extensions/`, not in `project/main.py` or core tool definitions, unless it is a generic primitive reused everywhere. The **`main`** branch keeps the default tree small (optional extension dirs are often gitignored); the **`personal`** branch can `git add -f` extra extensions (e.g. Arch update guard) and optional Cursor rules — see [docs/git-workflow.md](docs/git-workflow.md).
 
 ## How to run (development)
 

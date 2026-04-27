@@ -9,7 +9,12 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.arch_update_guard.guards import (  # noqa: E402
+pytest.importorskip(
+    "extensions.arch_update_guard",
+    reason="optional extension; on main the tree is gitignored — use personal or git add -f",
+)
+
+from extensions.arch_update_guard.guards import (  # noqa: E402
     canonical_etc_path,
     validated_http_service_url,
 )

@@ -12,6 +12,6 @@ This package provides **`PluginManager`** ([`plugin_manager.py`](plugin_manager.
 ## What this is not
 
 - **Not** a replacement for [`project/extensions/`](../../../project/extensions/README.md) (those load inside the **full** FastAPI app in `project/main.py`).
-- **Not** where [Arch Update Guard](../../../project/core/arch_update_guard/) lives; that stack mounts routes and schedulers on the full backend and is configured with `ARCH_GUARD_*` env vars.
+- **Not** where [Arch Update Guard](../../../project/extensions/arch_update_guard/) lives (optional extension, often on `personal` only); that stack mounts routes and schedulers on the full backend and is configured with `ARCH_GUARD_*` env vars.
 
 Keeping these surfaces separate avoids merge conflicts and wrong assumptions about which process loads which code.

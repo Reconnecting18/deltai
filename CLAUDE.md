@@ -162,7 +162,7 @@ User-space extension system. Any subdirectory inside `project/extensions/` that 
 
 Extensions are loaded **after** the core app is initialised. A broken extension is skipped with a warning and never prevents deltai from starting. Personal extension directories are gitignored by default (see `.gitignore`); add `-f` to `git add` to opt a specific extension into version control.
 
-See `project/extensions/README.md` for the full authoring guide and `project/extensions/example_extension/` for a minimal template. Arch Linux update guard (news, pacman evidence, snapshots, diffs, rollback API) lives in `project/core/arch_update_guard/` and loads from core (not extensions).
+See `project/extensions/README.md` for the full authoring guide and `project/extensions/example_extension/` for a minimal template. **Arch Linux update guard** (news, pacman evidence, snapshots, diffs, rollback API) is an **optional extension** at `project/extensions/arch_update_guard/`: it is **gitignored on `main`** (lightweight upstream) and typically **force-tracked on `personal`** (`git add -f project/extensions/arch_update_guard/`). When present, it loads like any other extension; the backend also starts its scheduler when the package is importable.
 
 **Local server network (`project/extensions/server_network/`):** JSON inventory of SSH-accessible Linux hosts under `$DELTA_DATA_DIR/local_server_network.json` (when set, `DELTA_DATA_DIR` must resolve under the real home directory), HTTP under `/ext/server_network/`, and tools `server_network_*` for list/add/update/remove, probe, and bounded remote `run_command` / `run_script` (only registered hosts; `BatchMode=yes`, `shell=False`). `filter_tools()` includes these when the query matches network/server patterns.
 
@@ -184,7 +184,7 @@ See `project/extensions/README.md` for the full authoring guide and `project/ext
 | `project/extensions/README.md` | Extension authoring guide |
 | `project/extensions/example_extension/` | Working extension template |
 | `project/extensions/server_network/` | Local Linux server inventory + bounded SSH automation (`/ext/server_network/`, `server_network_*` tools) |
-| `project/core/arch_update_guard/` | Arch news/wiki ingest + pacman evidence + SQLite snapshots/diffs/rollback (`/arch-guard/…`, legacy `/ext/arch_update_guard/…`) |
+| `project/extensions/arch_update_guard/` (optional; often `personal` only) | Arch news/wiki ingest + pacman evidence + SQLite snapshots/diffs/rollback (`/arch-guard/…`, legacy `/ext/arch_update_guard/…`) |
 | `project/extensions/training/pipeline.py` | QLoRA, adapters, distillation, dataset CRUD, auto-capture, daily cycle (`import training` via shim) |
 | `project/collector.py` | Web data collection for training |
 | `project/watcher.py` | Watchdog file watcher for `data/knowledge/` |
