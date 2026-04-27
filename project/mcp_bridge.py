@@ -102,10 +102,12 @@ def build_mcp_server():
                 content=[mtypes.TextContent(type="text", text=text)],
                 isError=is_err,
             )
-        except Exception as exc:
+        except Exception:
             logger.exception("MCP tool %s failed", name)
             return mtypes.CallToolResult(
-                content=[mtypes.TextContent(type="text", text=str(exc))],
+                content=[
+                    mtypes.TextContent(type="text", text="ERROR: Tool execution failed"),
+                ],
                 isError=True,
             )
 

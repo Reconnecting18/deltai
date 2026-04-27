@@ -9,6 +9,7 @@ The orchestrator is responsible for:
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from delta.agents.context import ContextAgent
@@ -21,6 +22,10 @@ from delta.orchestrator.context import build_request_context
 from delta.orchestrator.intents import classify_intent
 from delta.storage.reports import write_ai_report
 
+logger = logging.getLogger(__name__)
+
+# Client-visible orchestrator errors must not echo exception text (CWE-209 / stack-trace exposure).
+_ORCHESTRATOR_CLIENT_ERROR = "An internal error occurred"
 
 class Orchestrator:
     """Top-level coordinator for all DELTA task execution."""
@@ -68,6 +73,11 @@ class Orchestrator:
         try:
             output = await agent.run(query=query, source=source, session_id=session_id)
         except Exception as exc:
+            logger.exception(
+                "Orchestrator agent failed intent=%s agent=%s",
+                intent,
+                agent.name,
+            )
             write_ai_report(
                 reports_dir=s.reports_dir,
                 enabled=s.ai_reports_enabled,
@@ -75,7 +85,7 @@ class Orchestrator:
                 status="error",
                 fields={
                     "query": query,
-                    "output": str(exc),
+                    "output": _ORCHESTRATOR_CLIENT_ERROR,
                     "agent": agent.name,
                     "intent": intent,
                     "session_id": session_id,
@@ -83,7 +93,7 @@ class Orchestrator:
                     "error": {"detail": type(exc).__name__},
                 },
             )
-            return {"status": "error", "output": str(exc), "agent": agent.name}
+            return {"status": "error", "output": _ORCHESTRATOR_CLIENT_ERROR, "agent": agent.name}
 
         write_ai_report(
             reports_dir=s.reports_dir,
