@@ -1430,7 +1430,7 @@ async def _rag_bootstrap() -> None:
 async def _post_startup_cloud_and_models() -> None:
     """
     Cloud + Ollama model registry checks (can be slow when Ollama is down).
-    Runs after the server is accepting HTTP so Electron waitForBackend succeeds.
+    Runs after the server is accepting HTTP so late-bound checks do not block startup.
     """
     t0 = _time.monotonic()
     try:

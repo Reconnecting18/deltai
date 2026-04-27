@@ -28,20 +28,6 @@
         "panel": "dedicated"
       },
       "group": "build"
-    },
-    {
-      "label": "deltai: Electron npm start",
-      "type": "shell",
-      "command": "npm start",
-      "options": {
-        "cwd": "${workspaceFolder}/app"
-      },
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always",
-        "panel": "dedicated"
-      },
-      "group": "build"
     }
   ]
 }

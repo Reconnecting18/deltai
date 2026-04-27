@@ -34,13 +34,9 @@ journalctl --user -u delta-daemon -f
 
 SQLite and XDG paths are set in the unit file; override with `Environment=` drop-ins if needed.
 
-## Optional: Electron shell
+## Terminal health
 
-Cross-platform desktop wrapper lives in [../app/](../app/). Not required for headless or browser-only use.
-
-```bash
-cd ../app && npm install && npm start
-```
+With `delta-daemon` running, from the repo (after `pip install -e ..[dev]`): run **`deltai`** or **`deltai status`** for a fastfetch-style view (daemon, Ollama, IPC, SQLite, optional `http://127.0.0.1:8000/api/health` when the project server is up). Use **`deltai status --json`** for scripts.
 
 ## Optional: Windows development
 

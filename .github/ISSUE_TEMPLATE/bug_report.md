@@ -30,4 +30,4 @@ assignees: []
 
 ## Logs / screenshots
 
-<!-- Optional: backend log snippet, Electron console, etc. -->
+<!-- Optional: backend log snippet, browser/terminal output, etc. -->

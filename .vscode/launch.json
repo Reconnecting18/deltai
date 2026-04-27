@@ -10,15 +10,6 @@
       "cwd": "${workspaceFolder}/project",
       "jinja": true,
       "justMyCode": true
-    },
-    {
-      "name": "deltai Electron (npm start)",
-      "type": "node",
-      "request": "launch",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "start"],
-      "cwd": "${workspaceFolder}/app",
-      "console": "integratedTerminal"
     }
   ]
 }
