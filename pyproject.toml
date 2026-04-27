@@ -39,6 +39,7 @@ dev = [
 delta-daemon = "delta.daemon.server:main"
 deltai = "delta.interfaces.cli:main"
 delta = "delta.interfaces.cli:main"
+arch-update-guard = "delta.arch_guard_cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
