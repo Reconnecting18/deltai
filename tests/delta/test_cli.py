@@ -1,6 +1,5 @@
 """Smoke tests for delta.interfaces.cli (no running daemon required)."""
 
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
