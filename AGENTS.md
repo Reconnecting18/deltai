@@ -75,5 +75,6 @@ When you change user-visible behavior, configuration, or architecture:
 2. Update [README.md](README.md) — user-facing changes, endpoints, config.
 3. Keep [AGENTS.md](AGENTS.md) accurate — onboarding, boundaries, verify commands.
 4. If you change RAG, ingest, models, or adapters, update [docs/local-model-workflow.md](docs/local-model-workflow.md).
+5. If you change maintainer branching or extension tracking policy, update [docs/git-workflow.md](docs/git-workflow.md).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for issues and PR expectations.

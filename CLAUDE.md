@@ -192,6 +192,7 @@ See `project/extensions/README.md` for the full authoring guide and `project/ext
 | `project/extensions/training/daily_training.py` (also `scripts/daily_training.py`) | Nightly autonomous training orchestrator |
 | `project/extensions/training/collect_training_data.py` (also `scripts/collect_training_data.py`) | Standalone web data collector |
 | `docs/local-model-workflow.md` | Operator guide: RAG, models, adapters |
+| `docs/git-workflow.md` | Maintainer guide: `main` / `feature/*` / `personal` branches and extension tracking |
 
 ---
 
@@ -293,6 +294,8 @@ GitHub: **CodeQL** (SAST) and **Dependabot** complement each other; neither repl
 ---
 
 ## Development Workflow
+
+**Git branches:** upstream work lands on `main` via PRs from `feature/*`. A long-lived `personal` branch is for private overlays (e.g. force-tracked extensions); do not bulk-merge it into `main`. See [docs/git-workflow.md](docs/git-workflow.md).
 
 After any feature, bug fix, or significant change:
 
