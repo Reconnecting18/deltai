@@ -255,7 +255,6 @@ def _run_script_handler(server_id: str, script: str, timeout_sec: int = 300) -> 
 def setup(app) -> None:
     from fastapi import APIRouter
     from pydantic import BaseModel
-
     from tools.executor import register_handler
 
     register_handler("server_network_list", _list_handler)
