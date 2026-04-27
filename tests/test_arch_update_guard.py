@@ -14,7 +14,10 @@ from fastapi.testclient import TestClient
 
 pytest.importorskip(
     "extensions.arch_update_guard",
-    reason="optional extension not on main; use personal or git add -f project/extensions/arch_update_guard/",
+    reason=(
+        "optional extension not on main; use personal or git add -f "
+        "project/extensions/arch_update_guard/"
+    ),
 )
 
 
