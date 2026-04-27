@@ -188,7 +188,8 @@ See `project/extensions/README.md` for the full authoring guide and `project/ext
 | `project/extensions/training/pipeline.py` | QLoRA, adapters, distillation, dataset CRUD, auto-capture, daily cycle (`import training` via shim) |
 | `project/collector.py` | Web data collection for training |
 | `project/watcher.py` | Watchdog file watcher for `data/knowledge/` |
-| `project/anthropic_client.py` | Cloud inference (dormant until ANTHROPIC_API_KEY set) |
+| `project/prompts.py` | Shared system prompts (protocols) for cloud and local Ollama paths |
+| `project/anthropic_client.py` | Cloud inference (dormant until ANTHROPIC_API_KEY set); optional split-workload planner outline |
 | `project/static/index.html` | Dashboard UI (single file — HTML + CSS + JS) |
 | `src/delta/interfaces/cli_reference.py` | Plain-text terminal reference for `deltai reference [--topic …]` (systemd, `curl` Arch guard API, REPL slash commands, model tool names) |
 | `src/delta/daemon/app.py` | Packaged FastAPI app: `/health`, `/v1/execute` on Unix socket (`delta-daemon`) |
@@ -204,6 +205,8 @@ See `project/extensions/README.md` for the full authoring guide and `project/ext
 | `project/extensions/training/daily_training.py` (also `scripts/daily_training.py`) | Nightly autonomous training orchestrator |
 | `project/extensions/training/collect_training_data.py` (also `scripts/collect_training_data.py`) | Standalone web data collector |
 | `docs/local-model-workflow.md` | Operator guide: RAG, models, adapters |
+| `docs/data-reset.md` | Operator runbook: backup, Chroma/SQLite/trace purge, legacy DB migration |
+| `scripts/reset_deltai_data.py` | Gated script: wipe Chroma dir and/or SQLite analytics tables |
 | `docs/git-workflow.md` | Maintainer guide: `main` / `feature/*` / `personal` branches and extension tracking |
 
 ---
@@ -260,6 +263,15 @@ REASONING_TRACE_MAX=500
 QUALITY_CAPTURE_THRESHOLD=0.6
 REACT_ALLOW_CLARIFY=true
 SMART_CAPTURE_ENABLED=true
+
+# Local Ollama sampling (optional; defaults 0.2 / 0.95)
+# DELTAI_OLLAMA_TEMPERATURE=0.2
+# DELTAI_OLLAMA_TOP_P=0.95
+
+# Split workload: optional synthesis model override and planner pass (see project/main.py)
+# DELTAI_SPLIT_SYNTH_MODEL=
+# DELTAI_SPLIT_PLANNER_ENABLED=false
+# DELTAI_SPLIT_PLANNER_MODEL=
 
 # Resource management
 VRAM_TIER_AB_MIN_MB=5000

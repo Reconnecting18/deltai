@@ -23,43 +23,15 @@ import os
 
 import httpx
 import safe_errors
+from prompts import build_cloud_system_prompt
 
 logger = logging.getLogger("deltai.anthropic")
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"  # Pinned for stability; update when new features needed
 
-# ── deltai SYSTEM PROMPT FOR CLOUD MODELS ──────────────────────────────────
-
-DELTAI_SYSTEM_PROMPT = """You are deltai — a modular, user-controlled AI extension layer
-for Linux (cloud mode via Anthropic). You are not a generic chatbot: you think, act with
-tools when appropriate, and report clearly.
-
-OPERATOR
-  The human using this machine. Respect their goals, privacy, and explicit choices.
-
-PROTOCOLS (non-negotiable)
-  Protocol 1: Protect the operator — safety, privacy, and interests first.
-  Protocol 2: Answer first — lead with the answer. No preamble. No filler.
-    Never say "Great question", "Certainly", "Of course", "Absolutely".
-    Short when simple. Detailed when the task warrants it.
-  Protocol 3: Act, don't describe — use tools when real data or side effects are required.
-  Protocol 4: Present, don't interpret — show what was asked for; avoid editorializing.
-  Protocol 5: Identity and integrity — you are deltai, an AI system. Own it honestly.
-    Never fabricate data. If you don't know, say so.
-
-CHARACTER
-  Calm, precise, and professional — like a trusted systems engineer. Dry wit sparingly.
-  Match the operator's tone. No engagement bait or sycophancy.
-
-DOMAINS
-  Task automation and reasoning: be surgical; prefer facts and reproducible steps.
-  Engineering / math: state assumptions, show reasoning, use tools for heavy calculation.
-  System help: respect user-space — never assume root; destructive actions need confirmation.
-
-You are running in CLOUD MODE via the Anthropic API. Local tools (files, shell, stats,
-knowledge base, optional telemetry HTTP bridge) execute on the operator's machine and
-return results to you. Paths and shell follow the host OS (often bash on Linux)."""
+# Default cloud system prompt (non-split); split workload uses build_cloud_system_prompt(split_workload=True)
+DELTAI_SYSTEM_PROMPT = build_cloud_system_prompt()
 
 
 # ── TOOL SCHEMA CONVERSION ───────────────────────────────────────────────
@@ -147,13 +119,7 @@ async def stream_chat(
     total_output_tokens = 0
 
     for _round_num in range(MAX_TOOL_ROUNDS + 1):
-        system_prompt = DELTAI_SYSTEM_PROMPT
-        if split_mode:
-            system_prompt += (
-                "\n\nYou are in SPLIT WORKLOAD mode. Local tools already gathered data — "
-                "results are in the context below. Focus on analysis and reasoning. "
-                "Do not suggest running commands or gathering data — it has been done."
-            )
+        system_prompt = build_cloud_system_prompt(split_workload=split_mode)
 
         payload = {
             "model": model,
@@ -411,3 +377,59 @@ async def chat_once(message: str, model: str, max_tokens: int = 2048) -> str:
     except Exception as e:
         safe_errors.log_exception(logger, "chat_once failed", e)
         return f"ERROR: {safe_errors.public_error_detail(e)}"
+
+
+async def split_workload_planner_outline(
+    user_message: str,
+    tool_results_context: str,
+    rag_context: str = "",
+    model: str | None = None,
+    max_tokens: int = 1024,
+) -> str:
+    """
+    Optional leader pass before split synthesis: short outline from a (usually smaller)
+    cloud model to structure the final answer. Returns empty string on skip/error.
+    """
+    api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        return ""
+
+    planner_model = model or os.getenv(
+        "DELTAI_SPLIT_PLANNER_MODEL",
+        os.getenv("ANTHROPIC_SONNET_MODEL", "claude-sonnet-4-20250514"),
+    )
+    system = build_cloud_system_prompt() + (
+        "\n\nYou are a planning pass for SPLIT WORKLOAD synthesis. Output ONLY a short structured "
+        "outline (bullet list is fine): (1) what was gathered, (2) conclusions supported by the "
+        "evidence, (3) what remains uncertain. Do not write the final user-facing answer — "
+        "another model will synthesize it. Be concise (max ~400 words)."
+    )
+    user_block = f"User request:\n{user_message}\n\n"
+    if rag_context.strip():
+        user_block += f"Prior RAG (hints only, may be stale):\n{rag_context}\n\n"
+    user_block += f"Local tool results (ground truth for the host):\n{tool_results_context}"
+
+    payload = {
+        "model": planner_model,
+        "max_tokens": max_tokens,
+        "system": system,
+        "messages": [{"role": "user", "content": user_block}],
+    }
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": ANTHROPIC_VERSION,
+        "content-type": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=90) as client:
+            resp = await client.post(ANTHROPIC_API_URL, json=payload, headers=headers)
+            if resp.status_code != 200:
+                logger.warning("split planner HTTP %s", resp.status_code)
+                return ""
+            data = resp.json()
+            content = data.get("content", [])
+            return "".join(c.get("text", "") for c in content if c.get("type") == "text").strip()
+    except Exception as e:
+        safe_errors.log_exception(logger, "split_workload_planner_outline failed", e)
+        return ""

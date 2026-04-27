@@ -41,6 +41,7 @@ engine/
 docs/**
 !docs/git-workflow.md
 !docs/local-model-workflow.md
+!docs/data-reset.md
 reports/
 E3N_PROJECT_HANDOFF.md
 

@@ -1,6 +1,6 @@
 """
-delta-linux · Mythos context model
-===================================
+deltai · Mythos context model
+=============================
 Generalized task-session state for the Mythos-style reason-act pipeline.
 Designed to be backend-agnostic: swap Ollama for any inference provider,
 swap SQLite for any persistence layer — the model stays the same.
@@ -264,7 +264,7 @@ class RemediationStep(BaseModel):
 
 class SynthesisReport(BaseModel):
     """
-    Phase 5 output. The auditable, structured response that leaves delta-linux.
+    Phase 5 output. The auditable, structured response that leaves deltai.
     This is what gets written to SQLite and optionally returned over the API.
 
     Fork guidance
@@ -312,7 +312,7 @@ class TaskContext(BaseModel):
 
     Fork guidance
     -------------
-    peer_node_id: set this if the task originated from a delta-linux peer on
+    peer_node_id: set this if the task originated from a deltai peer on
     the local network rather than directly from the user.
     user_id: optional; useful if you add multi-user support later.
     extensions on the root level is the widest escape hatch — anything that

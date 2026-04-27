@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 import httpx
 import psutil
 import safe_errors
-from anthropic_client import stream_chat as anthropic_stream
+from anthropic_client import split_workload_planner_outline, stream_chat as anthropic_stream
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,6 +39,7 @@ from persistence import (
     trim_history,
 )
 from persistence import clear_history as db_clear_history
+from prompts import build_local_system_prompt, build_react_system_prompt, protocol_antifabrication_reminder
 from pydantic import BaseModel
 from router import (
     _pick_local_model,
@@ -485,6 +486,18 @@ async def _try_ollama_inference(
         options["num_gpu"] = num_gpu
     if num_ctx is not None:
         options["num_ctx"] = num_ctx
+    temp_raw = os.getenv("DELTAI_OLLAMA_TEMPERATURE", "0.2").strip()
+    top_p_raw = os.getenv("DELTAI_OLLAMA_TOP_P", "0.95").strip()
+    try:
+        if temp_raw:
+            options["temperature"] = float(temp_raw)
+    except ValueError:
+        pass
+    try:
+        if top_p_raw:
+            options["top_p"] = float(top_p_raw)
+    except ValueError:
+        pass
     if options:
         payload["options"] = options
     try:
@@ -574,30 +587,6 @@ _REACT_ENABLED = os.getenv("REACT_ENABLED", "true").lower() in ("true", "1", "ye
 
 _REACT_ALLOW_CLARIFY = os.getenv("REACT_ALLOW_CLARIFY", "true").lower() in ("true", "1", "yes")
 
-_REACT_SYSTEM_PROMPT = """You are in structured reasoning mode. For each step:
-
-THINK: State what you need to figure out or what information you're missing.
-ACT: Call a tool to gather information, calculate, or look something up. If no tool is needed, write ACT: none.
-OBSERVE: Analyze the result you got back.
-CONFIDENCE: Rate your confidence: HIGH (>80%), MEDIUM (50-80%), LOW (<50%).
-
-After sufficient information is gathered (max {max_iter} iterations), provide your final answer.
-
-Format your response EXACTLY as:
-THINK: [your reasoning]
-ACT: [tool call or "none"]
-OBSERVE: [analysis of results]
-CONFIDENCE: [HIGH/MEDIUM/LOW]
-
-Confidence protocol:
-- HIGH: You have enough information. Proceed to FINAL.
-- MEDIUM after 2+ iterations: Provide your best answer with [CONFIDENCE: MEDIUM] and note what additional info would help.
-- LOW: Use ACT to gather more data, or write CLARIFY: [question for the operator] if you need input.
-
-When ready to answer:
-FINAL: [your complete answer]"""
-
-
 def _is_react_eligible(decision) -> bool:
     """Check if a query should use the ReAct reasoning loop."""
     if not _REACT_ENABLED:
@@ -651,13 +640,14 @@ async def _react_reasoning_loop(
         except Exception as e:
             logger.debug("Trace retrieval failed [%s]", type(e).__name__)
 
-    react_system = _REACT_SYSTEM_PROMPT.format(max_iter=_REACT_MAX_ITERATIONS)
+    react_system = build_react_system_prompt(_REACT_MAX_ITERATIONS)
     context_prefix = f"{rag_context}\n" if rag_context else ""
 
-    messages = history + [
-        {"role": "system", "content": react_system},
-        {"role": "user", "content": f"{prior_context}{context_prefix}{user_message}"},
-    ]
+    messages = (
+        [{"role": "system", "content": react_system}]
+        + history
+        + [{"role": "user", "content": f"{prior_context}{context_prefix}{user_message}"}]
+    )
 
     for _iteration in range(_REACT_MAX_ITERATIONS):
         data, err = await _try_ollama_inference(
@@ -1223,7 +1213,7 @@ _SELF_HEAL_ENABLED = os.getenv("SELF_HEAL_ENABLED", "true").lower() in ("true", 
 _SELF_HEAL_INTERVAL = int(os.getenv("SELF_HEAL_INTERVAL_SEC", "300"))  # 5 minutes
 _SELF_HEAL_MODEL = os.getenv("DELTAI_MODEL", "deltai-qwen3b")
 
-_SELF_HEAL_SYSTEM_PROMPT = """You are deltai's internal diagnostics AI. You receive a system diagnostics report and must decide if any repairs are needed.
+_SELF_HEAL_SYSTEM_PROMPT = f"""You are deltai's internal diagnostics AI. You receive a system diagnostics report and must decide if any repairs are needed.
 
 RULES:
 - Only suggest repairs if there are actual issues (DOWN, ERROR, STOPPED, WARNING, DEGRADED)
@@ -1233,6 +1223,7 @@ RULES:
 - Only suggest ONE repair per cycle (most critical first)
 - Never suggest clear_vram during an active GPU focus session
 - Never suggest repairs for cosmetic warnings
+- {protocol_antifabrication_reminder()}
 
 Examples:
 - Diagnostics show "Watcher: STOPPED" -> REPAIR:restart_watcher
@@ -2014,7 +2005,11 @@ async def chat(req: ChatRequest):
                 local_content = f"{rag_context}\n{req.message}"
             else:
                 local_content = req.message
-            local_messages = _get_history() + [{"role": "user", "content": local_content}]
+            local_messages = (
+                [{"role": "system", "content": build_local_system_prompt()}]
+                + _get_history()
+                + [{"role": "user", "content": local_content}]
+            )
 
             gathered = []  # list of {"tool": name, "args": args, "result": text}
 
@@ -2152,13 +2147,31 @@ async def chat(req: ChatRequest):
             split_context_parts.append("[END SPLIT CONTEXT]")
             split_context = "\n\n".join(split_context_parts)
 
+            planner_prefix = ""
+            if os.getenv("DELTAI_SPLIT_PLANNER_ENABLED", "false").lower() in ("true", "1", "yes"):
+                outline = await split_workload_planner_outline(
+                    req.message,
+                    split_context,
+                    rag_context=rag_context or "",
+                )
+                if outline.strip():
+                    planner_prefix = (
+                        "[PLANNER OUTLINE — structured synthesis prep]\n"
+                        f"{outline}\n[END PLANNER OUTLINE]\n\n"
+                    )
+
             # Combine with RAG context if present
-            combined_context = f"{rag_context}\n\n{split_context}" if rag_context else split_context
+            if rag_context:
+                combined_context = f"{rag_context}\n\n{planner_prefix}{split_context}"
+            else:
+                combined_context = f"{planner_prefix}{split_context}"
+
+            split_synth_model = os.getenv("DELTAI_SPLIT_SYNTH_MODEL", "").strip() or decision.model
 
             full_response = ""
             async for line in anthropic_stream(
                 message=req.message,
-                model=decision.model,
+                model=split_synth_model,
                 rag_context=combined_context,
                 tools=None,
                 split_mode=True,
@@ -2248,9 +2261,11 @@ async def chat(req: ChatRequest):
     else:
         user_content = req.message
 
-    messages = _get_smart_history(max_tokens=decision.num_ctx) + [
-        {"role": "user", "content": user_content}
-    ]
+    messages = (
+        [{"role": "system", "content": build_local_system_prompt()}]
+        + _get_smart_history(max_tokens=decision.num_ctx)
+        + [{"role": "user", "content": user_content}]
+    )
 
     # Filter tools based on query domain and complexity
     relevant_tools = filter_tools(

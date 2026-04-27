@@ -77,6 +77,10 @@ Gaps are logged from low quality scores and related signals (see [project/main.p
 - **Compaction:** `POST /memory/compact` (warm → cold).
 - **Stats:** `GET /memory/cold/stats`.
 
+### A.6 Full local reset (legacy installs, stale RAG, traces)
+
+- **Runbook:** [docs/data-reset.md](../docs/data-reset.md) (backups, Chroma/SQLite, optional `scripts/reset_deltai_data.py`).
+
 ---
 
 ## Phase B — Behavior and reliability (iterate as needed)
