@@ -535,6 +535,17 @@ _SERVER_NETWORK_TOOL_NAMES = {
     "server_network_run_script",
 }
 
+# appwrite_bridge extension (project/extensions/appwrite_bridge/)
+_APPWRITE_TOOL_NAMES = {
+    "appwrite_status",
+    "appwrite_storage_list",
+    "appwrite_storage_upload",
+    "appwrite_storage_download",
+    "appwrite_storage_delete",
+    "appwrite_function_execute",
+    "appwrite_remote_storage_push",
+}
+
 # Domain-specific tool sets
 TOOL_DOMAIN_MAP = {
     "racing": {
@@ -608,6 +619,11 @@ _NETWORK_PATTERNS = _re.compile(
     r"server\s*network|ansible|provision)\b",
     _re.IGNORECASE,
 )
+_APPWRITE_PATTERNS = _re.compile(
+    r"\b(appwrite|cloud\s*storage|storage\s*bucket|bucket\s*sync|"
+    r"sync\s*to\s*cloud|project\s*sync|function\s*execution)\b",
+    _re.IGNORECASE,
+)
 
 
 def filter_tools(
@@ -643,6 +659,8 @@ def filter_tools(
         relevant_names |= _ARCH_EXT_TOOL_NAMES
     if _NETWORK_PATTERNS.search(query):
         relevant_names |= _SERVER_NETWORK_TOOL_NAMES
+    if _APPWRITE_PATTERNS.search(query):
+        relevant_names |= _APPWRITE_TOOL_NAMES
 
     # Add domain-specific tools
     if domain and domain in TOOL_DOMAIN_MAP:
@@ -659,6 +677,7 @@ def filter_tools(
         and not _DIAG_PATTERNS.search(query)
         and not _ARCH_PATTERNS.search(query)
         and not _NETWORK_PATTERNS.search(query)
+        and not _APPWRITE_PATTERNS.search(query)
     ):
         # General query: include common tools but skip diagnostics
         relevant_names = {
@@ -682,7 +701,11 @@ def filter_tools(
     if tier <= 1 and len(relevant_names) > 6:
         # Prioritize: universal + domain-specific, drop less common
         priority = list(_UNIVERSAL_TOOLS)
-        for essential in ("server_network_list", "server_network_probe"):
+        for essential in (
+            "server_network_list",
+            "server_network_probe",
+            "appwrite_status",
+        ):
             if essential in relevant_names and essential not in priority and len(priority) < 6:
                 priority.append(essential)
         for name in relevant_names:

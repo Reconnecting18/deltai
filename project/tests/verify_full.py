@@ -334,6 +334,23 @@ def run():
         except OSError:
             pass
 
+    # === 7c. appwrite_bridge extension ===
+    print("\n--- 7c. Appwrite bridge ---")
+    from extensions import appwrite_bridge
+    from tools.definitions import TOOLS, _merge_extension_tools, filter_tools
+
+    _merge_extension_tools(appwrite_bridge.TOOLS)
+    ft_aw = filter_tools(
+        TOOLS, query="sync project files to appwrite cloud bucket", tier=3
+    )
+    fnames_aw = {t["function"]["name"] for t in ft_aw}
+    check(
+        "filter_tools includes appwrite",
+        "appwrite_status" in fnames_aw and "appwrite_storage_upload" in fnames_aw,
+    )
+    st_out = appwrite_bridge._status_handler()
+    check("appwrite_status handler", '"config"' in st_out)
+
     # === 8. ANTHROPIC CLIENT ===
     print("\n--- 8. Anthropic Client ---")
     import anthropic_client
