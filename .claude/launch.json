@@ -2,14 +2,6 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "deltai Electron App",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["start"],
-      "cwd": "${workspaceFolder}/app",
-      "port": 8000,
-      "autoPort": false
-    },
-    {
       "name": "deltai FastAPI Backend (venv)",
       "runtimeExecutable": "${workspaceFolder}/project/venv/Scripts/python.exe",
       "runtimeArgs": [

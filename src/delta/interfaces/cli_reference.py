@@ -51,6 +51,12 @@ deltai / delta — CLI (talks to delta-daemon over UDS)
 ================================================================================
   deltai --help
 
+  deltai
+  deltai status [--json] [--project-url URL] [--socket PATH]
+      Fastfetch-style health: daemon, Ollama, IPC, SQLite, and (if reachable)
+      project dev /api/health. Default project URL: env DELTAI_STATUS_PROJECT_URL
+      or http://127.0.0.1:8000. With no subcommand, `deltai` runs `status`.
+
   deltai version
       Print package version.
 

@@ -77,3 +77,6 @@ disable_error_code = ["attr-defined"]
 [[tool.mypy.overrides]]
 module = "delta.interfaces.cli"
 disable_error_code = ["attr-defined"]
+[[tool.mypy.overrides]]
+module = "delta.interfaces.status_panel"
+disable_error_code = ["attr-defined"]

@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import socket
 import sys
 from typing import Any
@@ -18,6 +19,7 @@ from delta import __version__
 from delta.config import Settings, load_settings
 from delta.core import set_plugin_enabled, upsert_plugin_enabled
 from delta.interfaces.cli_reference import TOPIC_CHOICES, render_reference
+from delta.interfaces.status_panel import run_status
 
 _EXIT_OK = 0
 _EXIT_ERR = 1
@@ -33,12 +35,14 @@ def _epilog() -> str:
   DELTA_DAEMON_SOCKET   Unix socket for HTTP API (default under $XDG_RUNTIME_DIR/deltai/).
   DELTA_IPC_SOCKET      Line-delimited JSON IPC socket (orchestrator).
   DELTA_DATA_DIR, DELTA_CONFIG_DIR, DELTA_CACHE_DIR, DELTA_SQLITE_PATH
+  DELTAI_STATUS_PROJECT_URL   Optional: project dev app for /api/health (default http://127.0.0.1:8000)
 
 Start the daemon (systemd user unit):
   systemctl --user enable --now delta-daemon
 
 Legacy full-stack REPL (TCP :8000, /chat) remains: python project/cli.py
 
+With no subcommand, `deltai` runs `status` (system health panel).
 Command lists: deltai reference [--topic TOPIC]
 """
 
@@ -259,6 +263,29 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override DELTA_DAEMON_SOCKET (HTTP over UDS).",
     )
 
+    st = sub.add_parser(
+        "status",
+        help="Fastfetch-style health: daemon, Ollama, IPC, SQLite, optional project /api/health.",
+    )
+    st.add_argument(
+        "--socket",
+        dest="daemon_socket",
+        metavar="PATH",
+        help="Override DELTA_DAEMON_SOCKET (HTTP over UDS).",
+    )
+    st.add_argument(
+        "--project-url",
+        dest="project_url",
+        metavar="URL",
+        default=None,
+        help="Base URL for project dev app (default: env DELTAI_STATUS_PROJECT_URL or http://127.0.0.1:8000).",
+    )
+    st.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit one JSON object (scripting / automation).",
+    )
+
     ep = sub.add_parser("execute", help="POST /v1/execute with a query.")
     ep.add_argument(
         "--socket",
@@ -340,6 +367,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def run(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
+    if not argv:
+        argv = ["status"]
     settings = load_settings()
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -353,6 +382,13 @@ def run(argv: list[str] | None = None) -> int:
     if args.command == "health":
         path = args.daemon_socket or settings.daemon_socket_path
         return cmd_health(path)
+    if args.command == "status":
+        path = args.daemon_socket or settings.daemon_socket_path
+        base = args.project_url or os.getenv(
+            "DELTAI_STATUS_PROJECT_URL",
+            "http://127.0.0.1:8000",
+        )
+        return run_status(settings, path, base, args.json)
     if args.command == "execute":
         path = args.daemon_socket or settings.daemon_socket_path
         return cmd_execute(

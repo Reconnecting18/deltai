@@ -51,9 +51,9 @@ deltai is **not** a GUI assistant, not a desktop environment replacement, and no
 ┌──────────────────────────────────────────────────────────────┐
 │  Clients (any of the following)                              │
 │  ┌──────────┐ ┌──────────┐ ┌────────────┐ ┌──────────────┐  │
-│  │ CLI      │ │ Browser  │ │ Electron   │ │ External     │  │
-│  │ (curl /  │ │ dashboard│ │ (optional) │ │ scripts/apps │  │
-│  │  delta)  │ │ :8000    │ │            │ │ via HTTP     │  │
+│  │ CLI      │ │ Browser  │ │ deltai     │ │ External     │  │
+│  │ (curl /  │ │ dashboard│ │ status     │ │ scripts/apps │  │
+│  │  delta)  │ │ :8000    │ │ (terminal) │ │ via HTTP     │  │
 │  └──────────┘ └──────────┘ └────────────┘ └──────────────┘  │
 └─────────────────────────┬────────────────────────────────────┘
                           │ NDJSON streaming / REST
@@ -103,8 +103,6 @@ The daemon is built for **local trust**: bind to **127.0.0.1** in normal use. Th
 - [Ollama](https://ollama.com) installed and running (`ollama serve`)
 - Python 3.11+
 - SQLite with JSON1 enabled in Python's `sqlite3` build (required for reasoning trace JSON queries)
-- Node.js (optional — only for the Electron desktop shell)
-
 You can verify JSON1 quickly with:
 
 ```bash
@@ -163,7 +161,8 @@ systemctl --user enable --now delta-daemon
 ```bash
 # Optional: installed package CLI (talks to delta-daemon on the Unix socket — use Option B first)
 deltai reference
-deltai health
+deltai              # same as: deltai status — fastfetch-style health (daemon, Ollama, IPC, optional :8000)
+deltai health       # JSON from GET /health only
 
 # Project dev server (Option A) — browser dashboard
 xdg-open http://localhost:8000
@@ -320,8 +319,6 @@ deltai/
 ├── .cursor/rules/                Cursor project rules (.mdc)
 ├── .github/                      Issue templates, workflows
 ├── .vscode/                      launch.json + tasks.json
-├── app/                          Electron desktop shell (optional)
-│   └── main.js                   Frameless window + IPC
 ├── project/                      deltai daemon (FastAPI)
 │   ├── .env.example              Template copied to .env for local configuration
 │   ├── main.py                   Chat, ingest pipeline, ReAct loop, resource manager
@@ -472,7 +469,7 @@ This repo is set up for **Cursor**, **Claude Code**, and any agent that reads ma
 | [AGENTS.md](AGENTS.md) | Short onboarding for agents — boundaries, paths, verify commands |
 | [CLAUDE.md](CLAUDE.md) | Full architecture, stream protocol, file map, development workflow |
 | [`.cursor/rules/`](.cursor/rules/) | Cursor project rules (short `.mdc` files) |
-| [`.vscode/launch.json`](.vscode/launch.json) | Debug/run FastAPI and Electron from workspace |
+| [`.vscode/launch.json`](.vscode/launch.json) | Debug/run FastAPI (uvicorn) from workspace |
 | [docs/local-model-workflow.md](docs/local-model-workflow.md) | Operator guide for RAG, models, and adapters |
 
 ---

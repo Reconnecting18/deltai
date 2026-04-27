@@ -11,10 +11,6 @@ project/.env
 *.pyo
 fix.py
 
-# Node / Electron
-app/node_modules/
-app/.cache/
-
 # Ollama models — too large, typically stored in ~/.ollama/
 # Do NOT commit model weights
 

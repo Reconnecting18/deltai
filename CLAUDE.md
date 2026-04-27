@@ -49,7 +49,6 @@ External services, scripts, and cron jobs push context into deltai via `POST /in
 |------|---------|
 | `project/` | deltai daemon (FastAPI backend) |
 | `project/extensions/` | User extensions — personal features that don't touch core (auto-discovered at startup) |
-| `app/` | Electron desktop shell (optional) |
 | `modelfiles/` | Ollama modelfiles |
 | `systemd/user/` | systemd user service unit |
 | `scripts/` | Standalone scripts (backup, training, data collection) |
@@ -78,7 +77,7 @@ Key subsystems:
 
 ### Packaged daemon (`src/delta/daemon/app.py`)
 
-The **`delta-daemon`** entrypoint ([`src/delta/daemon/server.py`](src/delta/daemon/server.py)) runs FastAPI with **uvicorn on a Unix domain socket** (`DELTA_DAEMON_SOCKET`, default under `$XDG_RUNTIME_DIR/deltai/`). Used by the in-repo [systemd user unit](systemd/user/delta-daemon.service) and by the **`deltai` / `delta` CLI** (HTTP over UDS).
+The **`delta-daemon`** entrypoint ([`src/delta/daemon/server.py`](src/delta/daemon/server.py)) runs FastAPI with **uvicorn on a Unix domain socket** (`DELTA_DAEMON_SOCKET`, default under `$XDG_RUNTIME_DIR/deltai/`). Used by the in-repo [systemd user unit](systemd/user/delta-daemon.service) and by the **`deltai` / `delta` CLI** (HTTP over UDS). Run **`deltai`** or **`deltai status`** for a terminal health panel (daemon, Ollama, IPC, SQLite, optional probe of the project dev app at `DELTAI_STATUS_PROJECT_URL`).
 
 - **`GET /health`** — liveness JSON (`status`, `service`)
 - **`POST /v1/execute`** — orchestrator: JSON body `{"query": "...", "source": "...", "session_id": null}` → JSON response (`status`, `output`, `agent`). **Not** NDJSON streaming.
@@ -195,6 +194,8 @@ See `project/extensions/README.md` for the full authoring guide and `project/ext
 | `project/deltai_mcp_stdio.py` | MCP stdio server entry (IDE clients); or use `deltai-mcp` launcher |
 | `src/delta/mcp/stdio_launcher.py` | Installed `deltai-mcp` script — runs `project/deltai_mcp_stdio.py` from repo root |
 | `project/static/index.html` | Dashboard UI (single file — HTML + CSS + JS) |
+| `src/delta/interfaces/cli.py` | `deltai` / `delta` CLI — `health`, `status` (default), `execute`, `ipc`, `plugin`, `reference` |
+| `src/delta/interfaces/status_panel.py` | Fastfetch-style terminal health panel (`deltai status`, JSON with `--json`) |
 | `src/delta/interfaces/cli_reference.py` | Plain-text terminal reference for `deltai reference [--topic …]` (systemd, `curl` Arch guard API, REPL slash commands, model tool names) |
 | `src/delta/daemon/app.py` | Packaged FastAPI app: `/health`, `/v1/execute` on Unix socket (`delta-daemon`) |
 | `src/delta/daemon/server.py` | uvicorn entry for `delta-daemon` |
@@ -246,6 +247,9 @@ See `project/extensions/README.md` for the full authoring guide and `project/ext
 OLLAMA_URL=http://localhost:11434
 DELTAI_MODEL=qwen2.5:14b-instruct-q4_K_M
 DELTAI_SMALL_MODEL=qwen2.5:3b-instruct-q4_K_M
+
+# CLI: optional base URL for `deltai status` to fetch project /api/health (full RAG/tools subsystem view)
+# DELTAI_STATUS_PROJECT_URL=http://127.0.0.1:8000
 
 # Cloud (optional)
 ANTHROPIC_API_KEY=
