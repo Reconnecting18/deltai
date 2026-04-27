@@ -25,7 +25,8 @@ dependencies = [
   "watchdog>=4.0",
   "psutil>=5.9",
   "pynvml>=11.5",
-  "pydbus>=0.6.0"
+  "pydbus>=0.6.0",
+  "tomli-w>=1.0.0"
 ]
 
 [project.optional-dependencies]
@@ -39,6 +40,7 @@ dev = [
 delta-daemon = "delta.daemon.server:main"
 deltai = "delta.interfaces.cli:main"
 delta = "delta.interfaces.cli:main"
+arch-update-guard = "delta.arch_guard_cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
