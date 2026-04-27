@@ -130,6 +130,59 @@ def _sqlite_info(path: str) -> dict[str, Any]:
     return {"path": str(p), "exists": True, "size_bytes": p.stat().st_size}
 
 
+def _status_plain_output() -> bool:
+    """ASCII-friendly status (pipes, ssh, script logs)."""
+    if "NO_COLOR" in os.environ:
+        return True
+    if os.environ.get("TERM", "") == "dumb":
+        return True
+    if not sys.stdout.isatty():
+        return True
+    v = os.environ.get("DELTAI_STATUS_MINIMAL", "")
+    return v.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _format_plain_panel(
+    settings: Settings,
+    daemon_path: str,
+    project_url: str,
+    daemon: dict[str, Any],
+    ollama: dict[str, Any],
+    ipc: str,
+    sql: dict[str, Any],
+    project: dict[str, Any] | None,
+) -> str:
+    lines: list[str] = []
+    lines.append(f"deltai {__version__}")
+    d_ok = "ok" if daemon.get("ok") else "fail"
+    svc = (daemon.get("payload") or {}).get("service", "?")
+    lines.append(f"  daemon ({d_ok})  {svc}")
+    lines.append(f"    socket {daemon_path}")
+    if not daemon.get("ok") and daemon.get("error"):
+        lines.append(f"    error {daemon['error'][:200]}")
+    o_ok = "ok" if ollama.get("ok") else "fail"
+    lines.append(f"  ollama ({o_ok})  {settings.ollama_url}  {ollama.get('detail', '')}")
+    ipc_ok = "ok" if ("accepting" in ipc or "skipped" in ipc) else "fail"
+    lines.append(f"  ipc ({ipc_ok})  {settings.ipc_socket_path}")
+    lines.append(f"    {ipc}")
+    sz = sql.get("size_bytes", 0)
+    ex = "ready" if sql.get("exists") else "missing"
+    lines.append(f"  sqlite ({ex})  {sz} bytes")
+    lines.append(f"    {sql.get('path', '')}")
+    tools = ", ".join(_CORE_TOOL_NAMES[:8]) + ", ..."
+    lines.append(f"  core tools  {tools}")
+    if project is not None:
+        lines.append(f"  project  {project_url}/api/health  ({len(project)} keys)")
+    else:
+        lines.append(f"  project  not reachable at {project_url}")
+    lines.append(f"  data_dir   {settings.data_dir}")
+    lines.append(f"  config_dir {settings.config_dir}")
+    cloud = "set" if settings.anthropic_api_key else "unset"
+    lines.append(f"  cloud key  {cloud}")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def _format_human_panel(
     settings: Settings,
     daemon_path: str,
@@ -229,16 +282,28 @@ def run_status(
     if as_json:
         print(json.dumps(blob, indent=2))
     else:
-        out = _format_human_panel(
-            settings,
-            daemon_socket,
-            project_url,
-            daemon,
-            ollama,
-            ipc,
-            sql,
-            project,
-        )
+        if _status_plain_output():
+            out = _format_plain_panel(
+                settings,
+                daemon_socket,
+                project_url,
+                daemon,
+                ollama,
+                ipc,
+                sql,
+                project,
+            )
+        else:
+            out = _format_human_panel(
+                settings,
+                daemon_socket,
+                project_url,
+                daemon,
+                ollama,
+                ipc,
+                sql,
+                project,
+            )
         print(out, file=sys.stdout)
 
     okish = bool(daemon.get("ok")) and bool(ollama.get("ok"))

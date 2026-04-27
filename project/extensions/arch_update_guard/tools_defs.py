@@ -94,7 +94,8 @@ ARCH_GUARD_TOOLS = [
             "name": "arch_rollback_plan",
             "description": (
                 "Plan rollback from a snapshot: list restore steps for /etc files and staged SQLite copy. "
-                "Does not modify the system unless the operator runs suggested commands."
+                "With dry_run=false, stages SQLite restore; apply_etc restores captured /etc only if "
+                "DELTAI_TOOL_AUTO_APPROVE=1 (opt-in). Otherwise use CLI or curl for explicit apply_etc."
             ),
             "parameters": {
                 "type": "object",
@@ -104,6 +105,15 @@ ARCH_GUARD_TOOLS = [
                         "type": "boolean",
                         "description": "If true, only return the plan JSON (default true).",
                         "default": True,
+                    },
+                    "apply_etc": {
+                        "type": "boolean",
+                        "description": (
+                            "If dry_run is false: restore captured /etc files from the snapshot "
+                            "(requires root for in-place writes). Only honored when "
+                            "DELTAI_TOOL_AUTO_APPROVE=1 on the server."
+                        ),
+                        "default": False,
                     },
                 },
                 "required": ["snapshot_id"],

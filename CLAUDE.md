@@ -292,6 +292,9 @@ WARM_TO_COLD_AGE_SEC=86400
 INGEST_QUEUE_MAX=500
 INGEST_FLUSH_INTERVAL=2.0
 
+# Tool policy (optional)
+# DELTAI_TOOL_AUTO_APPROVE=false   # when true, LLM may use arch_rollback_plan apply_etc
+
 # Security (optional — defaults preserve single-user localhost dev)
 # When set, ingest routes require X-Deltai-Ingest-Key or Authorization: Bearer <same value>
 # DELTAI_INGEST_API_KEY=
@@ -316,6 +319,7 @@ The **project** app targets **loopback TCP** (`uvicorn --host 127.0.0.1`); **`de
 - **`POST /ingest` (and related):** Optional shared secret: set **`DELTAI_INGEST_API_KEY`** in `project/.env`. When set, clients must send **`X-Deltai-Ingest-Key: <key>`** or **`Authorization: Bearer <key>`** for `POST /ingest`, `POST /ingest/batch`, `POST /ingest/cleanup`, `POST /memory/ingest`, and **`GET /ingest/pipeline/status`**. If unset, behavior matches prior releases (ingest open to the same network visibility as the daemon).
 - **MCP HTTP** (`DELTAI_MCP_HTTP_ENABLE`): Off by default. When enabled, the Streamable HTTP MCP app is mounted under **`DELTAI_MCP_HTTP_PATH`** (e.g. `/mcp`) with the same tool surface as chat. Optional **`DELTAI_MCP_HTTP_KEY`** enforces Bearer / `X-Deltai-Mcp-Key`. **Stdio MCP** (`deltai-mcp` / `project/deltai_mcp_stdio.py`) runs as the current OS user; no HTTP exposure.
 - **CORS:** Default **`allow_origins=["*"]`**. For browser access from a limited set of pages (e.g. after switching away from loopback), set **`DELTAI_CORS_ORIGINS`** to a comma-separated allowlist. Empty/unset keeps `*`.
+- **Arch rollback (`arch_rollback_plan`):** By default the model cannot pass **`apply_etc: true`** with **`dry_run: false`** (captured `/etc` restore). Set **`DELTAI_TOOL_AUTO_APPROVE=1`** in `project/.env` to opt in. The **`arch-update-guard`** CLI and **`POST /arch-guard/rollback`** are unchanged for explicit operators.
 
 GitHub: **CodeQL** (SAST) and **Dependabot** complement each other; neither replaces firewall and deployment hygiene.
 

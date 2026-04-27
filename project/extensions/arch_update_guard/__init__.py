@@ -18,6 +18,7 @@ TOOLS = ARCH_GUARD_TOOLS
 
 
 def setup(app) -> None:
+    from tool_policy import deltai_tool_auto_approve
     from tools.executor import register_handler
 
     from . import news_wiki, pacman_audit, rollback, tracker
@@ -49,12 +50,29 @@ def setup(app) -> None:
         d = tracker.compute_diff(from_snapshot_id, to_snapshot_id)
         return json.dumps(d, indent=2)
 
-    def _arch_rollback_plan_handler(snapshot_id: str, dry_run: bool = True) -> str:
+    def _arch_rollback_plan_handler(
+        snapshot_id: str, dry_run: bool = True, apply_etc: bool = False
+    ) -> str:
+        if not dry_run and apply_etc and not deltai_tool_auto_approve():
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": (
+                        "apply_etc from the model is disabled. Set DELTAI_TOOL_AUTO_APPROVE=1 "
+                        "in project/.env to opt in, or use the arch-update-guard CLI / HTTP API "
+                        "for explicit operator-driven rollback."
+                    ),
+                },
+                indent=2,
+            )
         if dry_run:
             r = rollback.plan_rollback(snapshot_id)
         else:
             r = rollback.execute_rollback(
-                snapshot_id, dry_run=False, requested_by="tool", apply_etc=False
+                snapshot_id,
+                dry_run=False,
+                requested_by="tool",
+                apply_etc=bool(apply_etc),
             )
         return json.dumps(r, indent=2, default=str)
 

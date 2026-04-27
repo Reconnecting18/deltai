@@ -211,3 +211,38 @@ def test_rollback_plan_unknown_snapshot(isolated_db):
 
     r = rollback.plan_rollback("00000000-0000-0000-0000-000000000000")
     assert r.get("ok") is False
+
+
+def test_arch_rollback_tool_blocks_apply_etc_without_auto_approve(isolated_db, monkeypatch):
+    monkeypatch.delenv("DELTAI_TOOL_AUTO_APPROVE", raising=False)
+    from extensions.arch_update_guard import setup
+    from tools.executor import execute_tool
+
+    app = FastAPI()
+    setup(app)
+    out = execute_tool(
+        "arch_rollback_plan",
+        {"snapshot_id": "00000000-0000-0000-0000-000000000000", "dry_run": False, "apply_etc": True},
+    )
+    data = json.loads(out)
+    assert data.get("ok") is False
+    assert "DELTAI_TOOL_AUTO_APPROVE" in (data.get("error") or "")
+
+
+def test_arch_rollback_tool_apply_etc_when_auto_approve(isolated_db, monkeypatch):
+    monkeypatch.setenv("DELTAI_TOOL_AUTO_APPROVE", "1")
+    from extensions.arch_update_guard import setup
+    from tools.executor import execute_tool
+
+    app = FastAPI()
+    setup(app)
+    with mock.patch(
+        "extensions.arch_update_guard.rollback.execute_rollback",
+        return_value={"ok": True, "dry_run": False, "status": "completed", "steps": []},
+    ) as ex:
+        execute_tool(
+            "arch_rollback_plan",
+            {"snapshot_id": "11111111-1111-1111-1111-111111111111", "dry_run": False, "apply_etc": True},
+        )
+    ex.assert_called_once()
+    assert ex.call_args.kwargs.get("apply_etc") is True
