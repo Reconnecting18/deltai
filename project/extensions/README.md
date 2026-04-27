@@ -105,6 +105,20 @@ The `example_extension/` ships as a reference; your own packages are yours to ma
 
 ---
 
+## Other extension mechanisms
+
+deltai has more than one way to extend behavior; pick the surface that matches **which process** you run.
+
+| Mechanism | Process | Use when |
+|-----------|---------|----------|
+| **`project/extensions/`** (this dir) | Full backend `project/main.py` | In-repo packages: routes, tools, startup hooks; no core edits. |
+| **`project/core/arch_update_guard/`** | Same full backend | Arch Linux maintenance assistant (API, scheduler, tools). Toggle with **`ARCH_GUARD_*`** env vars (see `project/core/arch_update_guard/settings.py`). |
+| **`delta.core.PluginManager`** | **`delta-daemon`** only (`delta-daemon` systemd service) | End-user `.py` plugins under XDG + `extensions.toml`; managed with **`deltai plugin install|unload`**. |
+
+See [`src/delta/core/README.md`](../../src/delta/core/README.md) for daemon plugins. Arch Update Guard’s CLI entrypoint (`arch-update-guard`) needs the **`project/`** tree on disk; set **`DELTAI_PROJECT_ROOT`** if you installed the wheel outside the clone.
+
+---
+
 ## Rules
 
 - Extensions run in the **same process** as deltai and have full access to its internals.

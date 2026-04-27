@@ -3,8 +3,11 @@ deltai Tool Definitions — JSON schemas for Ollama tool calling.
 llama3.1 uses these to decide when and how to invoke tools.
 """
 
+import logging
 import os as _os
 import re as _re
+
+_log = logging.getLogger(__name__)
 
 TOOLS = [
     {
@@ -470,17 +473,22 @@ if _TELEMETRY_API_URL:
         TOOL_MAP[t["function"]["name"]] = t
 
 
+def _merge_tools_into_catalog(tool_list: list) -> None:
+    """Append tool dicts to TOOLS / TOOL_MAP when the name is not already registered."""
+    for tool in tool_list:
+        name = tool.get("function", {}).get("name") or tool.get("name")
+        if name and name not in TOOL_MAP:
+            TOOLS.append(tool)
+            TOOL_MAP[name] = tool
+
+
 # ── ARCH UPDATE GUARD (core) ───────────────────────────────────────────
 try:
     from core.arch_update_guard.tools_defs import ARCH_GUARD_TOOLS
 
-    for t in ARCH_GUARD_TOOLS:
-        name = t.get("function", {}).get("name")
-        if name and name not in TOOL_MAP:
-            TOOLS.append(t)
-            TOOL_MAP[name] = t
-except Exception:
-    pass
+    _merge_tools_into_catalog(ARCH_GUARD_TOOLS)
+except Exception as exc:
+    _log.debug("arch_update_guard tools not merged: %s", exc, exc_info=True)
 
 
 # ── EXTENSION TOOLS ─────────────────────────────────────────────────────
@@ -494,11 +502,7 @@ def _merge_extension_tools(ext_tools: list) -> None:
     Skips any tool whose name already exists to avoid accidental overrides.
     Called once by main.py after load_extensions().
     """
-    for tool in ext_tools:
-        name = tool.get("function", {}).get("name") or tool.get("name")
-        if name and name not in TOOL_MAP:
-            TOOLS.append(tool)
-            TOOL_MAP[name] = tool
+    _merge_tools_into_catalog(ext_tools)
 
 
 # ── TOOL RELEVANCE FILTERING ────────────────────────────────────────────
