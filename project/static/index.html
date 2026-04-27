@@ -592,6 +592,7 @@ canvas.spark{width:100%;height:28px;display:block}
 <script src="/static/js/ai-core.js"></script>
 <script>
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function kbMsg(text){var e=document.createElement('div');e.className='kb-empty';e.textContent=text;return e}
 // WINDOW CONTROLS
 if (window.deltai) {
   document.getElementById('btn-min').onclick=()=>window.deltai.minimize()
@@ -788,8 +789,14 @@ async function poll(){
     if(d.rag_available){var mc=document.getElementById('mem-chip');if(mc){mc.className='chip chip-ok';mc.textContent='RAG ACTIVE'}}
     var wc=document.getElementById('m-watcher-chip');if(wc){if(d.watcher_active){wc.className='chip chip-ok';wc.textContent='Watcher Active'}else if(d.rag_available){wc.className='chip chip-warn';wc.textContent='Watcher Stopped'}else{wc.className='chip chip-warn';wc.textContent='RAG Unavailable'}}
     if(d.models&&d.models.length){
-      document.getElementById('model-list').innerHTML=d.models.map(m=>
-        `<div class="mrow"><div class="mdot ${m.includes('deltai')?'on':''}"></div>${esc(m)}</div>`).join('')
+      const ml=document.getElementById('model-list')
+      ml.replaceChildren()
+      d.models.forEach(function(m){
+        var row=document.createElement('div');row.className='mrow'
+        var dot=document.createElement('div');dot.className='mdot '+(m.includes('deltai')?'on':'')
+        row.appendChild(dot);row.appendChild(document.createTextNode(String(m)))
+        ml.appendChild(row)
+      })
     }
     const s=Math.max(health.gpu,health.temp*.8)/100
     const se=document.getElementById('entity-status'),mk=document.getElementById('tb-mark')
@@ -864,14 +871,16 @@ function renderHealth(){
   countEl.textContent=`${online}/${total} ONLINE`
   const container=document.getElementById('sys-alerts')
   const divider=document.querySelector('.sys-divider')
-  container.innerHTML=''
+  container.replaceChildren()
   Object.entries(sysHealth).forEach(([key,state])=>{
     if((NOMINAL[key]||[]).includes(state))return
     const config=BADGE_CONFIG[key]?.[state]
     if(!config)return
     const badge=document.createElement('div')
     badge.className=`sys-alert sys-alert--${config.cls}`
-    badge.innerHTML=`<div class="sys-alert-dot"></div><span>${config.text}</span>`
+    const dot=document.createElement('div');dot.className='sys-alert-dot'
+    const lab=document.createElement('span');lab.textContent=config.text
+    badge.appendChild(dot);badge.appendChild(lab)
     container.appendChild(badge)
   })
   if(divider)divider.style.display=container.children.length?'':'none'
@@ -900,7 +909,10 @@ function showToast(alert){
   const prio=alert.priority||'normal'
   toast.className=`toast toast--${prio}`
   const icon=prio==='critical'?'⚠':'●'
-  toast.innerHTML=`<span class="toast-icon">${icon}</span><span class="toast-text">${esc(alert.context)}</span><span class="toast-src">${esc(alert.source)}</span>`
+  const ic=document.createElement('span');ic.className='toast-icon';ic.textContent=icon
+  const tx=document.createElement('span');tx.className='toast-text';tx.textContent=alert.context||''
+  const sr=document.createElement('span');sr.className='toast-src';sr.textContent=alert.source||''
+  toast.appendChild(ic);toast.appendChild(tx);toast.appendChild(sr)
   container.appendChild(toast)
   setTimeout(()=>{toast.classList.add('toast--fade');setTimeout(()=>toast.remove(),500)},10000)
 }
@@ -912,23 +924,35 @@ tIn.addEventListener('input',()=>{tIn.style.height='auto';tIn.style.height=Math.
 tIn.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();runCmd()}})
 
 function timeStr(){return new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
+function renderMdInto(el, src){
+  if(!el)return
+  var html=renderMd(typeof src==='string'?src:String(src))
+  var doc=new DOMParser().parseFromString('<div id="__md_root">'+html+'</div>','text/html')
+  var root=doc.getElementById('__md_root')
+  if(!root||doc.querySelector('parsererror')){
+    el.textContent=typeof src==='string'?src:String(src)
+    return
+  }
+  el.replaceChildren(...Array.from(root.childNodes))
+}
 function addLine(pfx,txt,cls,role){
   const d=document.createElement('div');d.className='te'+(role?' '+role:'')
-  const ts=role?`<span class="t-time">${timeStr()}</span>`:''
-  d.innerHTML=`<span class="tp ${cls||''}">${pfx}</span><span class="tt ${cls||''}"></span>${ts}`
-  d.querySelector('.tt').textContent=txt
+  const tp=document.createElement('span');tp.className='tp '+(cls||'');tp.textContent=pfx
+  const tt=document.createElement('div');tt.className='tt '+(cls||'');tt.textContent=txt
+  d.appendChild(tp);d.appendChild(tt)
+  if(role){const ts=document.createElement('span');ts.className='t-time';ts.textContent=timeStr();d.appendChild(ts)}
   tLog.appendChild(d);tLog.scrollTop=tLog.scrollHeight
-  return d.querySelector('.tt')
+  return tt
 }
 
 async function runCmd(){
   const txt=tIn.value.trim();if(!txt||window._deltaiSending)return
   window._deltaiSending=true
-  addLine('&gt;',txt,'','user')
+  addLine('>',txt,'','user')
   tIn.value='';tIn.style.height='auto'
   aiActive=1
   aiCore.simSpeech=true
-  const node=addLine('deltai&gt;','','deltai','deltai-msg')
+  const node=addLine('deltai>','','deltai','deltai-msg')
   try{
     const res=await fetch('http://localhost:8000/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:txt})})
     const rd=res.body.getReader(),dec=new TextDecoder()
@@ -948,7 +972,7 @@ async function runCmd(){
           else if(ev.t==='rag'){addLine('',''+ev.n+' memory chunks injected','dim','meta')}
           else if(ev.t==='tool'){addLine('','tool: '+ev.n,'dim','meta')}
           else if(ev.t==='result'){addLine('','result: '+ev.s,'dim','meta')}
-          else if(ev.t==='done'){node.innerHTML=renderMd(full);if(ev.turns!==undefined)updateHistoryCounter(ev.turns)}
+          else if(ev.t==='done'){renderMdInto(node,full);if(ev.turns!==undefined)updateHistoryCounter(ev.turns)}
           else if(ev.t==='split_phase'){addLine('','SPLIT: '+ev.c,'dim','meta')}
           else if(ev.t==='emergency'){addLine('','EMERGENCY: '+ev.c,'','emergency-alert')}
           else if(ev.t==='error'){node.textContent='ERROR: '+ev.c;node.style.color='var(--danger)'}
@@ -960,11 +984,11 @@ async function runCmd(){
       try{
         const ev=JSON.parse(buf)
         if(ev.t==='text'){full+=ev.c}
-        if(ev.t==='done'||ev.t==='text'){node.innerHTML=renderMd(full);if(ev.turns!==undefined)updateHistoryCounter(ev.turns)}
+        if(ev.t==='done'||ev.t==='text'){renderMdInto(node,full);if(ev.turns!==undefined)updateHistoryCounter(ev.turns)}
       }catch(pe){}
     }
     // If we got text but no done event, still render markdown
-    if(full&&node.textContent===full)node.innerHTML=renderMd(full)
+    if(full&&node.textContent===full)renderMdInto(node,full)
   }catch(e){node.textContent='ERROR: backend unreachable'}
   const hr=document.createElement('hr');hr.className='tdiv';tLog.appendChild(hr)
   setTimeout(()=>{aiActive=0;aiCore.simSpeech=false;aiCore.setSpeechState(false,0,null)},4000)
@@ -975,7 +999,12 @@ async function runCmd(){
 async function clearHistory(){
   try{
     await fetch('http://localhost:8000/chat/history',{method:'DELETE'})
-    tLog.innerHTML='<div class="te deltai-msg"><span class="tp deltai">deltai&gt;</span><span class="tt dim">History cleared. Terminal ready.</span></div><hr class="tdiv">'
+    const row=document.createElement('div');row.className='te deltai-msg'
+    const tp=document.createElement('span');tp.className='tp deltai';tp.textContent='deltai>'
+    const tt=document.createElement('div');tt.className='tt dim';tt.textContent='History cleared. Terminal ready.'
+    row.appendChild(tp);row.appendChild(tt)
+    tLog.replaceChildren();tLog.appendChild(row)
+    const hr=document.createElement('hr');hr.className='tdiv';tLog.appendChild(hr)
     updateHistoryCounter(0)
   }catch(e){console.warn('Clear history failed:',e)}
 }
@@ -1160,12 +1189,13 @@ async function loadModule(name){
     const t=await r.text()
     var raw=r.ok?t:'# Error loading '+name
     document.getElementById('mod-'+name).value=raw
-    document.getElementById('mod-'+name+'-view').innerHTML=renderMd(raw)
+    renderMdInto(document.getElementById('mod-'+name+'-view'), raw)
     // exit edit mode on reload
     if(modEditState[name]){toggleModEdit(name)}
   }catch(e){
     document.getElementById('mod-'+name).value='# Could not load '+name
-    document.getElementById('mod-'+name+'-view').innerHTML='<p>Could not load '+name+'</p>'
+    var err=document.createElement('p');err.textContent='Could not load '+name
+    document.getElementById('mod-'+name+'-view').replaceChildren(err)
   }
 }
 function toggleModEdit(name){
@@ -1180,7 +1210,7 @@ function toggleModEdit(name){
     editBtn.textContent='View';saveBtn.style.display='';reloadBtn.style.display=''
     modEditState[name]=true
   }else{
-    view.innerHTML=renderMd(ta.value)
+    renderMdInto(view,ta.value)
     ta.style.display='none';view.style.display='block'
     editBtn.textContent='Edit';saveBtn.style.display='none';reloadBtn.style.display='none'
     modEditState[name]=false
@@ -1195,7 +1225,7 @@ async function saveModule(name){
     ok.textContent=d.ok?'SAVED':'SAVE FAILED'
     setTimeout(()=>ok.textContent='',4000)
     // update rendered view
-    if(d.ok)document.getElementById('mod-'+name+'-view').innerHTML=renderMd(content)
+    if(d.ok)renderMdInto(document.getElementById('mod-'+name+'-view'),content)
   }catch{document.getElementById('mod-'+name+'-ok').textContent='ERROR'}
 }
 
@@ -1204,16 +1234,19 @@ async function loadMemoryFiles(){
   const list=document.getElementById('kb-file-list')
   try{
     const d=await(await fetch(API+'/memory/files')).json()
-    if(d.error){list.innerHTML='<div class="kb-empty">'+esc(d.error)+'</div>';return}
-    if(!d.files||d.files.length===0){list.innerHTML='<div class="kb-empty">No files ingested. Drop files into ~/deltai/data\\knowledge\\ to add memories</div>';return}
-    list.innerHTML=d.files.map(f=>
-      '<div class="kb-row">'+
-        '<span class="kb-src">'+esc(f.source)+'</span>'+
-        '<span class="kb-chunks">'+esc(String(f.chunks))+' chunks</span>'+
-        '<button class="kb-rm" onclick="kbRemoveFile(\''+f.source.replace(/\\/g,"\\\\").replace(/'/g,"\\'")+'\')">Remove</button>'+
-      '</div>'
-    ).join('')
-  }catch(e){list.innerHTML='<div class="kb-empty">Error loading files</div>'}
+    if(d.error){list.replaceChildren(kbMsg(d.error));return}
+    if(!d.files||d.files.length===0){list.replaceChildren(kbMsg('No files ingested. Drop files into ~/deltai/data\\knowledge\\ to add memories'));return}
+    list.replaceChildren()
+    d.files.forEach(function(f){
+      var row=document.createElement('div');row.className='kb-row'
+      var src=document.createElement('span');src.className='kb-src';src.textContent=f.source
+      var ch=document.createElement('span');ch.className='kb-chunks';ch.textContent=String(f.chunks)+' chunks'
+      var btn=document.createElement('button');btn.className='kb-rm';btn.textContent='Remove'
+      btn.addEventListener('click',function(){kbRemoveFile(f.source)})
+      row.appendChild(src);row.appendChild(ch);row.appendChild(btn)
+      list.appendChild(row)
+    })
+  }catch(e){list.replaceChildren(kbMsg('Error loading files'))}
 }
 async function kbRemoveFile(source){
   const st=document.getElementById('kb-status')
@@ -1248,7 +1281,9 @@ async function trLoadDatasets(){
     const d=await(await fetch(API+'/training/datasets')).json()
     const ds=d.datasets||[]
     const prev=sel.value
-    sel.innerHTML='<option value="">— select dataset —</option>'
+    sel.replaceChildren()
+    var opt0=document.createElement('option');opt0.value='';opt0.textContent='— select dataset —'
+    sel.appendChild(opt0)
     ds.forEach(x=>{
       const o=document.createElement('option')
       o.value=x.name;o.textContent=x.name+' ('+x.examples+' examples)'
@@ -1266,24 +1301,29 @@ async function trLoadDataset(){
   const startBtn=document.getElementById('tr-start-btn')
   if(startBtn)startBtn.disabled=!_trCurrentDS
   if(!_trCurrentDS){
-    list.innerHTML='<div class="kb-empty">Select or create a dataset</div>'
+    list.replaceChildren(kbMsg('Select or create a dataset'))
     form.style.display='none';return
   }
   form.style.display='block'
   try{
     const d=await(await fetch(API+'/training/datasets/'+encodeURIComponent(_trCurrentDS))).json()
-    if(d.status!=='ok'){list.innerHTML='<div class="kb-empty">Error: '+esc(d.reason||'unknown')+'</div>';return}
+    if(d.status!=='ok'){list.replaceChildren(kbMsg('Error: '+(d.reason||'unknown')));return}
     const ex=d.examples||[]
-    if(ex.length===0){list.innerHTML='<div class="kb-empty">No examples yet — add some below</div>';return}
-    list.innerHTML=ex.map(e=>
-      '<div class="tr-ex-row">'+
-        '<span class="tr-ex-in" title="'+esc(e.input)+'">'+esc(e.input)+'</span>'+
-        '<span class="tr-ex-out" title="'+esc(e.output)+'">→ '+esc(e.output)+'</span>'+
-        '<span class="tr-ex-cat">'+esc(e.category||'')+'</span>'+
-        '<button class="kb-rm" onclick="trRemoveExample('+e._index+')">✕</button>'+
-      '</div>'
-    ).join('')+'<div class="tr-count">'+ex.length+' examples</div>'
-  }catch(e){list.innerHTML='<div class="kb-empty">Error loading dataset</div>'}
+    if(ex.length===0){list.replaceChildren(kbMsg('No examples yet — add some below'));return}
+    list.replaceChildren()
+    ex.forEach(function(e){
+      var row=document.createElement('div');row.className='tr-ex-row'
+      var i1=document.createElement('span');i1.className='tr-ex-in';i1.title=e.input||'';i1.textContent=e.input||''
+      var i2=document.createElement('span');i2.className='tr-ex-out';i2.title=e.output||'';i2.textContent='→ '+(e.output||'')
+      var cat=document.createElement('span');cat.className='tr-ex-cat';cat.textContent=e.category||''
+      var btn=document.createElement('button');btn.className='kb-rm';btn.textContent='✕'
+      btn.addEventListener('click',function(){trRemoveExample(e._index)})
+      row.appendChild(i1);row.appendChild(i2);row.appendChild(cat);row.appendChild(btn)
+      list.appendChild(row)
+    })
+    var tc=document.createElement('div');tc.className='tr-count';tc.textContent=ex.length+' examples'
+    list.appendChild(tc)
+  }catch(e){list.replaceChildren(kbMsg('Error loading dataset'))}
 }
 async function trNewDataset(){
   const name=prompt('Dataset name (alphanumeric, dashes, underscores):')
@@ -1480,8 +1520,14 @@ async function dxPoll(){
       const actList=document.getElementById('dx-actions-list')
       const actions=rm.recent_actions||[]
       if(actions.length){
-        actList.innerHTML=actions.map(a=>'<div class="mrow" style="font-size:10px;padding:2px 0;border-bottom:1px solid var(--bdr)"><span style="color:var(--text2)">'+fmtTs(a.ts)+'</span> '+esc(a.action)+'</div>').join('')
-      }else{actList.innerHTML='<div class="kb-empty">No actions recorded</div>'}
+        actList.replaceChildren()
+        actions.forEach(function(a){
+          var row=document.createElement('div');row.className='mrow';row.style.fontSize='10px';row.style.padding='2px 0';row.style.borderBottom='1px solid var(--bdr)'
+          var ts=document.createElement('span');ts.style.color='var(--text2)';ts.textContent=fmtTs(a.ts)
+          row.appendChild(ts);row.appendChild(document.createTextNode(' '+String(a.action||'')))
+          actList.appendChild(row)
+        })
+      }else{actList.replaceChildren(kbMsg('No actions recorded'))}
     }
     if(heal){
       document.getElementById('dx-heal-enabled').textContent=heal.enabled?'Yes':'No'
@@ -1492,8 +1538,16 @@ async function dxPoll(){
       const evList=document.getElementById('dx-events-list')
       const events=(evts.events||[]).reverse()
       if(events.length){
-        evList.innerHTML=events.map(e=>'<div class="mrow" style="font-size:10px;padding:2px 0;border-bottom:1px solid var(--bdr)"><span style="color:var(--text2)">'+fmtTs(e.ts)+'</span> <span style="color:var(--teal)">'+esc(e.type||'')+'</span> '+esc(JSON.stringify(e).substring(0,80))+'</div>').join('')
-      }else{evList.innerHTML='<div class="kb-empty">No events yet</div>'}
+        evList.replaceChildren()
+        events.forEach(function(e){
+          var row=document.createElement('div');row.className='mrow';row.style.fontSize='10px';row.style.padding='2px 0';row.style.borderBottom='1px solid var(--bdr)'
+          var ts=document.createElement('span');ts.style.color='var(--text2)';ts.textContent=fmtTs(e.ts)
+          var ty=document.createElement('span');ty.style.color='var(--teal)';ty.textContent=e.type||''
+          row.appendChild(ts);row.appendChild(document.createTextNode(' '));row.appendChild(ty)
+          row.appendChild(document.createTextNode(' '+JSON.stringify(e).substring(0,80)))
+          evList.appendChild(row)
+        })
+      }else{evList.replaceChildren(kbMsg('No events yet'))}
     }
   }catch(e){}
 }
