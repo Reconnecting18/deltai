@@ -11,6 +11,7 @@
 - Link related issues with `Closes #N` in the commit message or PR description.
 - Do not commit `project/.env`, credentials, or anything under `data/`.
 - Keep changes consistent with the [Linux philosophy principles](AGENTS.md#non-negotiable-boundaries) described in AGENTS.md.
+- **Core vs personal branches:** use `main` for upstream-shared work and PRs from `feature/*`. A maintainer-style `personal` branch is for private overlays (e.g. force-added extensions); never bulk-merge it into `main`. Details: [docs/git-workflow.md](docs/git-workflow.md).
 
 ## Checks before you open a PR
 

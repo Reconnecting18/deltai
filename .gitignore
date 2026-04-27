@@ -39,6 +39,7 @@ engine/
 
 # Docs / reports (generated, not source)
 docs/**
+!docs/git-workflow.md
 !docs/local-model-workflow.md
 reports/
 E3N_PROJECT_HANDOFF.md

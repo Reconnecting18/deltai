@@ -1,0 +1,22 @@
+#!/bin/sh
+# Optional local hook: copy to .git/hooks/pre-push and chmod +x.
+# Blocks pushing refs/heads/personal to any remote other than "origin".
+# Adjust the remote name below if your personal backup remote differs.
+
+remote="$1"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [ -z "$remote_ref" ]; then
+    continue
+  fi
+  case "$local_ref" in
+    *refs/heads/personal)
+      if [ "$remote" != "origin" ]; then
+        echo "deltai pre-push: refuse pushing 'personal' to remote '$remote' (only 'origin' allowed)." >&2
+        exit 1
+      fi
+      ;;
+  esac
+done
+
+exit 0
