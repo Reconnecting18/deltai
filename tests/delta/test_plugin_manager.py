@@ -48,7 +48,9 @@ def test_load_enabled_and_get_all_commands(tmp_path: Path) -> None:
     mgr.shutdown_all()
 
 
-def test_load_skips_broken_plugin_with_warning(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_load_skips_broken_plugin_with_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     plugin_dir = tmp_path / "plugins"
     plugin_dir.mkdir()
     (plugin_dir / "bad.py").write_text("not_a_plugin = 1\n", encoding="utf-8")

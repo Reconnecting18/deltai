@@ -9,9 +9,11 @@ import sys
 _ARCH_GUARD_REL = ("core", "arch_update_guard", "__init__.py")
 _ERR_HINT = (
     "arch-update-guard needs the deltai repo ``project/`` package on disk.\n"
-    "  • Set DELTAI_PROJECT_ROOT or DELTA_PROJECT_ROOT to the repository root (parent of project/), or\n"
-    "  • Run this command from somewhere inside the clone (we search upward for project/core/arch_update_guard), or\n"
-    "  • Use an editable install from the clone so this script can resolve paths next to src/.\n"
+    "  • Set DELTAI_PROJECT_ROOT or DELTA_PROJECT_ROOT to the repo root "
+    "(parent of project/), or\n"
+    "  • Run from inside the clone (we search upward for "
+    "project/core/arch_update_guard), or\n"
+    "  • Use an editable install from the clone so paths resolve next to src/.\n"
 )
 
 

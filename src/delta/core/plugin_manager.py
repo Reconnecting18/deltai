@@ -10,7 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, cast
 
 import tomli_w
 
@@ -100,10 +100,11 @@ class PluginManager:
         path = self._plugin_dir / f"{module_stem}.py"
         if not path.is_file():
             raise FileNotFoundError(f"plugin file not found: {path}")
-        instance = _instantiate_plugin_from_file(path, unique_tag=f"delta_plugin_{name}")
-        validate_plugin_instance(instance, label=f"plugin {name!r}")
-        instance.on_init(self._core_context)
-        self._instances[name] = instance
+        raw_instance = _instantiate_plugin_from_file(path, unique_tag=f"delta_plugin_{name}")
+        validate_plugin_instance(raw_instance, label=f"plugin {name!r}")
+        plugin = cast(DeltaPlugin, raw_instance)
+        plugin.on_init(self._core_context)
+        self._instances[name] = plugin
         logger.info("Plugin loaded: %s", name)
         return True
 

@@ -14,7 +14,7 @@ import os
 import re
 import subprocess
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import path_guard
@@ -56,7 +56,7 @@ def registry_path() -> str:
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _validate_host(host: str) -> str:
@@ -201,7 +201,7 @@ def update_server(
     sid = (server_id or "").strip()
     data = _load_raw()
     servers: list[dict[str, Any]] = data["servers"]
-    for i, s in enumerate(servers):
+    for s in servers:
         if s.get("id") != sid:
             continue
         if label is not None:
