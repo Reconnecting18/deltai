@@ -251,12 +251,31 @@ WARM_TO_COLD_AGE_SEC=86400
 INGEST_QUEUE_MAX=500
 INGEST_FLUSH_INTERVAL=2.0
 
+# Security (optional — defaults preserve single-user localhost dev)
+# When set, ingest routes require X-Deltai-Ingest-Key or Authorization: Bearer <same value>
+# DELTAI_INGEST_API_KEY=
+# Comma-separated browser origins for CORS; unset = allow all origins (see Security posture)
+# DELTAI_CORS_ORIGINS=http://127.0.0.1:8000,http://localhost:8000
+
 # Training automation (disabled by default)
 DAILY_TRAIN_ENABLED=false
 DAILY_TRAIN_MIN_VRAM_MB=7000
 DAILY_TRAIN_AUTO_PROMOTE=false
 DPO_ENABLED=false
 ```
+
+---
+
+## Security posture (operators)
+
+deltai targets **localhost** (`uvicorn --host 127.0.0.1`). There is **no app-level auth** on `POST /chat` or most APIs: anything that can reach the bind address is treated as trusted.
+
+- **Binding:** Do not expose the raw FastAPI app to `0.0.0.0` or a LAN address without a reverse proxy, firewall, and/or auth—**unauthenticated access equals full use of chat, tools, training, and RAG** for the Unix user running the process.
+- **`run_shell`:** The tool runs `bash -c` as that user. The keyword blocklist in `project/tools/executor.py` is **best effort only**, not a sandbox. Assume **arbitrary code execution** for that user if an attacker can drive tool calls.
+- **`POST /ingest` (and related):** Optional shared secret: set **`DELTAI_INGEST_API_KEY`** in `project/.env`. When set, clients must send **`X-Deltai-Ingest-Key: <key>`** or **`Authorization: Bearer <key>`** for `POST /ingest`, `POST /ingest/batch`, `POST /ingest/cleanup`, `POST /memory/ingest`, and **`GET /ingest/pipeline/status`**. If unset, behavior matches prior releases (ingest open to the same network visibility as the daemon).
+- **CORS:** Default **`allow_origins=["*"]`**. For browser access from a limited set of pages (e.g. after switching away from loopback), set **`DELTAI_CORS_ORIGINS`** to a comma-separated allowlist. Empty/unset keeps `*`.
+
+GitHub: **CodeQL** (SAST) and **Dependabot** complement each other; neither replaces firewall and deployment hygiene.
 
 ---
 

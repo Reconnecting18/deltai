@@ -81,7 +81,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "run_shell",
-            "description": "Execute a bash shell command on the local Linux system. Use for system tasks, process management, app launching, or any shell operation. Commands run with normal user privileges.",
+            "description": "Execute a bash shell command on the local Linux system. Use for system tasks, process management, app launching, or any shell operation. Commands run with normal user privileges (same Unix user as deltai). A best-effort blocklist blocks some dangerous substrings; it is not a security boundary—treat successful tool use as arbitrary code execution for that user.",
             "parameters": {
                 "type": "object",
                 "properties": {

@@ -13,7 +13,7 @@ import psutil
 import safe_errors
 from anthropic_client import stream_chat as anthropic_stream
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (
     FileResponse,
@@ -141,6 +141,35 @@ OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 DELTAI_MODEL = os.getenv("DELTAI_MODEL", "deltai")
 BACKUP_MAX_RETRIES = int(os.getenv("BACKUP_MAX_RETRIES", "2"))
 TELEMETRY_API_URL = os.getenv("TELEMETRY_API_URL", "").strip()
+# Optional: when set, POST /ingest, /ingest/batch, /ingest/cleanup, /memory/ingest, and
+# GET /ingest/pipeline/status require X-Deltai-Ingest-Key or Authorization: Bearer.
+DELTAI_INGEST_API_KEY = os.getenv("DELTAI_INGEST_API_KEY", "").strip()
+
+
+def _cors_allow_origins() -> list[str]:
+    """Comma-separated allowlist; unset defaults to '*' (localhost dev). Set for LAN or tunnel exposure."""
+    raw = os.getenv("DELTAI_CORS_ORIGINS", "").strip()
+    if not raw:
+        return ["*"]
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
+def require_ingest_api_key(
+    _x_deltai_ingest_key: str | None = Header(default=None, alias="X-Deltai-Ingest-Key"),
+    authorization: str | None = Header(default=None),
+) -> None:
+    if not DELTAI_INGEST_API_KEY:
+        return
+    if _x_deltai_ingest_key and _x_deltai_ingest_key.strip() == DELTAI_INGEST_API_KEY:
+        return
+    if authorization:
+        a = authorization.strip()
+        if a.lower().startswith("bearer ") and a[7:].strip() == DELTAI_INGEST_API_KEY:
+            return
+    raise HTTPException(
+        status_code=401,
+        detail="Ingest key required: X-Deltai-Ingest-Key or Authorization: Bearer (match DELTAI_INGEST_API_KEY)",
+    )
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -1523,7 +1552,7 @@ app = FastAPI(title="deltai", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_allow_origins(),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -2544,7 +2573,7 @@ def memory_stats_endpoint():
 
 
 @app.post("/memory/ingest")
-def memory_ingest_endpoint():
+def memory_ingest_endpoint(_ingest_auth: None = Depends(require_ingest_api_key)):
     if not RAG_AVAILABLE:
         return {"error": "RAG not available"}
     try:
@@ -2690,7 +2719,9 @@ class IngestRequest(BaseModel):
 
 
 @app.post("/ingest")
-async def ingest_endpoint(req: IngestRequest):
+async def ingest_endpoint(
+    req: IngestRequest, _ingest_auth: None = Depends(require_ingest_api_key)
+):
     """
     Ingest structured context from an external service into ChromaDB.
     This is deltai's connector — any service can push context here.
@@ -2770,7 +2801,9 @@ class IngestBatchRequest(BaseModel):
 
 
 @app.post("/ingest/batch")
-async def ingest_batch_endpoint(req: IngestBatchRequest):
+async def ingest_batch_endpoint(
+    req: IngestBatchRequest, _ingest_auth: None = Depends(require_ingest_api_key)
+):
     """Batch ingest multiple context items. Max 100 per batch."""
     if not RAG_AVAILABLE:
         return {"error": "RAG not available"}
@@ -2799,7 +2832,7 @@ async def ingest_batch_endpoint(req: IngestBatchRequest):
 
 
 @app.get("/ingest/pipeline/status")
-def ingest_pipeline_status():
+def ingest_pipeline_status(_ingest_auth: None = Depends(require_ingest_api_key)):
     """Get ingest pipeline queue metrics."""
     return {
         "pipeline_active": _ingest_queue is not None,
@@ -2810,7 +2843,7 @@ def ingest_pipeline_status():
 
 
 @app.post("/ingest/cleanup")
-def ingest_cleanup():
+def ingest_cleanup(_ingest_auth: None = Depends(require_ingest_api_key)):
     """Manually trigger TTL cleanup of expired ingested entries."""
     if not RAG_AVAILABLE:
         return {"error": "RAG not available"}

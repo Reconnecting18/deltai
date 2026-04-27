@@ -89,6 +89,10 @@ Any app/service   POST /ingest/batch
 
 deltai does **not** know or care what pushed the context. Any service, script, or cron job can push text into its memory. RAG retrieves it when relevant.
 
+### Security (short)
+
+The daemon is built for **local trust**: bind to **127.0.0.1** in normal use. There is no default login on the API; the `run_shell` tool executes as your user (blocklist is not a security boundary). For shared networks or tunnels, use a reverse proxy and/or set **`DELTAI_INGEST_API_KEY`** and **`DELTAI_CORS_ORIGINS`** in `project/.env` (see [CLAUDE.md](CLAUDE.md) Security posture).
+
 ---
 
 ## Quick Start

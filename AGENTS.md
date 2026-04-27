@@ -15,6 +15,7 @@ It is the open, user-controlled Linux answer to Copilot+Windows — built around
 - **Linux paths only.** No `C:\...` Windows paths anywhere in code or config.
 - **User choice.** Every feature is opt-in. Defaults must be safe and minimal.
 - **No lock-in.** Local models are the default. Cloud is dormant until explicitly configured.
+- **Network exposure:** Run the API on `127.0.0.1` unless you understand the risk: there is no default auth on `/chat` or tools. Optional **`DELTAI_INGEST_API_KEY`** locks ingest-related routes; see [CLAUDE.md](CLAUDE.md) Security posture.
 
 ## Repository paths
 
