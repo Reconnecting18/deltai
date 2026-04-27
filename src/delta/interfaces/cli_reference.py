@@ -158,6 +158,9 @@ Arch update guard — HTTP (project FastAPI on TCP)
   curl -fsS -X POST "$AG/rollback" -H 'Content-Type: application/json' \\
     -d '{"snapshot_id":"ID","dry_run":true,"apply_etc":false}'
 
+  # LLM tool arch_rollback_plan: apply_etc with dry_run=false needs DELTAI_TOOL_AUTO_APPROVE=1
+  # in project/.env. HTTP/CLI rollback are explicit operator actions.
+
   curl -fsS "$AG/rollback/jobs?limit=20"
 
   curl -fsS -X POST "$AG/refresh-news" -H 'Content-Type: application/json' \\
@@ -170,7 +173,7 @@ project/cli.py — Rich REPL slash commands (TCP backend)
 ================================================================================
   From directory project/ with backend up, e.g.:
     uvicorn main:app --host 127.0.0.1 --port 8000
-    python cli.py [--host HOST] [--port PORT] [--no-banner]
+    python cli.py [--host HOST] [--port PORT] [--no-banner] [--minimal|-q]
 
   /help                 Show this command list
   /health               Subsystem health status

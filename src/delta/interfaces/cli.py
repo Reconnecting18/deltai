@@ -43,6 +43,7 @@ Start the daemon (systemd user unit):
 Legacy full-stack REPL (TCP :8000, /chat) remains: python project/cli.py
 
 With no subcommand, `deltai` runs `status` (system health panel).
+Plain status (pipes, scripts): NO_COLOR=1, TERM=dumb, or DELTAI_STATUS_MINIMAL=1.
 Command lists: deltai reference [--topic TOPIC]
 """
 

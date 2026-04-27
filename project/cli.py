@@ -3,7 +3,10 @@ deltai Terminal — standalone CLI client.
 Connects to the deltai FastAPI backend via HTTP. Zero backend imports.
 
 Usage:
-    python cli.py [--host HOST] [--port PORT] [--no-banner]
+    python cli.py [--host HOST] [--port PORT] [--no-banner] [--minimal|-q]
+
+  --minimal / -q   Compact output (also set DELTAI_CLI_MINIMAL=1). With NO_COLOR or a
+                   non-TTY stdout, tables use ASCII borders and the large banner is skipped.
 
 Or directly:
     python cli.py
@@ -20,7 +23,6 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
-
 import httpx
 from rich import box
 from rich.console import Console
@@ -57,7 +59,47 @@ DELTAI_THEME = Theme(
     }
 )
 
-console = Console(theme=DELTAI_THEME, highlight=False, force_terminal=True)
+
+def _env_truthy(name: str) -> bool:
+    v = os.environ.get(name)
+    if v is None:
+        return False
+    return v.strip().lower() in ("1", "true", "yes", "on")
+
+
+def cli_minimal_ui() -> bool:
+    """Compact, plain-friendly UI (env DELTAI_CLI_MINIMAL, dumb TERM, or non-TTY stdout)."""
+    if _env_truthy("DELTAI_CLI_MINIMAL"):
+        return True
+    if os.environ.get("TERM", "") == "dumb":
+        return True
+    if not sys.stdout.isatty():
+        return True
+    return False
+
+
+def cli_no_color() -> bool:
+    """https://no-color.org/ — variable present => disable color."""
+    return "NO_COLOR" in os.environ
+
+
+console = Console(
+    theme=DELTAI_THEME,
+    highlight=False,
+    force_terminal=True,
+    no_color=cli_no_color(),
+)
+
+
+def _rich_box():
+    """Heavy unicode borders in full UI; ASCII when minimal or NO_COLOR for clean pipes/SSH."""
+    if cli_minimal_ui() or cli_no_color():
+        return box.ASCII
+    return box.SIMPLE_HEAVY
+
+
+def _venv_activate_cmd() -> str:
+    return ".\\venv\\Scripts\\activate" if sys.platform == "win32" else "source venv/bin/activate"
 
 # ── ASCII BANNER ───────────────────────────────────────────────────────
 
@@ -233,6 +275,18 @@ async def show_startup_status(client: httpx.AsyncClient, health: dict):
     online = sum(1 for v in health.values() if v.lower() in ("online", "active", "ready", "local"))
     total = len(health)
 
+    if cli_minimal_ui():
+        names = ",".join(f"{k}:{v}" for k, v in sorted(health.items()))
+        color = "ok" if online == total else "warn" if online >= total - 2 else "danger"
+        console.print(f"  [{color}]subsystems {online}/{total} online[/]  {names}")
+        stats = await api_get(client, "/stats")
+        if stats:
+            models = stats.get("models", [])
+            m0 = models[0] if models else "none"
+            console.print(f"  model={m0}")
+        console.print()
+        return
+
     status_parts = []
     for name, status in health.items():
         style = _status_style(status)
@@ -354,7 +408,9 @@ async def stream_chat(client: httpx.AsyncClient, message: str):
                     if response_started:
                         console.print()  # newline after streamed text
                         # Re-render as markdown if it contains formatting
-                        if any(c in full_text for c in ["#", "```", "**", "- ", "1."]):
+                        if (not cli_minimal_ui()) and any(
+                            c in full_text for c in ["#", "```", "**", "- ", "1."]
+                        ):
                             console.print()
                             md = Markdown(full_text)
                             console.print(
@@ -407,7 +463,7 @@ async def cmd_help(client, args):
     """Show available commands."""
     table = Table(
         title="deltai TERMINAL COMMANDS",
-        box=box.SIMPLE_HEAVY,
+        box=_rich_box(),
         border_style="accent",
         title_style="heading",
         show_header=True,
@@ -454,7 +510,7 @@ async def cmd_health(client, args):
 
     table = Table(
         title="SUBSYSTEM HEALTH",
-        box=box.SIMPLE_HEAVY,
+        box=_rich_box(),
         border_style="accent",
         title_style="heading",
     )
@@ -484,7 +540,7 @@ async def cmd_stats(client, args):
 
     table = Table(
         title="SYSTEM STATUS",
-        box=box.SIMPLE_HEAVY,
+        box=_rich_box(),
         border_style="accent",
         title_style="heading",
     )
@@ -587,7 +643,7 @@ async def cmd_resources(client, args):
 
     table = Table(
         title="RESOURCE STATUS",
-        box=box.SIMPLE_HEAVY,
+        box=_rich_box(),
         border_style="accent",
         title_style="heading",
     )
@@ -742,7 +798,7 @@ async def cmd_events(client, args):
 
     table = Table(
         title=f"HEALTH EVENTS (last {limit})",
-        box=box.SIMPLE_HEAVY,
+        box=_rich_box(),
         border_style="accent",
         title_style="heading",
     )
@@ -824,7 +880,10 @@ async def repl(client: httpx.AsyncClient):
         try:
             # Prompt
             try:
-                raw = console.input("[deltai]deltai >[/] ")
+                if cli_minimal_ui():
+                    raw = input("deltai> ")
+                else:
+                    raw = console.input("[deltai]deltai >[/] ")
             except EOFError:
                 break
 
@@ -861,10 +920,13 @@ async def repl(client: httpx.AsyncClient):
 
 
 async def main():
+    if any(a in ("--minimal", "-q") for a in sys.argv[1:]):
+        os.environ["DELTAI_CLI_MINIMAL"] = "1"
+
     # Parse simple CLI args
     host = DEFAULT_HOST
     port = DEFAULT_PORT
-    show_banner = True
+    show_banner = not cli_minimal_ui()
 
     args = sys.argv[1:]
     i = 0
@@ -878,6 +940,8 @@ async def main():
         elif args[i] == "--no-banner":
             show_banner = False
             i += 1
+        elif args[i] in ("--minimal", "-q"):
+            i += 1
         else:
             i += 1
 
@@ -887,6 +951,9 @@ async def main():
     if show_banner:
         console.print()
         print_banner()
+    elif cli_minimal_ui():
+        console.print(f"  deltai CLI  v{VERSION}  -> {base_url}")
+        console.print()
 
     # Connect
     console.print(f"  [dim]Connecting to deltai backend at {base_url}...[/]")
@@ -900,9 +967,9 @@ async def main():
                 Panel(
                     f"Cannot reach deltai backend at {base_url}\n\n"
                     "Start the backend first:\n"
-                    "  cd ~/deltai/project\n"
-                    "  .\\venv\\Scripts\\activate\n"
-                    "  uvicorn main:app --port 8000",
+                    "  cd /path/to/deltai/project\n"
+                    f"  {_venv_activate_cmd()}\n"
+                    "  uvicorn main:app --host 127.0.0.1 --port 8000",
                     border_style="danger",
                     title="[danger]CONNECTION FAILED[/]",
                 )
