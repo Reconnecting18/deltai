@@ -13,6 +13,7 @@ import subprocess
 import path_guard
 import psutil
 import safe_errors
+import shell_validation
 import url_safety
 
 _LOG = logging.getLogger("deltai.executor")
@@ -37,41 +38,6 @@ PROTECTED_PATHS = [
     "/bin",
 ]
 
-BLOCKED_COMMANDS = [
-    # Filesystem destruction
-    "rm -rf /",
-    "rm -rf /*",
-    "mkfs",
-    "dd if=",
-    # Privilege escalation
-    "sudo ",
-    "su -",
-    "sudo -i",
-    "chmod 777 /",
-    "chown root",
-    # User/group manipulation
-    "useradd",
-    "userdel",
-    "usermod",
-    "groupadd",
-    "groupdel",
-    "passwd ",
-    # System shutdown/reboot
-    "shutdown",
-    "reboot",
-    "halt",
-    "poweroff",
-    "init 0",
-    "init 6",
-    # Dangerous network ops
-    "wget ",
-    "curl ",
-    "nc -",
-    # Fork bomb and shell escape patterns
-    ":(){ :|:& };:",
-    "> /dev/sda",
-]
-
 
 def _is_path_safe_write(path: str) -> bool:
     normalized = os.path.normpath(path).lower()
@@ -82,11 +48,8 @@ def _is_path_safe_write(path: str) -> bool:
 
 
 def _is_command_safe(cmd: str) -> bool:
-    lower = cmd.lower().strip()
-    for blocked in BLOCKED_COMMANDS:
-        if blocked in lower:
-            return False
-    return True
+    """Backward-compatible guard used by tests; delegates to shell_validation."""
+    return shell_validation.is_bash_c_command_allowed(cmd)
 
 
 # ── TYPE COERCION ───────────────────────────────────────────────────────
@@ -236,10 +199,12 @@ def run_shell(command: str, timeout=15) -> str:
     try:
         timeout = _coerce_int(timeout, 15)
         timeout = min(timeout, 30)
-        if not _is_command_safe(command):
-            return f"ERROR: Command blocked for safety: {command}"
+        try:
+            safe_cmd = shell_validation.validated_bash_c_command(command)
+        except (TypeError, ValueError) as e:
+            return f"ERROR: Command blocked for safety: {e}"
         result = subprocess.run(
-            ["bash", "-c", command],
+            ["bash", "--norc", "--noprofile", "-c", safe_cmd],
             capture_output=True,
             text=True,
             timeout=timeout,

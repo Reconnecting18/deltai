@@ -1,0 +1,9 @@
+# CodeQL barrier models: strings produced by shell_validation are validated before bash -c / SSH.
+# Matches CWE-78 / py/command-line-injection sinks tied to subprocess with controlled argv tails.
+extensions:
+  - addsTo:
+      pack: codeql/python-all
+      extensible: barrierModel
+    data:
+      - ["shell_validation", "Member[validated_bash_c_command].ReturnValue", "command-line-injection"]
+      - ["shell_validation", "Member[validated_remote_stdin_script].ReturnValue", "command-line-injection"]
