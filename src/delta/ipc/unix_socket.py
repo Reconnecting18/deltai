@@ -8,9 +8,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+_IPC_CLIENT_ERROR = "An internal error occurred"
 
 
 class IPCServer:
@@ -54,10 +59,11 @@ class IPCServer:
             )
             writer.write((json.dumps(result) + "\n").encode("utf-8"))
             await writer.drain()
-        except Exception as exc:
+        except Exception:
+            logger.exception("IPC request handling failed")
             error_payload = {
                 "status": "error",
-                "output": str(exc),
+                "output": _IPC_CLIENT_ERROR,
                 "agent": "none",
             }
             writer.write((json.dumps(error_payload) + "\n").encode("utf-8"))

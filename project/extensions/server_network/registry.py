@@ -282,8 +282,9 @@ def probe_server(server_id: str, timeout_sec: int = 8) -> dict[str, Any]:
         )
     except subprocess.TimeoutExpired:
         return {"server_id": server_id, "reachable": False, "error": "timeout"}
-    except OSError as exc:
-        return {"server_id": server_id, "reachable": False, "error": str(exc)}
+    except OSError:
+        logger.exception("probe_server ssh subprocess failed server_id=%s", server_id)
+        return {"server_id": server_id, "reachable": False, "error": "local_ssh_error"}
     ok = proc.returncode == 0
     err = (proc.stderr or "").strip()[:2000] if not ok else ""
     return {"server_id": server_id, "reachable": ok, "returncode": proc.returncode, "stderr": err}
