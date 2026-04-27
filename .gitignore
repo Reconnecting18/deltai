@@ -2,6 +2,7 @@
 *.egg-info/
 project/venv/
 venv/
+.venv-mcp/
 project/__pycache__/
 project/*.pyc
 project/.env
