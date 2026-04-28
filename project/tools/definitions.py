@@ -524,17 +524,6 @@ _ARCH_EXT_TOOL_NAMES = {
     "arch_rollback_plan",
 }
 
-# server_network extension (project/extensions/server_network/)
-_SERVER_NETWORK_TOOL_NAMES = {
-    "server_network_list",
-    "server_network_add",
-    "server_network_update",
-    "server_network_remove",
-    "server_network_probe",
-    "server_network_run_command",
-    "server_network_run_script",
-}
-
 # Domain-specific tool sets
 TOOL_DOMAIN_MAP = {
     "racing": {
@@ -575,8 +564,7 @@ TOOL_DOMAIN_MAP = {
         "repair_subsystem",
         "resource_status",
     }
-    | _ARCH_EXT_TOOL_NAMES
-    | _SERVER_NETWORK_TOOL_NAMES,
+    | _ARCH_EXT_TOOL_NAMES,
     "diagnostics": {
         "self_diagnostics",
         "manage_ollama_models",
@@ -603,13 +591,6 @@ _ARCH_PATTERNS = _re.compile(
     r"kernel\s*upgrade|rolling\s*release)\b",
     _re.IGNORECASE,
 )
-_NETWORK_PATTERNS = _re.compile(
-    r"\b(server|servers|ssh|inventory|datacenter|homelab|remote\s*host|"
-    r"server\s*network|ansible|provision)\b",
-    _re.IGNORECASE,
-)
-
-
 def filter_tools(
     tools: list,
     domain: str | None = None,
@@ -641,8 +622,6 @@ def filter_tools(
         relevant_names |= TOOL_DOMAIN_MAP.get("diagnostics", set())
     if _ARCH_PATTERNS.search(query):
         relevant_names |= _ARCH_EXT_TOOL_NAMES
-    if _NETWORK_PATTERNS.search(query):
-        relevant_names |= _SERVER_NETWORK_TOOL_NAMES
 
     # Add domain-specific tools
     if domain and domain in TOOL_DOMAIN_MAP:
@@ -658,7 +637,6 @@ def filter_tools(
         and not _SYSTEM_PATTERNS.search(query)
         and not _DIAG_PATTERNS.search(query)
         and not _ARCH_PATTERNS.search(query)
-        and not _NETWORK_PATTERNS.search(query)
     ):
         # General query: include common tools but skip diagnostics
         relevant_names = {
@@ -682,9 +660,6 @@ def filter_tools(
     if tier <= 1 and len(relevant_names) > 6:
         # Prioritize: universal + domain-specific, drop less common
         priority = list(_UNIVERSAL_TOOLS)
-        for essential in ("server_network_list", "server_network_probe"):
-            if essential in relevant_names and essential not in priority and len(priority) < 6:
-                priority.append(essential)
         for name in relevant_names:
             if name not in priority and len(priority) < 6:
                 priority.append(name)

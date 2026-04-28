@@ -6,7 +6,7 @@ Short context for Cursor, Copilot, and other coding agents. **Full architecture,
 
 - **Project dev app** — [`project/main.py`](project/main.py) via `uvicorn` on **TCP** `127.0.0.1:8000`: `POST /chat` (NDJSON), ingest, training, WebSocket, dashboard. This is what `curl` examples targeting `:8000` use.
 - **Packaged daemon** — `delta-daemon` ([`src/delta/daemon/app.py`](src/delta/daemon/app.py)) on a **Unix domain socket** (`DELTA_DAEMON_SOCKET`): `GET /health`, `POST /v1/execute` (orchestrator). The [`deltai`](src/delta/interfaces/cli.py) / `delta` CLI talks to this socket (`deltai` / `deltai status` for a health panel, `deltai health`, `deltai reference`, etc.), not to `:8000` by default.
-- **Git branches** — keep a long-lived `personal` branch in sync with `main` (merge or rebase); see [docs/git-workflow.md](docs/git-workflow.md).
+- **Git branches** — **`main`** = **core architecture only** (small upstream: shared backend, RAG, tools, `example_extension`, `training`). **`personal`** = **your fork/overlay**: merge `main` often, then add optional extensions and tooling (e.g. server inventory, Arch guard, Appwrite) with `git add -f project/extensions/<name>/`. Never bulk-merge `personal` into `main`. Details: [CLAUDE.md](CLAUDE.md) (branch table), [docs/git-workflow.md](docs/git-workflow.md).
 
 ## What this is
 
@@ -34,7 +34,7 @@ It is the open, user-controlled Linux answer to Copilot+Windows — built around
 | Runtime data (gitignored) | `data/` |
 | Scripts | `scripts/` |
 
-Domain-specific automation (e.g. distro maintenance assistants) belongs in `project/extensions/`, not in `project/main.py` or core tool definitions, unless it is a generic primitive reused everywhere. The **`main`** branch keeps the default tree small (optional extension dirs are often gitignored); the **`personal`** branch can `git add -f` extra extensions (e.g. Arch update guard) and optional Cursor rules — see [docs/git-workflow.md](docs/git-workflow.md).
+Domain-specific automation belongs in `project/extensions/`, not in `project/main.py`, unless it is a generic primitive reused everywhere. **`main`** intentionally omits maintainer-specific extensions (homelab SSH inventory, Arch guard, Appwrite bridge, etc.); add those on **`personal`** with `git add -f` — see [docs/git-workflow.md](docs/git-workflow.md).
 
 ## How to run (development)
 

@@ -6,9 +6,9 @@ deltai keeps a **small upstream core** and pushes optional features into [`proje
 
 | Branch | Purpose |
 |--------|---------|
-| **`main`** | Shareable **lightweight** upstream: core daemon, router, RAG, shared tools, and a small set of always-tracked extensions (`example_extension`, `training`, `server_network` — see [`.gitignore`](../.gitignore)). Optional personal-only trees (e.g. Arch update guard) stay **untracked** on `main` (gitignored) so the default clone is minimal. |
+| **`main`** | Shareable **lightweight** upstream: core daemon, router, RAG, shared tools, and only **`example_extension`** + **`training`** under `project/extensions/` (see [`.gitignore`](../.gitignore)). Homelab / distro / cloud-bridge packages (e.g. `server_network`, `arch_update_guard`, `appwrite_bridge`) are **not** tracked here — default clone stays minimal. |
 | **`feature/*`** | Short-lived work you intend to merge into `main` via PR (e.g. `feature/workstation-cloud-arch`). |
-| **`personal`** | Long-lived overlay: pull shared core with `main`, then add optional extensions and Cursor/IDE “plugin” config you want on every machine. **Example:** `git add -f project/extensions/arch_update_guard/` so Arch update guard is installed in your fork. Remove or stop tracking a directory to “uninstall” that overlay. Not merged wholesale into `main`. |
+| **`personal`** | Long-lived overlay: merge `main`, then add **your** integrations — optional extensions (`git add -f project/extensions/<name>/`), Cursor rules, etc. Examples: server inventory + SSH tools, Arch update guard, Appwrite bridge. Remove or stop tracking a directory to “uninstall” that overlay. Not merged wholesale into `main`. |
 
 Do **not** merge `personal` → `main` in bulk. Promote changes with cherry-picks or a fresh branch from `main` and a focused PR.
 
@@ -23,8 +23,8 @@ Do **not** merge `personal` → `main` in bulk. Promote changes with cherry-pick
 | Kind of change | Branch / mechanism |
 |----------------|-------------------|
 | Core daemon, router, RAG, shared tools | **`main`** (via PR) |
-| Extension you want **everyone** to get | **`main`**: add `!project/extensions/your_pkg/` in [`.gitignore`](../.gitignore) and commit the tree |
-| Extension **only for you** (e.g. Arch update guard) | **`personal`**: `project/extensions/*/` is gitignored by default. Keep `main` free of that tree; on `personal`, `git add -f project/extensions/arch_update_guard/` (or your package) so it versions with your branch. |
+| Extension you want **everyone** to get | **`main`**: add `!project/extensions/your_pkg/` in [`.gitignore`](../.gitignore) and commit the tree (prefer keeping `main` to core + training only). |
+| Extension **only for you** (Arch guard, server network, Appwrite, …) | **`personal`**: `project/extensions/*/` is gitignored by default. On `personal`, `git add -f project/extensions/<name>/` so it versions with your branch; **`main`** stays free of those trees. |
 | Secrets, local experiments you never push | [`.git/info/exclude`](https://git-scm.com/docs/gitignore) or local ignore; never commit |
 
 See [project/extensions/README.md](../project/extensions/README.md) for extension authoring.

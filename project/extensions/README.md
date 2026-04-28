@@ -4,6 +4,8 @@ This directory is your personal space for features that don't belong in deltai's
 Drop a package (a folder with `__init__.py`) here and it is auto-discovered at startup —
 no edits to core files required.
 
+**Branch policy:** On **`main`**, only **`example_extension/`** and **`training/`** are tracked; everything else under `project/extensions/*/` is gitignored so the public tree stays small. On **`personal`**, use `git add -f project/extensions/<your_pkg>/` for overlays (server inventory, Arch guard, Appwrite, etc.). See [docs/git-workflow.md](../../docs/git-workflow.md) and [CLAUDE.md](../../CLAUDE.md).
+
 ---
 
 ## Quick start
@@ -101,7 +103,7 @@ Add a line to the project-level `.gitignore` (or a local `.git/info/exclude`) fo
 project/extensions/my_feature/
 ```
 
-The `example_extension/` ships as a reference; your own packages are yours to manage. **Arch update guard** is an optional in-repo extension: `project/extensions/arch_update_guard/` (gitignored on `main` by default; use `git add -f` on `personal` to track it — see [docs/git-workflow.md](../../docs/git-workflow.md)).
+The `example_extension/` ships as a reference; your own packages are yours to manage. **Examples of `personal`-only overlays** (not on `main`): **`arch_update_guard/`**, **`server_network/`**, **`appwrite_bridge/`** — use `git add -f` on **`personal`** to track them (see [docs/git-workflow.md](../../docs/git-workflow.md)).
 
 ---
 
@@ -112,7 +114,7 @@ deltai has more than one way to extend behavior; pick the surface that matches *
 | Mechanism | Process | Use when |
 |-----------|---------|----------|
 | **`project/extensions/`** (this dir) | Full backend `project/main.py` | In-repo packages: routes, tools, startup hooks; no core edits. |
-| **`project/extensions/arch_update_guard/`** (optional) | Same full backend | Arch Linux maintenance assistant (API, scheduler, tools). Toggle with **`ARCH_GUARD_*`** env vars (see `project/extensions/arch_update_guard/settings.py` when the tree is present). |
+| **`project/extensions/arch_update_guard/`** (`personal` typical) | Same full backend | Arch Linux maintenance assistant (API, scheduler, tools). Not on **`main`**; toggle with **`ARCH_GUARD_*`** when the tree is present. |
 | **`delta.core.PluginManager`** | **`delta-daemon`** only (`delta-daemon` systemd service) | End-user `.py` plugins under XDG + `extensions.toml`; managed with **`deltai plugin install|unload`**. |
 
 See [`src/delta/core/README.md`](../../src/delta/core/README.md) for daemon plugins. Arch Update Guard’s CLI entrypoint (`arch-update-guard`) needs the **`project/`** tree on disk; set **`DELTAI_PROJECT_ROOT`** if you installed the wheel outside the clone.

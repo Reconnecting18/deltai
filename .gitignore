@@ -75,7 +75,6 @@ deltai.wiki/
 project/extensions/*/
 !project/extensions/example_extension/
 !project/extensions/training/
-!project/extensions/server_network/
 !project/extensions/__init__.py
 !project/extensions/README.md
 
