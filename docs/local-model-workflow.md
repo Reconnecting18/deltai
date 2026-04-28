@@ -70,7 +70,7 @@ Content-Type: application/json
 - **List:** `GET http://127.0.0.1:8000/knowledge/gaps`
 - **Resolve after you add a knowledge article or fix ingest:** `POST http://127.0.0.1:8000/knowledge/gaps/{id}/resolve`
 
-Gaps are logged from low quality scores and related signals (see [project/main.py](../project/main.py) and persistence layer).
+Gaps are logged from low quality scores and related signals (see [project/deltai_api/core.py](../project/deltai_api/core.py) chat/history path and persistence layer).
 
 ### A.5 Hierarchical memory (optional maintenance)
 
@@ -121,7 +121,7 @@ When a **GPU focus session** is active (heavy foreground workload detected or ma
 
 ### C.1 Automatic capture from chat
 
-After each turn, [project/main.py](../project/main.py) calls `smart_auto_capture()` into dataset **`deltai-auto`** (quality-tiered; poor turns may land in **`deltai-auto-negative`** for DPO). Ensure `SMART_CAPTURE_ENABLED` matches your intent.
+After each turn, the project app ([project/deltai_api/core.py](../project/deltai_api/core.py)) calls `smart_auto_capture()` into dataset **`deltai-auto`** (quality-tiered; poor turns may land in **`deltai-auto-negative`** for DPO). Ensure `SMART_CAPTURE_ENABLED` matches your intent.
 
 ### C.2 Weak domains and improvement cycle
 

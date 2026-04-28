@@ -47,6 +47,8 @@ deltai is **not** a GUI assistant, not a desktop environment replacement, and no
 
 ## Architecture
 
+The full-stack dev server is `project/main.py` (routes and middleware) plus `project/deltai_api/core.py` (background work and chat implementation). The systemd-oriented **`delta-daemon`** is a separate, smaller surface ([docs/capability-matrix.md](docs/capability-matrix.md)).
+
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  Clients (any of the following)                              │

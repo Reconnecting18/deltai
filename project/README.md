@@ -1,6 +1,6 @@
 # deltai — FastAPI backend (`project/`)
 
-This directory is the **main HTTP daemon**: FastAPI app (`main.py`), router, RAG, tools, training hooks, and the single-file dashboard under `static/`. User-facing product docs and philosophy live in the repository root [README.md](../README.md). Deep assistant context: [CLAUDE.md](../CLAUDE.md).
+This directory is the **main HTTP daemon**: FastAPI entrypoint (`main.py`), shared implementation (`deltai_api/core.py` — lifespan, chat, ingest pipeline, resource manager), router, RAG, tools, training hooks, and the single-file dashboard under `static/`. User-facing product docs and philosophy live in the repository root [README.md](../README.md). Project app vs packaged daemon: [docs/capability-matrix.md](../docs/capability-matrix.md). Deep assistant context: [CLAUDE.md](../CLAUDE.md).
 
 ## Prerequisites
 

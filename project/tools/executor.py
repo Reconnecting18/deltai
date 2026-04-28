@@ -19,6 +19,12 @@ import url_safety
 _LOG = logging.getLogger("deltai.executor")
 _TOOL_ERR = "An unexpected error occurred"
 
+try:
+    from deltai_api.logging_setup import get_request_id
+except ImportError:
+    def get_request_id():
+        return None
+
 
 def _tool_error(exc: BaseException, log_message: str) -> str:
     safe_errors.log_exception(_LOG, log_message, exc)
@@ -1852,6 +1858,9 @@ def register_handler(name: str, fn) -> None:
 
 def execute_tool(name: str, arguments: dict) -> str:
     """Execute a tool by name with given arguments. Returns result string."""
+    _rid = get_request_id()
+    if _rid:
+        _LOG.info("execute_tool name=%s request_id=%s", name, _rid)
     fn = EXECUTORS.get(name)
     if not fn:
         return f"ERROR: Unknown tool '{name}'"

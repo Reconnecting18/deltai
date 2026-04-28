@@ -161,17 +161,18 @@ print("\n=== IDLE TRACKING ===\n")
 
 @test("IT 1: _is_idle returns True when no chat activity")
 def test_idle_default():
+    import deltai_api.core as core
     import main
 
-    old_start = main._last_chat_start
-    old_end = main._last_chat_end
+    old_start = core._last_chat_start
+    old_end = core._last_chat_end
     try:
-        main._last_chat_start = 0.0
-        main._last_chat_end = time.time() - 60  # 60s ago
+        core._last_chat_start = 0.0
+        core._last_chat_end = time.time() - 60  # 60s ago
         assert main._is_idle(), "Should be idle with no recent chat"
     finally:
-        main._last_chat_start = old_start
-        main._last_chat_end = old_end
+        core._last_chat_start = old_start
+        core._last_chat_end = old_end
 
 
 test_idle_default()
@@ -179,17 +180,18 @@ test_idle_default()
 
 @test("IT 2: _is_idle returns False during active chat")
 def test_idle_during_chat():
+    import deltai_api.core as core
     import main
 
-    old_start = main._last_chat_start
-    old_end = main._last_chat_end
+    old_start = core._last_chat_start
+    old_end = core._last_chat_end
     try:
-        main._last_chat_start = time.time()
-        main._last_chat_end = time.time() - 10  # end before start = active
+        core._last_chat_start = time.time()
+        core._last_chat_end = time.time() - 10  # end before start = active
         assert not main._is_idle(), "Should NOT be idle during active chat"
     finally:
-        main._last_chat_start = old_start
-        main._last_chat_end = old_end
+        core._last_chat_start = old_start
+        core._last_chat_end = old_end
 
 
 test_idle_during_chat()
@@ -197,17 +199,18 @@ test_idle_during_chat()
 
 @test("IT 3: _is_idle returns False within 30s of last chat")
 def test_idle_breathing_room():
+    import deltai_api.core as core
     import main
 
-    old_start = main._last_chat_start
-    old_end = main._last_chat_end
+    old_start = core._last_chat_start
+    old_end = core._last_chat_end
     try:
-        main._last_chat_start = time.time() - 20
-        main._last_chat_end = time.time() - 10  # 10s ago
+        core._last_chat_start = time.time() - 20
+        core._last_chat_end = time.time() - 10  # 10s ago
         assert not main._is_idle(), "Should NOT be idle within 30s of last chat"
     finally:
-        main._last_chat_start = old_start
-        main._last_chat_end = old_end
+        core._last_chat_start = old_start
+        core._last_chat_end = old_end
 
 
 test_idle_breathing_room()
@@ -322,18 +325,19 @@ test_sh_registered()
 
 @test("SH 4: Self-heal skips when not idle")
 def test_sh_skip_active():
+    import deltai_api.core as core
     import main
 
     # During active chat, self-heal should skip
-    old_start = main._last_chat_start
-    old_end = main._last_chat_end
+    old_start = core._last_chat_start
+    old_end = core._last_chat_end
     try:
-        main._last_chat_start = time.time()
-        main._last_chat_end = 0.0
+        core._last_chat_start = time.time()
+        core._last_chat_end = 0.0
         assert not main._is_idle()
     finally:
-        main._last_chat_start = old_start
-        main._last_chat_end = old_end
+        core._last_chat_start = old_start
+        core._last_chat_end = old_end
 
 
 test_sh_skip_active()

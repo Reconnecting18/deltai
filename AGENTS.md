@@ -4,7 +4,7 @@ Short context for Cursor, Copilot, and other coding agents. **Full architecture,
 
 ## Two runtimes (do not confuse them)
 
-- **Project dev app** — [`project/main.py`](project/main.py) via `uvicorn` on **TCP** `127.0.0.1:8000`: `POST /chat` (NDJSON), ingest, training, WebSocket, dashboard. This is what `curl` examples targeting `:8000` use.
+- **Project dev app** — [`project/main.py`](project/main.py) (HTTP routes + middleware) and [`project/deltai_api/core.py`](project/deltai_api/core.py) (lifespan, chat, ingest worker, resource loops) via `uvicorn` on **TCP** `127.0.0.1:8000`: `POST /chat` (NDJSON), ingest, training, WebSocket, dashboard. Capability split vs `delta-daemon`: [docs/capability-matrix.md](docs/capability-matrix.md).
 - **Packaged daemon** — `delta-daemon` ([`src/delta/daemon/app.py`](src/delta/daemon/app.py)) on a **Unix domain socket** (`DELTA_DAEMON_SOCKET`): `GET /health`, `POST /v1/execute` (orchestrator). The [`deltai`](src/delta/interfaces/cli.py) / `delta` CLI talks to this socket (`deltai` / `deltai status` for a health panel, `deltai health`, `deltai reference`, etc.), not to `:8000` by default.
 - **Git branches** — **`main`** = **core architecture only** (small upstream: shared backend, RAG, tools, `example_extension`, `training`). **`personal`** = **your fork/overlay**: merge `main` often, then add optional extensions and tooling (e.g. server inventory, Arch guard, Appwrite) with `git add -f project/extensions/<name>/`. Never bulk-merge `personal` into `main`. Details: [CLAUDE.md](CLAUDE.md) (branch table), [docs/git-workflow.md](docs/git-workflow.md).
 
@@ -21,7 +21,7 @@ It is the open, user-controlled Linux answer to Copilot+Windows — built around
 - **Linux paths only.** No `C:\...` Windows paths anywhere in code or config.
 - **User choice.** Every feature is opt-in. Defaults must be safe and minimal.
 - **No lock-in.** Local models are the default. Cloud is dormant until explicitly configured.
-- **Network exposure:** Run the API on `127.0.0.1` unless you understand the risk: there is no default auth on `/chat` or tools. Optional **`DELTAI_INGEST_API_KEY`** locks ingest-related routes; see [CLAUDE.md](CLAUDE.md) Security posture.
+- **Network exposure:** Run the API on `127.0.0.1` unless you understand the risk: there is no default auth on `/chat` or tools. Optional **`DELTAI_CHAT_API_KEY`** locks `POST /chat`; **`DELTAI_INGEST_API_KEY`** locks ingest-related routes; see [CLAUDE.md](CLAUDE.md) Security posture.
 
 ## Repository paths
 

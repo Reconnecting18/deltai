@@ -71,9 +71,9 @@ When editing docs or code, be explicit which branch you assume: default public i
 
 ## Architecture
 
-### Backend (project/main.py)
+### Backend (`project/main.py` + `project/deltai_api/`)
 
-FastAPI application for **development and full-stack use**: bind with `uvicorn main:app --host 127.0.0.1 --port 8000` from the `project/` directory. This is **not** the process started by `systemd` (that is **`delta-daemon`** — see below).
+FastAPI application for **development and full-stack use**: bind with `uvicorn main:app --host 127.0.0.1 --port 8000` from the `project/` directory. This is **not** the process started by `systemd` (that is **`delta-daemon`** — see below). Lifespan, background loops, chat logic, ingest pipeline worker, and shared state live in **`project/deltai_api/core.py`**; **`project/main.py`** is the entrypoint (middleware, static mount, extension bootstrap, HTTP route table). See [docs/capability-matrix.md](docs/capability-matrix.md) for **project app vs delta-daemon** features.
 
 Key subsystems:
 - **Chat endpoint** (`POST /chat`) — NDJSON streaming, three paths: local, cloud, split
@@ -91,7 +91,7 @@ The **`delta-daemon`** entrypoint ([`src/delta/daemon/server.py`](src/delta/daem
 - **`GET /health`** — liveness JSON (`status`, `service`)
 - **`POST /v1/execute`** — orchestrator: JSON body `{"query": "...", "source": "...", "session_id": null}` → JSON response (`status`, `output`, `agent`). **Not** NDJSON streaming.
 
-At startup the daemon loads optional plugins, starts Unix-socket IPC ([`delta.ipc`](src/delta/ipc/unix_socket.py)), and wires [Orchestrator](src/delta/orchestrator/core.py). Ingest, `POST /chat`, and training live on **`project/main.py`**, not on this app.
+At startup the daemon loads optional plugins, starts Unix-socket IPC ([`delta.ipc`](src/delta/ipc/unix_socket.py)), and wires [Orchestrator](src/delta/orchestrator/core.py). Ingest, `POST /chat`, and training live on the **project app** (`project/main.py` / `deltai_api`), not on this app.
 
 ### Router (project/router.py)
 
@@ -180,7 +180,10 @@ See `project/extensions/README.md` for the full authoring guide and `project/ext
 
 | File | Purpose |
 |------|---------|
-| `project/main.py` | FastAPI app — all chat paths, ReAct loop, ingest pipeline, resource self-manager, WebSocket, training endpoints |
+| `project/main.py` | FastAPI entry — CORS, request-ID middleware, static mount, extensions, HTTP routes (re-exports `deltai_api.core` symbols for tests and compatibility) |
+| `project/deltai_api/core.py` | Shared app implementation — lifespan, background tasks, chat/ReAct/ingest worker, circuit breaker, resource manager, history, RAG helpers |
+| `project/deltai_api/logging_setup.py` | Optional JSON logs (`DELTAI_LOG_JSON`) and `X-Request-ID` / ContextVar correlation |
+| `docs/capability-matrix.md` | **Project app vs delta-daemon** feature matrix |
 | `project/router.py` | VRAM detection, tier classification, quant selection, partial offload, cloud budget, adaptive routing |
 | `project/memory.py` | ChromaDB RAG, hierarchical storage, iterative retrieval, dedup, ingest |
 | `project/quality.py` | Response quality scorer, drives capture + routing feedback + gap detection |
@@ -306,6 +309,10 @@ INGEST_FLUSH_INTERVAL=2.0
 # Security (optional — defaults preserve single-user localhost dev)
 # When set, ingest routes require X-Deltai-Ingest-Key or Authorization: Bearer <same value>
 # DELTAI_INGEST_API_KEY=
+# When set, POST /chat requires X-Deltai-Chat-Key or Authorization: Bearer <same value>
+# DELTAI_CHAT_API_KEY=
+# Structured JSON logs on stderr (1/true/yes/on)
+# DELTAI_LOG_JSON=false
 # Comma-separated browser origins for CORS; unset = allow all origins (see Security posture)
 # DELTAI_CORS_ORIGINS=http://127.0.0.1:8000,http://localhost:8000
 
@@ -320,11 +327,13 @@ DPO_ENABLED=false
 
 ## Security posture (operators)
 
-The **project** app targets **loopback TCP** (`uvicorn --host 127.0.0.1`); **`delta-daemon`** listens on a **Unix domain socket** for the same user. There is **no app-level auth** on `POST /chat` (project) or on daemon routes reachable via that socket: anything that can reach the bind address (or the socket) is treated as trusted.
+The **project** app targets **loopback TCP** (`uvicorn --host 127.0.0.1`); **`delta-daemon`** listens on a **Unix domain socket** for the same user. By default there is **no app-level auth** on `POST /chat` (project) or on daemon routes reachable via that socket: anything that can reach the bind address (or the socket) is treated as trusted. Optional **`DELTAI_CHAT_API_KEY`** locks **`POST /chat`** the same way as ingest (header or Bearer).
 
 - **Binding:** Do not expose the raw FastAPI app to `0.0.0.0` or a LAN address without a reverse proxy, firewall, and/or auth—**unauthenticated access equals full use of chat, tools, training, and RAG** for the Unix user running the process.
 - **`run_shell`:** The tool runs `bash -c` as that user. The keyword blocklist in `project/tools/executor.py` is **best effort only**, not a sandbox. Assume **arbitrary code execution** for that user if an attacker can drive tool calls.
+- **`POST /chat`:** Optional shared secret: set **`DELTAI_CHAT_API_KEY`** in `project/.env`. When set, clients must send **`X-Deltai-Chat-Key: <key>`** or **`Authorization: Bearer <key>`** on **`POST /chat`**. If unset, chat matches prior releases (open to the same network visibility as the app).
 - **`POST /ingest` (and related):** Optional shared secret: set **`DELTAI_INGEST_API_KEY`** in `project/.env`. When set, clients must send **`X-Deltai-Ingest-Key: <key>`** or **`Authorization: Bearer <key>`** for `POST /ingest`, `POST /ingest/batch`, `POST /ingest/cleanup`, `POST /memory/ingest`, and **`GET /ingest/pipeline/status`**. If unset, behavior matches prior releases (ingest open to the same network visibility as the daemon).
+- **Request correlation:** Incoming HTTP requests get an **`X-Request-ID`** (or reuse the client header). The ID is stored in a **ContextVar** and echoed on the response; tool execution logs it when **`DELTAI_LOG_JSON`** enables JSON logging (`project/deltai_api/logging_setup.py`).
 - **MCP HTTP** (`DELTAI_MCP_HTTP_ENABLE`): Off by default. When enabled, the Streamable HTTP MCP app is mounted under **`DELTAI_MCP_HTTP_PATH`** (e.g. `/mcp`) with the same tool surface as chat. Optional **`DELTAI_MCP_HTTP_KEY`** enforces Bearer / `X-Deltai-Mcp-Key`. **Stdio MCP** (`deltai-mcp` / `project/deltai_mcp_stdio.py`) runs as the current OS user; no HTTP exposure.
 - **CORS:** Default **`allow_origins=["*"]`**. For browser access from a limited set of pages (e.g. after switching away from loopback), set **`DELTAI_CORS_ORIGINS`** to a comma-separated allowlist. Empty/unset keeps `*`.
 - **Arch rollback (`arch_rollback_plan`):** By default the model cannot pass **`apply_etc: true`** with **`dry_run: false`** (captured `/etc` restore). Set **`DELTAI_TOOL_AUTO_APPROVE=1`** in `project/.env` to opt in. The **`arch-update-guard`** CLI and **`POST /arch-guard/rollback`** are unchanged for explicit operators.

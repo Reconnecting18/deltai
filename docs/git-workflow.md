@@ -22,7 +22,7 @@ Do **not** merge `personal` → `main` in bulk. Promote changes with cherry-pick
 
 | Kind of change | Branch / mechanism |
 |----------------|-------------------|
-| Core daemon, router, RAG, shared tools | **`main`** (via PR) |
+| Core daemon, router, RAG, shared tools, `project/deltai_api/` | **`main`** (via PR) — merge into **`personal`** as usual; keep extensions in `project/extensions/` only |
 | Extension you want **everyone** to get | **`main`**: add `!project/extensions/your_pkg/` in [`.gitignore`](../.gitignore) and commit the tree (prefer keeping `main` to core + training only). |
 | Extension **only for you** (Arch guard, server network, Appwrite, …) | **`personal`**: `project/extensions/*/` is gitignored by default. On `personal`, `git add -f project/extensions/<name>/` so it versions with your branch; **`main`** stays free of those trees. |
 | Secrets, local experiments you never push | [`.git/info/exclude`](https://git-scm.com/docs/gitignore) or local ignore; never commit |

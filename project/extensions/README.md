@@ -2,7 +2,7 @@
 
 This directory is your personal space for features that don't belong in deltai's core.
 Drop a package (a folder with `__init__.py`) here and it is auto-discovered at startup —
-no edits to core files required.
+no edits to `project/deltai_api/core.py` or `project/main.py` required for normal extensions (use `setup(app)` only).
 
 **Branch policy:** On **`main`**, only **`example_extension/`** and **`training/`** are tracked; everything else under `project/extensions/*/` is gitignored so the public tree stays small. On **`personal`**, use `git add -f project/extensions/<your_pkg>/` for overlays (server inventory, Arch guard, Appwrite, etc.). See [docs/git-workflow.md](../../docs/git-workflow.md) and [CLAUDE.md](../../CLAUDE.md).
 
