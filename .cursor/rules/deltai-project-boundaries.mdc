@@ -5,6 +5,7 @@ alwaysApply: true
 
 # deltai project boundaries
 
+- **Git branches:** **`main`** is the **lightweight core** (daemon, RAG, shared tools, `example_extension` + `training` only). **`personal`** is for **your** overlays — extra extensions (e.g. `server_network`, `arch_update_guard`, `appwrite_bridge`) and integrations — merged from `main`, not the other way around. See [CLAUDE.md](../../CLAUDE.md) and [docs/git-workflow.md](../../docs/git-workflow.md).
 - **Scope:** deltai is the AI brain only (routing, RAG, tools, APIs). Do not add game telemetry parsers, UDP listeners, or domain-specific pipelines in-repo. External systems integrate via `POST /ingest` and related endpoints.
 - **Dashboard UI:** Keep the renderer in a single file: `project/static/index.html` (HTML + CSS + JS together). Do not split into a multi-file frontend unless the project explicitly migrates away from this pattern.
 - **PowerShell:** Do not use `&&` for command chaining. Use `;` or separate commands.
