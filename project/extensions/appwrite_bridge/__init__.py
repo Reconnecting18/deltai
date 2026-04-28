@@ -17,6 +17,8 @@ import re
 import shlex
 from typing import Any
 
+from safe_errors import log_exception, public_error_detail
+
 logger = logging.getLogger("deltai.extensions.appwrite_bridge")
 
 TOOLS = [
@@ -179,8 +181,8 @@ def _list_handler(
         out = aw.storage_list(bucket_id=bucket_id, limit=limit, offset=offset)
         return _json_result({"ok": True, "result": out})
     except Exception as exc:
-        logger.warning("appwrite_storage_list: %s", exc)
-        return _json_result({"ok": False, "error": str(exc)})
+        log_exception(logger, "appwrite_storage_list failed", exc)
+        return _json_result({"ok": False, "error": public_error_detail(exc)})
 
 
 def _upload_handler(
@@ -198,8 +200,8 @@ def _upload_handler(
         out = aw.storage_upload(local_path=resolved, bucket_id=bucket_id, file_id=file_id)
         return _json_result({"ok": True, "result": out, "local_path": resolved})
     except Exception as exc:
-        logger.warning("appwrite_storage_upload: %s", exc)
-        return _json_result({"ok": False, "error": str(exc)})
+        log_exception(logger, "appwrite_storage_upload failed", exc)
+        return _json_result({"ok": False, "error": public_error_detail(exc)})
 
 
 def _download_handler(
@@ -215,8 +217,8 @@ def _download_handler(
         out = aw.storage_download(file_id=file_id, local_path=resolved, bucket_id=bucket_id)
         return _json_result({"ok": True, "result": out})
     except Exception as exc:
-        logger.warning("appwrite_storage_download: %s", exc)
-        return _json_result({"ok": False, "error": str(exc)})
+        log_exception(logger, "appwrite_storage_download failed", exc)
+        return _json_result({"ok": False, "error": public_error_detail(exc)})
 
 
 def _delete_handler(file_id: str, bucket_id: str | None = None) -> str:
@@ -226,8 +228,8 @@ def _delete_handler(file_id: str, bucket_id: str | None = None) -> str:
         out = aw.storage_delete(file_id=file_id, bucket_id=bucket_id)
         return _json_result({"ok": True, "result": out})
     except Exception as exc:
-        logger.warning("appwrite_storage_delete: %s", exc)
-        return _json_result({"ok": False, "error": str(exc)})
+        log_exception(logger, "appwrite_storage_delete failed", exc)
+        return _json_result({"ok": False, "error": public_error_detail(exc)})
 
 
 def _execute_handler(
@@ -245,8 +247,8 @@ def _execute_handler(
         )
         return _json_result({"ok": True, "result": out})
     except Exception as exc:
-        logger.warning("appwrite_function_execute: %s", exc)
-        return _json_result({"ok": False, "error": str(exc)})
+        log_exception(logger, "appwrite_function_execute failed", exc)
+        return _json_result({"ok": False, "error": public_error_detail(exc)})
 
 
 def _bash_single_quoted(s: str) -> str:
@@ -316,10 +318,11 @@ exec curl -sS -X POST \\
         out = srv_reg.run_remote_script(server_id, script, timeout_sec=timeout_sec)
         return _json_result({"ok": True, "ssh": out, "hint": "check ssh.stdout for Appwrite JSON"})
     except ValueError as exc:
-        return _json_result({"ok": False, "error": str(exc)})
+        log_exception(logger, "appwrite_remote_storage_push validation failed", exc)
+        return _json_result({"ok": False, "error": public_error_detail(exc)})
     except Exception as exc:
-        logger.warning("appwrite_remote_storage_push: %s", exc)
-        return _json_result({"ok": False, "error": str(exc)})
+        log_exception(logger, "appwrite_remote_storage_push failed", exc)
+        return _json_result({"ok": False, "error": public_error_detail(exc)})
 
 
 def setup(app) -> None:

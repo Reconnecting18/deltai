@@ -12,6 +12,8 @@ import json
 import logging
 from typing import Any
 
+from safe_errors import public_error_detail
+
 logger = logging.getLogger("deltai.extensions.server_network")
 
 TOOLS = [
@@ -188,7 +190,7 @@ def _add_handler(
         )
         return _json_result({"ok": True, "server": rec})
     except ValueError as exc:
-        return _json_result({"ok": False, "error": str(exc)})
+        return _json_result({"ok": False, "error": public_error_detail(exc)})
 
 
 def _update_handler(
@@ -212,7 +214,7 @@ def _update_handler(
         )
         return _json_result({"ok": True, "server": rec})
     except ValueError as exc:
-        return _json_result({"ok": False, "error": str(exc)})
+        return _json_result({"ok": False, "error": public_error_detail(exc)})
 
 
 def _remove_handler(server_id: str) -> str:
@@ -229,7 +231,7 @@ def _probe_handler(server_id: str, timeout_sec: int = 8) -> str:
         out = reg.probe_server(server_id, timeout_sec=timeout_sec)
         return _json_result(out)
     except ValueError as exc:
-        return _json_result({"ok": False, "error": str(exc)})
+        return _json_result({"ok": False, "error": public_error_detail(exc)})
 
 
 def _run_cmd_handler(server_id: str, command: str, timeout_sec: int = 120) -> str:
@@ -239,7 +241,7 @@ def _run_cmd_handler(server_id: str, command: str, timeout_sec: int = 120) -> st
         out = reg.run_remote_command(server_id, command, timeout_sec=timeout_sec)
         return _json_result(out)
     except ValueError as exc:
-        return _json_result({"ok": False, "error": str(exc)})
+        return _json_result({"ok": False, "error": public_error_detail(exc)})
 
 
 def _run_script_handler(server_id: str, script: str, timeout_sec: int = 300) -> str:
@@ -249,7 +251,7 @@ def _run_script_handler(server_id: str, script: str, timeout_sec: int = 300) -> 
         out = reg.run_remote_script(server_id, script, timeout_sec=timeout_sec)
         return _json_result(out)
     except ValueError as exc:
-        return _json_result({"ok": False, "error": str(exc)})
+        return _json_result({"ok": False, "error": public_error_detail(exc)})
 
 
 def setup(app) -> None:
@@ -298,7 +300,7 @@ def setup(app) -> None:
         try:
             return {"ok": True, "server": reg.add_server(**body.model_dump())}
         except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": public_error_detail(exc)}
 
     @router.patch("/servers/{server_id}")
     def http_update_server(server_id: str, body: ServerUpdate):
@@ -307,7 +309,7 @@ def setup(app) -> None:
             d["server_id"] = server_id
             return {"ok": True, "server": reg.update_server(**d)}
         except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": public_error_detail(exc)}
 
     @router.delete("/servers/{server_id}")
     def http_remove_server(server_id: str):
