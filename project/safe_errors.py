@@ -6,14 +6,14 @@ import json
 import logging
 
 
-def _sanitize_for_log(value: object) -> str:
-    """Return a single-line representation suitable for plain-text logs."""
+def sanitize_for_log(value: object) -> str:
+    """Return a single-line representation suitable for plain-text logs (CWE-117)."""
     return str(value).replace("\r", "\\r").replace("\n", "\\n")
 
 
 def log_exception(logger: logging.Logger, message: str, exc: BaseException) -> None:
     """Log exception category without embedding exception text (CodeQL py/log-injection)."""
-    logger.error("%s [%s]", _sanitize_for_log(message), type(exc).__name__, exc_info=False)
+    logger.error("%s [%s]", sanitize_for_log(message), type(exc).__name__, exc_info=False)
 
 
 def public_error_detail(

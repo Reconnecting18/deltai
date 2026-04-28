@@ -19,6 +19,7 @@ from typing import Any
 
 import path_guard
 import shell_validation
+from safe_errors import sanitize_for_log
 
 logger = logging.getLogger("deltai.extensions.server_network")
 
@@ -108,7 +109,11 @@ def _load_raw() -> dict[str, Any]:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("server_network: could not read %s: %s", path, exc)
+        logger.warning(
+            "server_network: could not read %s [%s]",
+            sanitize_for_log(path),
+            type(exc).__name__,
+        )
         return {"schema_version": 1, "servers": []}
     if not isinstance(data, dict):
         return {"schema_version": 1, "servers": []}
@@ -300,7 +305,7 @@ def run_remote_command(server_id: str, command: str, timeout_sec: int = 120) -> 
     try:
         cmd_line = shell_validation.validated_bash_c_command(cmd_line, max_len=16000)
     except (TypeError, ValueError) as exc:
-        raise ValueError(str(exc)) from exc
+        raise ValueError("invalid remote command") from exc
     cmd = _ssh_base(rec) + [cmd_line]
     try:
         proc = subprocess.run(
@@ -327,7 +332,7 @@ def run_remote_script(server_id: str, script: str, timeout_sec: int = 300) -> di
     try:
         body = shell_validation.validated_remote_stdin_script(script or "", max_len=64000)
     except (TypeError, ValueError) as exc:
-        raise ValueError(str(exc)) from exc
+        raise ValueError("invalid remote script") from exc
     if not body.strip():
         raise ValueError("script must be non-empty")
     cmd = _ssh_base(rec) + ["bash", "-s"]

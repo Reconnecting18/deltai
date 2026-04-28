@@ -123,7 +123,10 @@ def init_db():
 
             init_arch_guard_tables(conn)
         except Exception as ag_exc:
-            logger.warning("arch_update_guard tables init skipped: %s", ag_exc)
+            logger.warning(
+                "arch_update_guard tables init skipped [%s]",
+                type(ag_exc).__name__,
+            )
         conn.commit()
     logger.info(f"Persistence DB initialized: {_db_path}")
 
