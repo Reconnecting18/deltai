@@ -27,6 +27,9 @@ project/~/.local/share/
 Thumbs.db
 desktop.ini
 
+# Editor / IDE vault metadata
+.obsidian/
+
 # Logs
 *.log
 npm-debug.log*
