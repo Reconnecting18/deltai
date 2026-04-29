@@ -12,7 +12,37 @@ import json
 import logging
 from typing import Any
 
+from pydantic import BaseModel
+
 from safe_errors import public_error_detail
+
+
+class ServerAdd(BaseModel):
+    host: str
+    user: str
+    port: int = 22
+    label: str | None = None
+    tags: list[str] | None = None
+    notes: str | None = None
+    identity_file: str | None = None
+
+
+class ServerUpdate(BaseModel):
+    label: str | None = None
+    tags: list[str] | None = None
+    notes: str | None = None
+    identity_file: str | None = None
+    clear_identity_file: bool = False
+
+
+class RunCommandBody(BaseModel):
+    command: str
+    timeout_sec: int = 120
+
+
+class ScriptBody(BaseModel):
+    script: str
+    timeout_sec: int = 300
 
 logger = logging.getLogger("deltai.extensions.server_network")
 
@@ -256,7 +286,6 @@ def _run_script_handler(server_id: str, script: str, timeout_sec: int = 300) -> 
 
 def setup(app) -> None:
     from fastapi import APIRouter
-    from pydantic import BaseModel
     from tools.executor import register_handler
 
     register_handler("server_network_list", _list_handler)
@@ -268,22 +297,6 @@ def setup(app) -> None:
     register_handler("server_network_run_script", _run_script_handler)
 
     from . import registry as reg
-
-    class ServerAdd(BaseModel):
-        host: str
-        user: str
-        port: int = 22
-        label: str | None = None
-        tags: list[str] | None = None
-        notes: str | None = None
-        identity_file: str | None = None
-
-    class ServerUpdate(BaseModel):
-        label: str | None = None
-        tags: list[str] | None = None
-        notes: str | None = None
-        identity_file: str | None = None
-        clear_identity_file: bool = False
 
     router = APIRouter(prefix="/ext/server_network", tags=["server_network"])
 
@@ -319,17 +332,9 @@ def setup(app) -> None:
     def http_probe(server_id: str, timeout_sec: int = 8):
         return reg.probe_server(server_id, timeout_sec=timeout_sec)
 
-    class RunCommandBody(BaseModel):
-        command: str
-        timeout_sec: int = 120
-
     @router.post("/servers/{server_id}/run")
     def http_run(server_id: str, body: RunCommandBody):
         return reg.run_remote_command(server_id, body.command, timeout_sec=body.timeout_sec)
-
-    class ScriptBody(BaseModel):
-        script: str
-        timeout_sec: int = 300
 
     @router.post("/servers/{server_id}/run-script")
     def http_run_script(server_id: str, body: ScriptBody):
