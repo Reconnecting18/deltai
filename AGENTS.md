@@ -1,6 +1,8 @@
 # deltai — Agent Onboarding
 
-Short context for Cursor, Copilot, and other coding agents. **Full architecture, endpoints, stream protocol, and development workflow live in [CLAUDE.md](CLAUDE.md).** Update that file when behavior or structure changes.
+Short context for Claude Code, Cursor, Copilot, OpenAI Codex, and any other coding agent that reads project context. **Full architecture, endpoints, stream protocol, and development workflow live in [CLAUDE.md](CLAUDE.md).** Update that file when behavior or structure changes.
+
+> **AI agents — start here.** Read this file first, then [CLAUDE.md](CLAUDE.md) for depth. Tool-specific files: [`.cursor/rules/`](.cursor/rules/) for Cursor, [`.claude/settings.json`](.claude/settings.json) for Claude Code permissions.
 
 ## Two runtimes (do not confuse them)
 
@@ -80,5 +82,6 @@ When you change user-visible behavior, configuration, or architecture:
 3. Keep [AGENTS.md](AGENTS.md) accurate — onboarding, boundaries, verify commands.
 4. If you change RAG, ingest, models, or adapters, update [docs/local-model-workflow.md](docs/local-model-workflow.md).
 5. If you change maintainer branching or extension tracking policy, update [docs/git-workflow.md](docs/git-workflow.md).
+6. If you adjust agent permissions, hooks, or sub-agents for Claude Code, update [`.claude/settings.json`](.claude/settings.json) (and any new files under `.claude/`). For Cursor rules, update [`.cursor/rules/`](.cursor/rules/).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for issues and PR expectations.
