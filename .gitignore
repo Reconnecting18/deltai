@@ -52,6 +52,9 @@ pip_out.txt
 
 # Local Claude config
 project/.claude/
+# Local-only Claude Code settings (the shared .claude/settings.json IS tracked)
+.claude/settings.local.json
+.claude/.credentials.json
 
 # Standalone JS (bundled into index.html)
 project/static/js/

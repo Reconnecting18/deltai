@@ -1,8 +1,13 @@
 # deltai — Project Context
 
-This is the deep context file for AI coding assistants (Cursor, Claude Code, Copilot, etc.). Keep it up to date when you change architecture, endpoints, file structure, or development workflow.
+This is the deep context file for AI coding assistants (Claude Code, Cursor, Copilot, and any tool that reads project context). Keep it up to date when you change architecture, endpoints, file structure, or development workflow.
 
-For short agent onboarding (Cursor entry point), see [AGENTS.md](AGENTS.md).
+**For agents/AI tools, the documented entry points are:**
+- **[CLAUDE.md](CLAUDE.md)** (this file) — full architecture, file map, stream protocol, development workflow. Read by Claude Code automatically; suitable for any agent.
+- **[AGENTS.md](AGENTS.md)** — short cross-tool onboarding (Cursor, Copilot, OpenAI Codex, etc.) — boundaries, paths, verify commands.
+- **[`.cursor/rules/`](.cursor/rules/)** — Cursor-specific project rules (`.mdc` files).
+- **[`.claude/settings.json`](.claude/settings.json)** — Claude Code permissions/allow-list (no secrets — safe to commit).
+- **[`.github/`](.github/)** — issue templates, PR template, CI/CodeQL workflows.
 
 ---
 
@@ -381,7 +386,7 @@ Update user-facing changes: new features, endpoints, configuration options, proj
 
 ### 4. Update AGENTS.md
 
-If onboarding steps, boundaries, or verify commands changed, update AGENTS.md so Cursor agents stay aligned.
+If onboarding steps, boundaries, or verify commands changed, update AGENTS.md so all agents (Claude Code, Cursor, Copilot, Codex, etc.) stay aligned.
 
 ### 5. Commit and push
 
