@@ -222,7 +222,11 @@ def test_arch_rollback_tool_blocks_apply_etc_without_auto_approve(isolated_db, m
     setup(app)
     out = execute_tool(
         "arch_rollback_plan",
-        {"snapshot_id": "00000000-0000-0000-0000-000000000000", "dry_run": False, "apply_etc": True},
+        {
+            "snapshot_id": "00000000-0000-0000-0000-000000000000",
+            "dry_run": False,
+            "apply_etc": True,
+        },
     )
     data = json.loads(out)
     assert data.get("ok") is False
@@ -242,7 +246,11 @@ def test_arch_rollback_tool_apply_etc_when_auto_approve(isolated_db, monkeypatch
     ) as ex:
         execute_tool(
             "arch_rollback_plan",
-            {"snapshot_id": "11111111-1111-1111-1111-111111111111", "dry_run": False, "apply_etc": True},
+            {
+                "snapshot_id": "11111111-1111-1111-1111-111111111111",
+                "dry_run": False,
+                "apply_etc": True,
+            },
         )
     ex.assert_called_once()
     assert ex.call_args.kwargs.get("apply_etc") is True
