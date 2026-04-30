@@ -191,6 +191,7 @@ def _upload_handler(
     file_id: str | None = None,
 ) -> str:
     import path_guard
+
     from . import api as aw
 
     try:
@@ -210,6 +211,7 @@ def _download_handler(
     bucket_id: str | None = None,
 ) -> str:
     import path_guard
+
     from . import api as aw
 
     try:

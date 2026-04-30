@@ -13,7 +13,6 @@ import logging
 from typing import Any
 
 from pydantic import BaseModel
-
 from safe_errors import public_error_detail
 
 

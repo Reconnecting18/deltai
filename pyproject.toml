@@ -62,6 +62,12 @@ select = ["E", "F", "I", "UP", "B"]
 # Training / app scripts under project/ predate strict 100-col wrapping; lint everything else.
 [tool.ruff.lint.per-file-ignores]
 "project/**" = ["E501"]
+# main.py injects deltai_api.core's namespace dynamically via setattr; E402 imports are
+# intentional (load_dotenv + configure_logging must run first); F821 names come from core.
+"project/main.py" = ["E402", "F821"]
+# core.py re-exports its imports into main.py's namespace via the setattr injection loop;
+# the F401 "unused" imports are intentional re-exports, not dead code.
+"project/deltai_api/core.py" = ["F401"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

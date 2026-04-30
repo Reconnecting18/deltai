@@ -24,7 +24,6 @@ for _name, _value in core.__dict__.items():
 import asyncio
 import json
 import platform
-import re
 import time as _time
 
 import httpx
